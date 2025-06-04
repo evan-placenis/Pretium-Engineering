@@ -1,153 +1,730 @@
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from 'docx';
-import { saveAs } from 'file-saver';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, ImageRun, Header } from 'docx';
+import { Project, ReportImage } from '@/lib/supabase';
 
 /**
- * Convert plain text to a properly formatted Word document
- * Handles headings, paragraphs, and basic formatting
+ * Generate the report header with logo, company info, observation report, and project details
  */
-export const generateWordDocument = async (
-  content: string,
-  title: string,
-  filename: string
-): Promise<void> => {
-  // Parse content to identify headers, paragraphs, etc.
-  const paragraphs = content.split(/\n\n+/).filter(p => p.trim() !== '');
-  
-  const docElements = paragraphs.map(paragraph => {
-    // Check if this paragraph is a heading
-    if (paragraph.trim().startsWith('#')) {
-      // H1 heading
-      const headingText = paragraph.trim().replace(/^#+\s*/g, '');
-      return new Paragraph({
-        text: headingText,
-        heading: HeadingLevel.HEADING_1,
-        spacing: {
-          after: 200
-        }
-      });
-    } else if (paragraph.trim().match(/^##\s+/)) {
-      // H2 heading
-      const headingText = paragraph.trim().replace(/^#+\s*/g, '');
-      return new Paragraph({
-        text: headingText,
-        heading: HeadingLevel.HEADING_2,
-        spacing: {
-          after: 200
-        }
-      });
-    } else if (paragraph.trim().match(/^###\s+/)) {
-      // H3 heading
-      const headingText = paragraph.trim().replace(/^#+\s*/g, '');
-      return new Paragraph({
-        text: headingText,
-        heading: HeadingLevel.HEADING_3,
-        spacing: {
-          after: 200
-        }
-      });
-    } else {
-      // Regular paragraph
-      return new Paragraph({
-        text: paragraph,
-        spacing: {
-          after: 200
-        }
-      });
-    }
-  });
+export const generate_report_header = async (project: Project | null, pretiumLogoBuffer: ArrayBuffer | null) => {
+  const headerChildren = [];
 
-  // Create Document with properties
-  const doc = new Document({
-    sections: [
-      {
-        properties: {},
-        children: [
-          // Add title
-          new Paragraph({
-            text: title,
-            heading: HeadingLevel.TITLE,
-            alignment: AlignmentType.CENTER,
-            spacing: {
-              after: 400
-            }
-          }),
-          ...docElements
-        ]
-      }
-    ]
-  });
+  if (pretiumLogoBuffer) {
+    const logoUint8Array = new Uint8Array(pretiumLogoBuffer);
+    
+    const headerTable = new Table({
+      width: {
+        size: 100,
+        type: WidthType.PERCENTAGE,
+      },
+      borders: {
+        top: { style: 'single', size: 12, color: '0E2841' },
+        bottom: { style: 'single', size: 12, color: '0E2841' },
+        left: { style: 'single', size: 12, color: '0E2841' },
+        right: { style: 'single', size: 12, color: '0E2841' },
+        insideHorizontal: { style: 'none', size: 0 },
+        insideVertical: { style: 'none', size: 0 },
+      },
+      rows: [
+        new TableRow({
+          children: [
+            new TableCell({
+              width: { size: 25, type: WidthType.PERCENTAGE },
+              margins: {
+                top: 50,
+                bottom: 50,
+                left: 100,
+                right: 100,
+              },
+              children: [
+                new Paragraph({
+                  children: [
+                    new ImageRun({
+                      data: logoUint8Array,
+                      transformation: { width: 200, height: 60 },
+                      type: "png",
+                    }),
+                  ],
+                  alignment: AlignmentType.CENTER,
+                }),
+              ],
+            }),
+            new TableCell({
+              width: { size: 75, type: WidthType.PERCENTAGE },
+              margins: {
+                top: 0,
+                bottom: 0,
+                left: 0,
+                right: 100,
+              },
+              children: [
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: "Pretium Engineering Inc.",
+                      color: "0E2841",
+                      size: 18,
+                      font: "Segoe UI",
+                    }),
+                  ],
+                  alignment: AlignmentType.RIGHT,
+                }),
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: project?.["Client Address 1"] || "Client Address 1",
+                      color: "0E2841",
+                      size: 18,
+                      font: "Segoe UI",
+                    }),
+                  ],
+                  alignment: AlignmentType.RIGHT,
+                }),
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: project?.["Client Address 2"] || "Client Address 2",
+                      color: "0E2841",
+                      size: 18,
+                      font: "Segoe UI",
+                    }),
+                  ],
+                  alignment: AlignmentType.RIGHT,
+                }),
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: `Tel: ${project?.["Client Tel"] || "Client Tel"}`,
+                      color: "0E2841",
+                      size: 18,
+                      font: "Segoe UI",
+                    }),
+                  ],
+                  alignment: AlignmentType.RIGHT,
+                }),
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: project?.website || "www.pretiumengineer.com",
+                      color: "0E2841",
+                      size: 18,
+                      font: "Segoe UI",
+                    }),
+                  ],
+                  alignment: AlignmentType.RIGHT,
+                }),
+              ],
+            }),
+          ],
+        }),
+      ],
+    });
 
-  // Generate the document as a blob
-  const blob = await Packer.toBlob(doc);
+    // Create separate Observation Report table
+    const observationTable = new Table({
+      width: {
+        size: 100,
+        type: WidthType.PERCENTAGE,
+      },
+      borders: {
+        top: { style: 'single', size: 12, color: '0E2841' },
+        bottom: { style: 'single', size: 12, color: '0E2841' },
+        left: { style: 'single', size: 12, color: '0E2841' },
+        right: { style: 'single', size: 12, color: '0E2841' },
+        insideHorizontal: { style: 'none', size: 0 },
+        insideVertical: { style: 'none', size: 0 },
+      },
+      rows: [
+        new TableRow({
+          children: [
+            new TableCell({
+              margins: {
+                top: 300,
+                bottom: 300,
+                left: 150,
+                right: 150,
+              },
+              verticalAlign: "center",
+              children: [
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: "Observation",
+                      bold: true,
+                      color: "0E2841",
+                      size: 26,
+                      font: "Segoe UI",
+                    }),
+                  ],
+                  alignment: AlignmentType.CENTER,
+                }),
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: `Report ${project?.["Report No."] || "1"}`,
+                      bold: true,
+                      color: "0E2841",
+                      size: 26,
+                      font: "Segoe UI",
+                    }),
+                  ],
+                  alignment: AlignmentType.CENTER,
+                }),
+              ],
+            }),
+          ],
+        }),
+      ],
+    });
+    
+    // Create a container table to hold both tables side by side
+    const containerTable = new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: {
+        top: { style: 'none', size: 0 },
+        bottom: { style: 'none', size: 0 },
+        left: { style: 'none', size: 0 },
+        right: { style: 'none', size: 0 },
+        insideHorizontal: { style: 'none', size: 0 },
+        insideVertical: { style: 'none', size: 0 },
+      },
+      rows: [
+        new TableRow({
+          height: {
+            value: 1600, // Set a fixed height for the row
+            rule: "exact",
+          },
+          children: [
+            new TableCell({
+              width: { size: 80, type: WidthType.PERCENTAGE },
+              verticalAlign: "top",
+              children: [headerTable],
+            }),
+            new TableCell({
+              width: { size: 20, type: WidthType.PERCENTAGE },
+              margins: { left: 200 },
+              verticalAlign: "top",
+              children: [observationTable],
+            }),
+          ],
+        }),
+      ],
+    });
+    
+    headerChildren.push(containerTable);
+
+    // Add project details section to header (first two rows)
+    const projectHeaderTable = new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: {
+        top: { style: 'none', size: 0 },
+        bottom: { style: 'single', size: 4, color: '000000' },
+        left: { style: 'none', size: 0 },
+        right: { style: 'none', size: 0 },
+        insideHorizontal: { style: 'single', size: 4, color: '000000' },
+        insideVertical: { style: 'none', size: 0 },
+      },
+      rows: [
+        // First row: Project No, Date of Visit, Time of Visit, Page
+        new TableRow({
+          children: [
+            new TableCell({
+              width: { size: 15, type: WidthType.PERCENTAGE },
+              margins: { top: 0, bottom: 100, left: 100, right: 100 },
+              children: [new Paragraph({ 
+                children: [
+                  new TextRun({
+                    text: `Project No: ${project?.["Project No."] || ''}`,
+                    size: 18,
+                    font: "Segoe UI",
+                  }),
+                ],
+                alignment: AlignmentType.LEFT,
+              })],
+            }),
+            new TableCell({
+              width: { size: 15, type: WidthType.PERCENTAGE },
+              margins: { top: 100, bottom: 100, left: 100, right: 100 },
+              children: [new Paragraph({ 
+                children: [
+                  new TextRun({
+                    text: `Date of Visit: ${''}`,
+                    size: 18,
+                    font: "Segoe UI",
+                  }),
+                ],
+                alignment: AlignmentType.LEFT,
+              })],
+            }),
+            new TableCell({
+              width: { size: 15, type: WidthType.PERCENTAGE },
+              margins: { top: 100, bottom: 100, left: 100, right: 100 },
+              children: [new Paragraph({ 
+                children: [
+                  new TextRun({
+                    text: `Time of Visit: ${''}`,
+                    size: 18,
+                    font: "Segoe UI",
+                  }),
+                ],
+                alignment: AlignmentType.LEFT,
+              })],
+            }),
+            new TableCell({
+              width: { size: 15, type: WidthType.PERCENTAGE },
+              margins: { top: 100, bottom: 100, left: 100, right: 0 },
+              children: [new Paragraph({ 
+                children: [
+                  new TextRun({
+                    text: "Page _ of _",
+                    size: 18,
+                    font: "Segoe UI",
+                  }),
+                ],
+                alignment: AlignmentType.LEFT,
+              })],
+            }),
+          ],
+        }),
+        // Second row: Weather, Temperature, Build Permit, Crew Size
+        new TableRow({
+          children: [
+            new TableCell({
+              margins: { top: 100, bottom: 100, left: 100, right: 100 },
+              children: [new Paragraph({ 
+                children: [
+                  new TextRun({
+                    text: "Weather: ",
+                    size: 18,
+                    font: "Segoe UI",
+                  }),
+                ],
+                alignment: AlignmentType.LEFT,
+              })],
+            }),
+            new TableCell({
+              margins: { top: 100, bottom: 100, left: 100, right: 100 },
+              children: [new Paragraph({ 
+                children: [
+                  new TextRun({
+                    text: "Temperature: ",
+                    size: 18,
+                    font: "Segoe UI",
+                  }),
+                ],
+                alignment: AlignmentType.LEFT,
+              })],
+            }),
+            new TableCell({
+              margins: { top: 100, bottom: 100, left: 100, right: 100 },
+              children: [new Paragraph({ 
+                children: [
+                  new TextRun({
+                    text: "Build. Permit: ",
+                    size: 18,
+                    font: "Segoe UI",
+                  }),
+                ],
+                alignment: AlignmentType.LEFT,
+              })],
+            }),
+            new TableCell({
+              margins: { top: 100, bottom: 100, left: 100, right: 100 },
+              children: [new Paragraph({ 
+                children: [
+                  new TextRun({
+                    text: "Crew Size: ",
+                    size: 18,
+                    font: "Segoe UI",
+                  }),
+                ],
+                alignment: AlignmentType.LEFT,
+              })],
+            }),
+          ],
+        }),
+      ],
+    });
+    
+    headerChildren.push(new Paragraph({ text: "" })); // Space
+    headerChildren.push(projectHeaderTable);
+  }
+
+  return headerChildren;
+}; 
+
+/**
+ * Process content and replace [IMAGE:X] placeholders with HTML for display
+ */
+export const processContentWithImages = (rawContent: string, images: ReportImage[]): string => {
+  let processed = rawContent;
   
-  // Save the blob as a file
-  saveAs(blob, filename);
+  // Replace [IMAGE:X] placeholders with two-column layout
+  images.forEach((img, index) => {
+    const placeholder = `[IMAGE:${index + 1}]`;
+    
+    // Find the placeholder and the text around it
+    const placeholderRegex = new RegExp(`([^\\n]*?)\\s*\\[IMAGE:${index + 1}\\]`, 'g');
+    
+    const imageHtml = `
+<div style="display: flex; margin: 1rem 0; gap: 1rem; align-items: flex-start;">
+  <div style="flex: 1; padding-right: 1rem;">
+    $1
+  </div>
+  <div style="flex: 1; text-align: center;">
+    <img src="${img.url}" alt="${img.description || 'Report image'}" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 0.5rem;" />
+    <p style="font-size: 0.75rem; color: #666; margin: 0; font-style: italic;">
+      Photo ${index + 1}: ${img.description || 'No description available'}
+    </p>
+  </div>
+</div>`;
+    
+    // Replace the pattern with the two-column layout
+    processed = processed.replace(placeholderRegex, imageHtml);
+    
+    // Also handle case where placeholder is on its own line
+    const standaloneRegex = new RegExp(`\\[IMAGE:${index + 1}\\]`, 'g');
+    const standaloneImageHtml = `
+<div style="display: flex; margin: 1rem 0; gap: 1rem; align-items: flex-start;">
+  <div style="flex: 1;">
+    <!-- Text content appears here -->
+  </div>
+  <div style="flex: 1; text-align: center;">
+    <img src="${img.url}" alt="${img.description || 'Report image'}" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 0.5rem;" />
+    <p style="font-size: 0.75rem; color: #666; margin: 0; font-style: italic;">
+      Photo ${index + 1}: ${img.description || 'No description available'}
+    </p>
+  </div>
+</div>`;
+    
+    processed = processed.replace(standaloneRegex, standaloneImageHtml);
+  });
+  
+  return processed;
 };
 
 /**
- * Simple conversion that just preserves the text formatting
- * but doesn't try to parse headings or special formatting
+ * Create Word document with proper image handling and professional header
  */
-export const textToSimpleWordDocument = async (
-  content: string,
-  filename: string
-): Promise<void> => {
-  // Calculate page breaks based on standard 11-inch pages
-  const linesPerPage = 45; // Approximate lines per page
-  const lines = content.split(/\n/);
-  const paragraphs = [];
-  
-  let lineCount = 0;
-  let pageCount = 1;
-  
-  // Process each line and add page breaks as needed
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    
-    // Add the line
-    paragraphs.push(new Paragraph({
-      children: [new TextRun(line || " ")],
-      spacing: {
-        after: 120,
-        // Add more top margin for first paragraph after a page break
-        before: lineCount === 0 && pageCount > 1 ? 720 : 0 // 720 twips = approx 1 inch
-      }
-    }));
-    
-    lineCount++;
-    
-    // Check if we need a page break (this is approximate)
-    if (lineCount >= linesPerPage && i < lines.length - 1) {
-      paragraphs.push(new Paragraph({
-        text: "",
-        pageBreakBefore: true
-      }));
-      
-      lineCount = 0;
-      pageCount++;
+export const createWordDocumentWithImages = async (
+  content: string, 
+  images: ReportImage[], 
+  filename: string, 
+  project: Project | null
+) => {
+  try {
+    // Load Pretium logo
+    let pretiumLogoBuffer: ArrayBuffer | null = null;
+    try {
+      const logoResponse = await fetch('/pretium.png');
+      pretiumLogoBuffer = await logoResponse.arrayBuffer();
+    } catch (error) {
+      console.error('Could not load Pretium logo:', error);
     }
-  }
+    
+    // Generate header using the utility function
+    const headerChildren = await generate_report_header(project, pretiumLogoBuffer);
+    const bodyChildren = [];
 
-  // Create Document with appropriate section properties to ensure 1-inch margins
-  const doc = new Document({
-    sections: [
-      {
+    // Add remaining project details form to body (only Project Name onwards)
+    const projectDetailsTable = new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: {
+        top: { style: 'none', size: 0 },
+        bottom: { style: 'single', size: 4, color: '000000' },
+        left: { style: 'none', size: 0 },
+        right: { style: 'none', size: 0 },
+        insideHorizontal: { style: 'single', size: 4, color: '000000' },
+        insideVertical: { style: 'none', size: 0 },
+      },
+      rows: [
+        // Project Name (spans full width)
+        new TableRow({
+          children: [
+            new TableCell({
+              columnSpan: 4,
+              margins: { top: 100, bottom: 100, left: 100, right: 100 },
+              children: [new Paragraph({ 
+                children: [
+                  new TextRun({
+                    text: `Project Name: ${project?.project_name  || ''}`,
+                    size: 18,
+                    font: "Segoe UI",
+                  }),
+                ],
+                alignment: AlignmentType.LEFT,
+              })],
+            }),
+          ],
+        }),
+        // Client/Owner (spans full width)
+        new TableRow({
+          children: [
+            new TableCell({
+              columnSpan: 4,
+              margins: { top: 100, bottom: 100, left: 100, right: 100 },
+              children: [new Paragraph({ 
+                children: [
+                  new TextRun({
+                    text: `Client / Owner: ${project?.["Client Company Name"] || ''}`,
+                    size: 18,
+                    font: "Segoe UI",
+                  }),
+                ],
+                alignment: AlignmentType.LEFT,
+              })],
+            }),
+          ],
+        }),
+        // Contractor (spans full width)
+        new TableRow({
+          children: [
+            new TableCell({
+              columnSpan: 4,
+              margins: { top: 100, bottom: 100, left: 100, right: 100 },
+              children: [new Paragraph({ 
+                children: [
+                  new TextRun({
+                    text: `Contractor: ${project?.[ "Contractor Name 1"] || ''}`,
+                    size: 18,
+                    font: "Segoe UI",
+                  }),
+                ],
+                alignment: AlignmentType.LEFT,
+              })],
+            }),
+          ],
+        }),
+        // Project Materials (spans full width)
+        new TableRow({
+          children: [
+            new TableCell({
+              columnSpan: 4,
+              margins: { top: 100, bottom: 100, left: 100, right: 100 },
+              children: [new Paragraph({ 
+                children: [
+                  new TextRun({
+                    text: "Project Materials observed onsite:",
+                    size: 18,
+                    font: "Segoe UI",
+                  }),
+                ],
+                alignment: AlignmentType.LEFT,
+              })],
+            }),
+          ],
+        }),
+      ],
+    });
+    
+    bodyChildren.push(projectDetailsTable);
+    bodyChildren.push(new Paragraph({ text: "" })); // Empty space
+
+    // Split content by lines and process each line
+    const lines = content.split('\n');
+    let currentParagraphText = '';
+    
+    for (const line of lines) {
+      // Check if line contains an image placeholder
+      const imageMatch = line.match(/\[IMAGE:(\d+)\]/);
+      
+      if (imageMatch) {
+        const imageIndex = parseInt(imageMatch[1]) - 1;
+        const textBeforeImage = line.replace(/\[IMAGE:\d+\]/, '').trim();
+        
+        // Add any accumulated text as a paragraph
+        if (currentParagraphText.trim()) {
+          bodyChildren.push(new Paragraph({ 
+            children: [
+              new TextRun({
+                text: currentParagraphText,
+                font: "Segoe UI",
+                size: 20, // 12pt for body text
+              }),
+            ],
+          }));
+          currentParagraphText = '';
+        }
+        
+        // Create two-column table for text and image (without borders)
+        if (images[imageIndex]) {
+          try {
+            // Fetch image data
+            const imageResponse = await fetch(images[imageIndex].url);
+            const imageBuffer = await imageResponse.arrayBuffer();
+            const imageUint8Array = new Uint8Array(imageBuffer);
+            
+            // Create table with two columns (no borders)
+            const table = new Table({
+              width: {
+                size: 100,
+                type: WidthType.PERCENTAGE,
+              },
+              borders: {
+                top: { style: 'none', size: 0 },
+                bottom: { style: 'none', size: 0 },
+                left: { style: 'none', size: 0 },
+                right: { style: 'none', size: 0 },
+                insideHorizontal: { style: 'none', size: 0 },
+                insideVertical: { style: 'none', size: 0 },
+              },
+              rows: [
+                new TableRow({
+                  children: [
+                    new TableCell({
+                      width: {
+                        size: 50,
+                        type: WidthType.PERCENTAGE,
+                      },
+                      margins: { top: 200, bottom: 200, left: 0, right: 100 },
+                      children: [
+                        new Paragraph({
+                          children: [
+                            new TextRun({
+                              text: textBeforeImage || "See image for details:",
+                              font: "Segoe UI",
+                              size: 20,
+                            }),
+                          ],
+                        }),
+                      ],
+                    }),
+                    new TableCell({
+                      width: {
+                        size: 50,
+                        type: WidthType.PERCENTAGE,
+                      },
+                      margins: { top: 200, bottom: 200, left: 100, right: 0 },
+                      children: [
+                        new Paragraph({
+                          children: [
+                            new ImageRun({
+                              data: imageUint8Array,
+                              transformation: {
+                                width: 300, // Much larger - nearly full column width
+                                height: 250, // Proportionally larger
+                              },
+                              type: "jpg",
+                            }),
+                          ],
+                          alignment: AlignmentType.CENTER,
+                        }),
+                        new Paragraph({
+                          children: [
+                            new TextRun({
+                              text: `Photo ${imageIndex + 1}: ${images[imageIndex].description || 'No description available'}`,
+                              font: "Segoe UI",
+                              size: 18, // Slightly smaller for captions
+                            }),
+                          ],
+                          alignment: AlignmentType.CENTER,
+                        }),
+                      ],
+                    }),
+                  ],
+                }),
+              ],
+            });
+            
+            bodyChildren.push(table);
+            
+          } catch (error) {
+            console.error('Error processing image:', error);
+            // Fallback to text if image fails
+            bodyChildren.push(
+              new Paragraph({
+                children: [
+                  new TextRun({
+                    text: `${textBeforeImage} [Image ${imageIndex + 1}: ${images[imageIndex]?.description || 'Image not available'}]`,
+                    font: "Segoe UI",
+                    size: 20,
+                  }),
+                ],
+              })
+            );
+          }
+        } else {
+          // Image not found, just add the text
+          bodyChildren.push(new Paragraph({ 
+            children: [
+              new TextRun({
+                text: textBeforeImage,
+                font: "Segoe UI",
+                size: 20,
+              }),
+            ],
+          }));
+        }
+      } else {
+        // Regular text line
+        if (line.trim()) {
+          currentParagraphText += (currentParagraphText ? '\n' : '') + line;
+        } else if (currentParagraphText.trim()) {
+          // Empty line, add accumulated text as paragraph
+          bodyChildren.push(new Paragraph({ 
+            children: [
+              new TextRun({
+                text: currentParagraphText,
+                font: "Segoe UI",
+                size: 20, // 12pt for body text
+              }),
+            ],
+          }));
+          currentParagraphText = '';
+          bodyChildren.push(new Paragraph({ text: "" })); // Empty paragraph for spacing
+        }
+      }
+    }
+    
+    // Add any remaining text
+    if (currentParagraphText.trim()) {
+      bodyChildren.push(new Paragraph({ 
+        children: [
+          new TextRun({
+            text: currentParagraphText,
+            font: "Segoe UI",
+            size: 20, // 12pt for body text
+          }),
+        ],
+      }));
+    }
+
+    // Create document with proper header
+    const doc = new Document({
+      sections: [{
         properties: {
           page: {
             margin: {
-              top: 1440, // 1 inch in twips (1440 twips = 1 inch)
-              right: 1440,
-              bottom: 1440,
-              left: 1440
-            }
-          }
+              top: 2347,     // 1.63 inches
+              bottom: 446,   // 0.31 inches
+              left: 1080,    // 0.75 inches
+              right: 1080,   // 0.75 inches
+            },
+          },
         },
-        children: paragraphs
-      }
-    ]
-  });
+        headers: {
+          default: new Header({
+            children: headerChildren,
+          }),
+        },
+        children: bodyChildren,
+      }],
+    });
 
-  // Generate and save
-  const blob = await Packer.toBlob(doc);
-  saveAs(blob, filename);
+    // Generate and download
+    const buffer = await Packer.toBuffer(doc);
+    const blob = new Blob([buffer], { 
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    
+  } catch (error) {
+    console.error('Error creating Word document:', error);
+    throw error;
+  }
 }; 

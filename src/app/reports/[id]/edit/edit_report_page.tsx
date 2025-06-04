@@ -3,28 +3,38 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import { supabase, Project, Report, ChatMessage } from '@/lib/supabase';
-import { textToSimpleWordDocument, generateWordDocument } from '@/lib/word-utils';
+import { supabase, Project, Report, ChatMessage, ReportImage } from '@/lib/supabase';
+import { processContentWithImages, createWordDocumentWithImages} from '@/lib/word-utils';
+import { useChatMessages } from '@/lib/chat-utils';
 
 export default function ReportEditor() {
   const [report, setReport] = useState<Report | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [content, setContent] = useState('');
+  const [reportImages, setReportImages] = useState<ReportImage[]>([]);
+  const [processedContent, setProcessedContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState('');
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadStatus, setDownloadStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [showChat, setShowChat] = useState(true);
-  const [chatMessage, setChatMessage] = useState('');
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [user, setUser] = useState<any>(null);
   const router = useRouter();
   const params = useParams();
   const reportId = params.id as string;
-  const chatContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Use the chat hook
+  const {
+    chatMessages,
+    chatMessage,
+    isSendingMessage,
+    setChatMessage,
+    sendChatMessage: originalSendChatMessage,
+    chatContainerRef
+  } = useChatMessages(reportId, content, project, report, user);
+
 
   // Add global style for better text wrapping
   useEffect(() => {
@@ -37,6 +47,17 @@ export default function ReportEditor() {
     };
   }, []);
 
+  // Process content when report images or content changes
+  useEffect(() => {
+    if (content && reportImages.length > 0) {
+      const processed = processContentWithImages(content, reportImages);
+      setProcessedContent(processed);
+    } else {
+      setProcessedContent(content);
+    }
+  }, [content, reportImages]);
+
+  // Check if user is authenticated
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -74,17 +95,16 @@ export default function ReportEditor() {
         if (projectError) throw projectError;
         setProject(projectData);
 
-        // Fetch chat messages
-        const { data: chatData, error: chatError } = await supabase
-          .from('chat_messages')
+        // Fetch report images
+        const { data: imagesData, error: imagesError } = await supabase
+          .from('report_images')
           .select('*')
-          .eq('report_id', reportId)
-          .order('created_at', { ascending: true });
+          .eq('report_id', reportId);
 
-        if (chatError) {
-          console.error('Error fetching chat messages:', chatError);
+        if (imagesError) {
+          console.error('Error fetching report images:', imagesError);
         } else {
-          setChatMessages(chatData || []);
+          setReportImages(imagesData || []);
         }
       } catch (error: any) {
         console.error('Error fetching data:', error);
@@ -94,31 +114,7 @@ export default function ReportEditor() {
 
     checkAuth();
     fetchData();
-
-    // Set up real-time subscription for chat messages
-    const chatSubscription = supabase
-      .channel(`report-chat-${reportId}`)
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
-        table: 'chat_messages',
-        filter: `report_id=eq.${reportId}`
-      }, (payload) => {
-        setChatMessages(prev => [...prev, payload.new as ChatMessage]);
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(chatSubscription);
-    };
   }, [reportId, router]);
-
-  // Auto-scroll to bottom of chat when new messages arrive
-  useEffect(() => {
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    }
-  }, [chatMessages]);
 
   // Focus textarea and adjust height on initial load and when content changes
   useEffect(() => {
@@ -171,71 +167,7 @@ export default function ReportEditor() {
     }
   };
 
-  const sendChatMessage = async () => {
-    if (!chatMessage.trim() || !user || !reportId) return;
-    
-    setIsSendingMessage(true);
-    
-    try {
-      // Save user message
-      const { error: userMsgError } = await supabase
-        .from('chat_messages')
-        .insert({
-          report_id: reportId,
-          content: chatMessage,
-          role: 'user'
-        });
-      
-      if (userMsgError) throw userMsgError;
-      
-      // Clear input
-      setChatMessage('');
-      
-      // Call API to get AI response
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          reportId,
-          message: chatMessage,
-          reportContent: content,
-          projectName: project?.name,
-          bulletPoints: report?.bullet_points
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to get chat response');
-      }
-      
-      const data = await response.json();
-      
-      // Save assistant message
-      const { error: assistantMsgError } = await supabase
-        .from('chat_messages')
-        .insert({
-          report_id: reportId,
-          content: data.message,
-          role: 'assistant'
-        });
-      
-      if (assistantMsgError) throw assistantMsgError;
-      
-      // Update content if there's a suggestion
-      if (data.updatedContent) {
-        setContent(data.updatedContent);
-        saveReport();
-      }
-    } catch (error: any) {
-      console.error('Error in chat:', error);
-      setError(error.message);
-    } finally {
-      setIsSendingMessage(false);
-    }
-  };
-
+  
   if (!report || !project) {
     return (
       <div className="loading-container">
@@ -287,10 +219,10 @@ export default function ReportEditor() {
                   setDownloadStatus('Preparing document...');
                   
                   // Generate a filename
-                  const filename = `${project?.name || 'Report'}_${new Date().toISOString().split('T')[0]}.docx`;
+                  const filename = `${project?.project_name || 'Report'}_${new Date().toISOString().split('T')[0]}.docx`;
                   
-                  // Generate and download the Word document
-                  await textToSimpleWordDocument(content, filename);
+                  // Use the new Word document function with actual images
+                  await createWordDocumentWithImages(content, reportImages, filename, project);
                   
                   setDownloadStatus('Downloaded!');
                   // Clear status after delay
@@ -300,19 +232,6 @@ export default function ReportEditor() {
                 } catch (error) {
                   console.error('Error generating Word document:', error);
                   setDownloadStatus('Error downloading');
-                  
-                  // Fallback to simple approach if the library fails
-                  const blob = new Blob([content], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `${project?.name || 'Report'}.docx`;
-                  document.body.appendChild(a);
-                  a.click();
-                  setTimeout(() => {
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                  }, 0);
                 } finally {
                   setIsDownloading(false);
                 }
@@ -338,10 +257,6 @@ export default function ReportEditor() {
             {downloadStatus && <span style={{ marginLeft: '0.5rem', fontSize: '0.875rem' }}>{downloadStatus}</span>}
           </div>
 
-
-          
-          
-          
           <div style={{ marginLeft: 'auto' }}>
             <button 
               onClick={() => setShowChat(!showChat)}
@@ -386,7 +301,6 @@ export default function ReportEditor() {
         }}>AI Chat</div>
       </div>
 
-
       {/* Main content area */}
       <div style={{ 
         display: 'flex', 
@@ -422,6 +336,23 @@ export default function ReportEditor() {
             position: 'relative'
           }} className="word-document-page">
             <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+              {/* Display processed content with images */}
+              <div 
+                style={{
+                  width: '100%',
+                  minHeight: '800px',
+                  fontFamily: 'Times New Roman, serif',
+                  fontSize: '12pt',
+                  lineHeight: '1.6',
+                  whiteSpace: 'pre-wrap',
+                  overflowWrap: 'break-word',
+                  color: '#333',
+                  textAlign: 'left'
+                }}
+                dangerouslySetInnerHTML={{ __html: processedContent }}
+              />
+              
+              {/* Hidden textarea for editing */}
               <textarea
                 ref={textareaRef}
                 value={content}
@@ -433,6 +364,9 @@ export default function ReportEditor() {
                 }}
                 className="word-editor-textarea"
                 style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
                   width: '100%',
                   minHeight: '800px',
                   height: 'auto',
@@ -446,24 +380,13 @@ export default function ReportEditor() {
                   whiteSpace: 'pre-wrap',
                   overflowWrap: 'break-word',
                   overflow: 'hidden',
-                  color: '#333',
-                  textAlign: 'left'
+                  color: 'transparent',
+                  background: 'transparent',
+                  zIndex: 2
                 }}
               />
               
-              {/* Page break indicators - dynamically create based on content height */}
-              <div style={{ position: 'absolute', left: '0', right: '0', top: '11in', height: '12px' }} className="word-page-breaks">
-                Page 1 end - Page 2 start
-              </div>
-              <div style={{ position: 'absolute', left: '0', right: '0', top: '22in', height: '12px' }} className="word-page-breaks">
-                Page 2 end - Page 3 start
-              </div>
-              <div style={{ position: 'absolute', left: '0', right: '0', top: '33in', height: '12px' }} className="word-page-breaks">
-                Page 3 end - Page 4 start
-              </div>
-              <div style={{ position: 'absolute', left: '0', right: '0', top: '44in', height: '12px' }} className="word-page-breaks">
-                Page 4 end - Page 5 start
-              </div>
+    
             </div>
           </div>
         </div>
@@ -541,7 +464,7 @@ export default function ReportEditor() {
                 type="text"
                 value={chatMessage}
                 onChange={(e) => setChatMessage(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendChatMessage()}
+                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey} //&& sendChatMessage()}
                 placeholder="Ask a question or request changes..."
                 style={{
                   flex: '1',
@@ -553,7 +476,7 @@ export default function ReportEditor() {
                 disabled={isSendingMessage}
               />
               <button
-                onClick={sendChatMessage}
+                //onClick={sendChatMessage}
                 disabled={!chatMessage.trim() || isSendingMessage}
                 style={{
                   background: '#2b579a',
@@ -580,3 +503,5 @@ export default function ReportEditor() {
     </div>
   );
 } 
+
+

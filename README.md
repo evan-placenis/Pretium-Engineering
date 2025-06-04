@@ -146,3 +146,5 @@ The application uses GPT-4 by default. For lower costs, you can modify the model
 ### Custom Styling
 
 The application uses a custom CSS system with variables for consistent styling. Modify the globals.css file to adjust colors, spacing, and other design elements to match your brand style.
+
+https://pretium-engineering-p8qn.vercel.app/

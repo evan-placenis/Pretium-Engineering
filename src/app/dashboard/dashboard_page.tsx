@@ -8,9 +8,12 @@ import { supabase, Project } from '@/lib/supabase';
 export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [allProjects, setAllProjects] = useState<Project[]>([]);
+  const [filteredProjects, setFilteredProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [projectFilter, setProjectFilter] = useState<'all' | 'mine'>('all');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const router = useRouter();
 
   useEffect(() => {
@@ -106,6 +109,29 @@ export default function Dashboard() {
     }
   };
 
+  // Filter projects based on search query
+  useEffect(() => {
+    let filtered = [...projects];
+    
+    // Search filter
+    if (searchQuery) {
+      filtered = filtered.filter(project => 
+        project.project_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        project.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        project["Client Company Name"]?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        project["Project Title"]?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        project["Client Contact Name"]?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        project["Client Address 1"]?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        project["Client Address 2"]?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        project["Name"]?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        project["Project No."]?.toLowerCase().includes(searchQuery.toLowerCase())
+        
+      );
+    }
+    
+    setFilteredProjects(filtered);
+  }, [projects, searchQuery]);
+
   const handleFilterChange = (filter: 'all' | 'mine') => {
     setProjectFilter(filter);
     if (user) {
@@ -164,7 +190,51 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {projects.length === 0 ? (
+        {/* Search Controls */}
+        <div className="card" style={{ marginBottom: '2rem' }}>
+          <div className="card-body">
+            <h3 style={{ marginBottom: '1rem' }}>Search Projects</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem' }}>
+              <div>
+                <label className="form-label" style={{ color: 'var(--color-text)' }}>Search Projects</label>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search by project name, company, or title..."
+                  className="form-input"
+                  style={{ width: '100%' }}
+                />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'end', gap: '0.5rem' }}>
+                <button
+                  onClick={() => {
+                    setSearchQuery('');
+                  }}
+                  className="btn btn-secondary btn-sm"
+                  style={{ width: '20%' }}
+                >
+                  Clear Search
+                </button>
+                
+              </div>
+            </div>
+            <div style={{ marginTop: '1rem', fontSize: '0.875rem', color: 'var(--color-text-light)' }}>
+              Showing {filteredProjects.length} of {projects.length} projects
+            </div>
+          </div>
+        </div>
+        
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={() => setViewMode(mode => mode === 'grid' ? 'list' : 'grid')}
+        >
+          {viewMode === 'grid' ? 'List View' : 'Grid View'}
+        </button>
+        </div>
+
+        {filteredProjects.length === 0 ? (
           <div className="card">
             <div className="card-body" style={{ textAlign: "center" }}>
               <div style={{ width: '100px', height: '100px', margin: '0 auto 1.5rem' }}>
@@ -172,77 +242,123 @@ export default function Dashboard() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                 </svg>
               </div>
-              <h2 style={{ marginBottom: "0.5rem" }}>No projects yet</h2>
+              <h2 style={{ marginBottom: "0.5rem" }}>
+                {searchQuery ? 'No projects match your search' : 'No projects yet'}
+              </h2>
               <p style={{ marginBottom: "1rem" }} className="text-secondary">
-                Get started by creating a new project for your reports.
+                {searchQuery ? 'Try adjusting your search terms.' : 'Get started by creating a new project for your reports.'}
               </p>
-              <Link href="/projects/new" className="btn btn-primary">
-                Create New Project
-              </Link>
+              {!searchQuery && (
+                <Link href="/projects/new" className="btn btn-primary">
+                  Create New Project
+                </Link>
+              )}
             </div>
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
-            {projects.map((project) => (
-              <Link key={project.id} href={`/projects/${project.id}`} className="card" style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'flex-start',
-                textDecoration: 'none',
-                background: '#f9fafb',
-                borderRadius: '1rem',
-                boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-                padding: '2.5rem 1.5rem',
-                border: '1px solid #e5e7eb',
-                minHeight: '120px',
-                transition: 'box-shadow 0.18s, transform 0.18s',
-                cursor: 'pointer',
-                height: '100%',
-              }}
-                onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.10)')}
-                onMouseLeave={e => (e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.06)')}
-              >
-                <div style={{ width: '48px', height: '48px', marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ width: '100%', height: '100%', color: '#2b579a' }}>
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                  </svg>
-                </div>
-                <h3 style={{
-                  margin: 0,
-                  fontWeight: 700,
-                  fontSize: '1.75rem',
-                  color: '#2b579a',
-                  letterSpacing: '0.01em',
-                  textAlign: 'center',
-                  width: '100%',
-                  lineHeight: 1.2,
-                  maxWidth: '90%',
-                  wordBreak: 'break-word',
-                  whiteSpace: 'pre-line',
-                  marginBottom: '1.5rem',
-                }}>{project.project_name}</h3>
-                <div className="card-body">
-                  <h3 style={{ marginBottom: "0.5rem" }}>{project.name}</h3>
-                  <p style={{ marginBottom: "1rem", fontSize: "0.875rem" }} className="text-secondary">
-                    <strong>Company:</strong> {project["Client Company Name"]}
-                  </p>
-                  <p style={{ marginBottom: "0.25rem", fontSize: "0.875rem" }} className="text-secondary">
-                    <strong>Title:</strong> {project["Project Title"]}
-                  </p>
-                  
-                  <div style={{ marginTop: "0.5rem", display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span className="badge badge-secondary">
-                      View Reports
-                    </span>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--color-text-light)' }}>
-                      {project.user_id === user?.id ? 'Your project' : 'Shared project'}
-                    </span>
+          viewMode === 'grid' ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
+              {filteredProjects.map((project) => (
+                <Link key={project.id} href={`/projects/${project.id}`} className="card" style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'flex-start',
+                  textDecoration: 'none',
+                  background: '#f9fafb',
+                  borderRadius: '1rem',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+                  padding: '2.5rem 1.5rem',
+                  border: '1px solid #e5e7eb',
+                  minHeight: '120px',
+                  transition: 'box-shadow 0.18s, transform 0.18s',
+                  cursor: 'pointer',
+                  height: '100%',
+                }}
+                  onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.10)')}
+                  onMouseLeave={e => (e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.06)')}
+                >
+                  <div style={{ width: '48px', height: '48px', marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ width: '100%', height: '100%', color: '#2b579a' }}>
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                    </svg>
                   </div>
-                </div>
-              </Link>
-            ))}
-          </div>
+                  <h3 style={{
+                    margin: 0,
+                    fontWeight: 700,
+                    fontSize: '1.75rem',
+                    color: '#2b579a',
+                    letterSpacing: '0.01em',
+                    textAlign: 'center',
+                    width: '100%',
+                    lineHeight: 1.2,
+                    maxWidth: '90%',
+                    wordBreak: 'break-word',
+                    whiteSpace: 'pre-line',
+                    marginBottom: '1.5rem',
+                  }}>{project.project_name}</h3>
+                  <div className="card-body">
+                    <h3 style={{ marginBottom: "0.5rem" }}>{project.name}</h3>
+                    <p style={{ marginBottom: "1rem", fontSize: "0.875rem" }} className="text-secondary">
+                      <strong>Company:</strong> {project["Client Company Name"]}
+                    </p>
+                    <p style={{ marginBottom: "0.25rem", fontSize: "0.875rem" }} className="text-secondary">
+                      <strong>Title:</strong> {project["Project Title"]}
+                    </p>
+                    
+                    <div style={{ marginTop: "0.5rem", display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span className="badge badge-secondary">
+                        View Reports
+                      </span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-light)' }}>
+                        {project.user_id === user?.id ? 'Your project' : 'Shared project'}
+                      </span>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {filteredProjects.map((project) => (
+                <Link key={project.id} href={`/projects/${project.id}`} className="card" style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '1.5rem', 
+                  padding: '1rem',
+                  textDecoration: 'none',
+                  transition: 'box-shadow 0.18s, transform 0.18s',
+                  cursor: 'pointer'
+                }}
+                  onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.10)')}
+                  onMouseLeave={e => (e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.06)')}
+                >
+                  <div style={{ width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ width: '100%', height: '100%', color: '#2b579a' }}>
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                    </svg>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <h4 style={{ marginBottom: "0.5rem", fontSize: '1.25rem', fontWeight: 600, color: '#2b579a' }}>{project.project_name}</h4>
+                    <p style={{ marginBottom: "0.25rem", fontSize: "0.875rem" }} className="text-secondary">
+                      <strong>Company:</strong> {project["Client Company Name"]}
+                    </p>
+                    <p style={{ marginBottom: "0.25rem", fontSize: "0.875rem" }} className="text-secondary">
+                      <strong>Title:</strong> {project["Project Title"]}
+                    </p>
+                    <div style={{ marginTop: "0.5rem", display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span className="badge badge-secondary">
+                        View Reports
+                      </span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-light)' }}>
+                        {project.user_id === user?.id ? 'Your project' : 'Shared project'}
+                      </span>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )
         )}
       </div>
     </>

@@ -324,13 +324,6 @@ export default function NewReport() {
               <label htmlFor="image-upload" className="btn btn-secondary">
                 Import From Local Files
               </label>
-              {/* <button 
-                onClick={testImageDocument}
-                className="btn btn-primary"
-                disabled={allImages.length === 0}
-              >
-                Test Image Document
-              </button> */}
             </div>
 
             {allImages.length > 0 && (
@@ -479,94 +472,3 @@ export default function NewReport() {
     </>
   );
 } 
-
-
-
-
-// ///TESTING IMAGE DOCUMENT GENERATION
-// const testImageDocument = async () => {
-//   try {
-//     const imagesToTest = allImages;
-//     const doc = new Document({
-//       sections: [{
-//         properties: {},
-//         children: [
-//           new Paragraph({
-//             text: "ENGINEERING REPORT",
-//             heading: HeadingLevel.TITLE,
-//             alignment: AlignmentType.CENTER,
-//           }),
-//           new Paragraph({
-//             text: `${project?.name || 'Project Name'}`,
-//             heading: HeadingLevel.HEADING_1,
-//             alignment: AlignmentType.CENTER,
-//           }),
-//           new Paragraph({
-//             text: `Location: ${project?.location || 'Location'}`,
-//             alignment: AlignmentType.CENTER,
-//           }),
-//           new Paragraph({
-//             text: `Date: ${new Date().toLocaleDateString()}`,
-//             alignment: AlignmentType.CENTER,
-//           }),
-//           new Paragraph({ text: "" }),
-//           new Paragraph({
-//             text: "OBSERVATIONS / COMMENTS",
-//             heading: HeadingLevel.HEADING_1,
-//           }),
-//           new Paragraph({
-//             text: "1. GENERAL",
-//             heading: HeadingLevel.HEADING_2,
-//           }),
-//           new Paragraph({ text: "" }),
-//         ],
-//       }],
-//     });
-//     for (const image of imagesToTest) {
-//       try {
-//         const imageData = await fetch(image.url).then(res => res.arrayBuffer());
-//         const section = {
-//           properties: {},
-//           children: [
-//             new Paragraph({
-//               text: image.description || 'No description',
-//               spacing: { before: 200, after: 200 },
-//             }),
-//             new Paragraph({
-//               children: [
-//                 new ImageRun({
-//                   data: imageData,
-//                   type: 'png',
-//                   transformation: { width: 400, height: 300 },
-//                   floating: {
-//                     horizontalPosition: { offset: 0 },
-//                     verticalPosition: { offset: 0 },
-//                     wrap: { type: 1, side: 'bothSides' },
-//                   },
-//                 }),
-//               ],
-//             }),
-//           ],
-//         };
-//         (doc as any).addSection(section);
-//       } catch (error) {
-//         console.error('Error processing image:', error);
-//         continue;
-//       }
-//     }
-//     const buffer = await Packer.toBuffer(doc);
-//     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-//     const url = window.URL.createObjectURL(blob);
-//     const a = document.createElement('a');
-//     a.href = url;
-//     a.download = 'test-image-document.docx';
-//     document.body.appendChild(a);
-//     a.click();
-//     window.URL.revokeObjectURL(url);
-//     document.body.removeChild(a);
-//     console.log('Test document generated successfully');
-//   } catch (error) {
-//     console.error('Error testing image document:', error);
-//     setError('Failed to generate test document: ' + (error as Error).message);
-//   }
-// };

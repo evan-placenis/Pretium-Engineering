@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { supabase, ChatMessage, Project, Report } from '@/lib/supabase';
+import { supabase, ChatMessage, Project, Report, ReportImage } from '@/lib/supabase';
 
 export interface ChatState {
   chatMessages: ChatMessage[];
@@ -15,7 +15,8 @@ export const useChatMessages = (
   content: string,
   project: Project | null,
   report: Report | null,
-  user: any
+  user: any,
+  reportImages: ReportImage[] = []
 ): ChatState => {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatMessage, setChatMessage] = useState('');
@@ -75,27 +76,82 @@ export const useChatMessages = (
     }
   }, [chatMessages]);
 
-  const sendChatMessage = async () => {
-    if (!chatMessage.trim() || !user || !reportId) return;
+  const sendChatMessage = async (): Promise<string | null> => {
+    if (!chatMessage.trim() || !user || !reportId) return null;
     
     setIsSendingMessage(true);
     
     try {
+      // Store current message for API call
+      const currentMessage = chatMessage;
+      
       // Save user message
-      const { error: userMsgError } = await supabase
-        .from('chat_messages')
-        .insert({
-          report_id: reportId,
-          content: chatMessage,
-          role: 'user'
-        });
+              const { data: savedUserMessage, error: userMsgError } = await supabase
+          .from('chat_messages')
+          .insert({
+            report_id: reportId,
+            content: currentMessage,
+            role: 'user'
+          })
+        .select()
+        .single();
       
       if (userMsgError) throw userMsgError;
       
-      // Clear input
-      setChatMessage('');
+      // Immediately add the user message to local state
+      if (savedUserMessage) {
+        setChatMessages(prev => [...prev, savedUserMessage as ChatMessage]);
+      }
       
-      // Call API to get AI response
+              // Clear input immediately
+        setChatMessage('');
+      
+      // Check if the user is asking about visual content
+      const imageKeywords = [
+        'image', 'images', 'photo', 'photos', 'picture', 'pictures',
+        'see', 'look', 'show', 'visual', 'visually', 'appearance',
+        'deficiency', 'deficiencies', 'damage', 'condition',
+        'site', 'area', 'section', 'view', 'overview'
+      ];
+      
+      const isAskingAboutImages = imageKeywords.some(keyword => 
+        currentMessage.toLowerCase().includes(keyword.toLowerCase())
+      );
+
+      let processedImages: ReportImage[] = [];
+      
+      if (isAskingAboutImages && reportImages.length > 0) {
+        // Convert report images to public URLs if needed
+        processedImages = reportImages.map(img => {
+          // If the URL is already a full URL, use it as is
+          if (img.url.startsWith('http://') || img.url.startsWith('https://')) {
+            return img;
+          }
+          
+          // Otherwise, get the public URL from Supabase storage
+          const { data: { publicUrl } } = supabase.storage
+            .from('reports-images')
+            .getPublicUrl(img.url);
+            
+          return {
+            ...img,
+            url: publicUrl
+          };
+        });
+      }
+
+      console.log('Sending chat request with:', {
+        reportId,
+        message: currentMessage,
+        reportContent: content,
+        projectName: project?.project_name,
+        bulletPoints: report?.bullet_points,
+        isAskingAboutImages,
+        imagesCount: processedImages.length,
+        totalImagesAvailable: reportImages.length
+      });
+      
+      // Call API to get AI response with current report content and images
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -103,35 +159,61 @@ export const useChatMessages = (
         },
         body: JSON.stringify({
           reportId,
-          message: chatMessage,
-          reportContent: content,
+          message: currentMessage,
+          reportContent: content, // Pass current report content directly
           projectName: project?.project_name,
-          bulletPoints: report?.bullet_points
+          bulletPoints: report?.bullet_points,
+          images: processedImages // Pass current images with public URLs
         }),
       });
       
       if (!response.ok) {
-        throw new Error('Failed to get chat response');
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
       
       const data = await response.json();
+      console.log('Received chat response:', { hasMessage: !!data.message, hasUpdatedContent: !!data.updatedContent });
       
       // Save assistant message
-      const { error: assistantMsgError } = await supabase
+      const { data: savedMessage, error: assistantMsgError } = await supabase
         .from('chat_messages')
         .insert({
           report_id: reportId,
           content: data.message,
           role: 'assistant'
-        });
+        })
+        .select()
+        .single();
       
       if (assistantMsgError) throw assistantMsgError;
+      
+      // Immediately add the assistant message to local state to avoid waiting for real-time subscription
+      if (savedMessage) {
+        setChatMessages(prev => [...prev, savedMessage as ChatMessage]);
+      }
       
       // Return updated content if there's a suggestion
       return data.updatedContent || null;
     } catch (error: any) {
       console.error('Error in chat:', error);
-      throw error;
+      
+      // Re-add the message to input if there was an error
+      setChatMessage(chatMessage);
+      
+      // Save error message to chat
+      try {
+        await supabase
+          .from('chat_messages')
+          .insert({
+            report_id: reportId,
+            content: `Error: ${error.message || 'Failed to process your request. Please try again.'}`,
+            role: 'assistant'
+          });
+      } catch (dbError) {
+        console.error('Error saving error message:', dbError);
+      }
+      
+      return null;
     } finally {
       setIsSendingMessage(false);
     }

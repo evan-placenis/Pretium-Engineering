@@ -83,17 +83,44 @@ export default function ReportEditor() {
     setChatMessage,
     sendChatMessage: originalSendChatMessage,
     chatContainerRef
-  } = useChatMessages(reportId, content, project, report, user);
+  } = useChatMessages(reportId, content, project, report, user, reportImages);
+
+  // Enhanced send chat message that handles content updates
+  const sendChatMessage = async () => {
+    const updatedContent = await originalSendChatMessage();
+    if (updatedContent) {
+      // Update the report content if the AI provided changes
+      setContent(updatedContent);
+      console.log('Updated report content from chat response');
+    }
+  };
 
 
-  // Add global style for better text wrapping
+  // Add global style for better text wrapping and animations
   useEffect(() => {
     // Add a class to the document body for better styling
     document.body.classList.add('word-editor-page');
     
+    // Add CSS animation for typing dots
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes typing-dot {
+        0%, 60%, 100% {
+          opacity: 0.3;
+          transform: scale(0.8);
+        }
+        30% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+    `;
+    document.head.appendChild(style);
+    
     return () => {
       // Clean up when component unmounts
       document.body.classList.remove('word-editor-page');
+      document.head.removeChild(style);
     };
   }, []);
 
@@ -485,21 +512,75 @@ export default function ReportEditor() {
                   </p>
                 </div>
               ) : (
-                chatMessages.map((msg, index) => (
-                  <div 
-                    key={index}
-                    style={{
-                      padding: '0.75rem',
-                      borderRadius: '0.5rem',
-                      maxWidth: '85%',
-                      alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                      background: msg.role === 'user' ? '#dcf8c6' : '#f0f0f0',
-                      wordBreak: 'break-word'
-                    }}
-                  >
-                    {msg.content}
-                  </div>
-                ))
+                <>
+                  {chatMessages.map((msg, index) => (
+                    <div 
+                      key={index}
+                      style={{
+                        padding: '0.75rem',
+                        borderRadius: '0.5rem',
+                        maxWidth: '85%',
+                        alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                        background: msg.role === 'user' ? '#dcf8c6' : '#f0f0f0',
+                        wordBreak: 'break-word'
+                      }}
+                    >
+                      {msg.content}
+                    </div>
+                  ))}
+                  
+                  {/* AI thinking animation */}
+                  {isSendingMessage && (
+                    <div 
+                      style={{
+                        padding: '0.75rem',
+                        borderRadius: '0.5rem',
+                        maxWidth: '85%',
+                        alignSelf: 'flex-start',
+                        background: '#f0f0f0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem'
+                      }}
+                    >
+                      <div style={{ display: 'flex', gap: '0.25rem' }}>
+                        <div 
+                          style={{
+                            width: '8px',
+                            height: '8px',
+                            borderRadius: '50%',
+                            background: '#666',
+                            animation: 'typing-dot 1.4s infinite ease-in-out',
+                            animationDelay: '0s'
+                          }}
+                        />
+                        <div 
+                          style={{
+                            width: '8px',
+                            height: '8px',
+                            borderRadius: '50%',
+                            background: '#666',
+                            animation: 'typing-dot 1.4s infinite ease-in-out',
+                            animationDelay: '0.2s'
+                          }}
+                        />
+                        <div 
+                          style={{
+                            width: '8px',
+                            height: '8px',
+                            borderRadius: '50%',
+                            background: '#666',
+                            animation: 'typing-dot 1.4s infinite ease-in-out',
+                            animationDelay: '0.4s'
+                          }}
+                        />
+                      </div>
+                      <span style={{ fontSize: '0.875rem', color: '#666', fontStyle: 'italic' }}>
+                        AI is thinking...
+                      </span>
+                    </div>
+                  )}
+                </>
               )}
             </div>
             
@@ -514,7 +595,7 @@ export default function ReportEditor() {
                 type="text"
                 value={chatMessage}
                 onChange={(e) => setChatMessage(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey} //&& sendChatMessage()}
+                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendChatMessage()}
                 placeholder="Ask a question or request changes..."
                 style={{
                   flex: '1',
@@ -526,7 +607,7 @@ export default function ReportEditor() {
                 disabled={isSendingMessage}
               />
               <button
-                //onClick={sendChatMessage}
+                onClick={sendChatMessage}
                 disabled={!chatMessage.trim() || isSendingMessage}
                 style={{
                   background: '#2b579a',

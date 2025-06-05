@@ -39,12 +39,12 @@ export async function POST(req: NextRequest) {
 
     // Create a prompt for GPT
 
-    //### PROMPT 1 ###
+    //### PROMPT 1 ### (may want to add more project details here to improve the knowledge of the agent)
     const prompt = `
     ### WRITING INSTRUCTIONS:
 
 
-    You are a senior engineering report writer at Pretium, a professional engineering consulting firm. Your assignment is to produce a highly technical, detailed, and professionally written site observation report for the project titled ${contractName || 'a contract'}, located at ${location || 'the specified location'}.
+    You are a senior engineering report writer at Pretium, a professional engineering consulting firm. Your assignment is to produce a highly technical, detailed, and professionally written site observation report for a project. 
 
 You will be provided with:
 
@@ -80,6 +80,7 @@ Maintain a clear, logical structure throughout the report, and use a formal engi
     ` : 'Note: No photos were provided with this report.'}
 
     GENERAL OBSERVATIONS:
+    Below are the general observations. This text may contain further instructions that are crucial to consider when writing the.
     ${bulletPoints}
 
     ---

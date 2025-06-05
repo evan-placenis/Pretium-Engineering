@@ -4,8 +4,58 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Project, Report, ChatMessage, ReportImage } from '@/lib/supabase';
-import { processContentWithImages, createWordDocumentWithImages} from '@/lib/word-utils';
+import { createWordDocumentWithImages} from '@/lib/word-utils';
 import { useChatMessages } from '@/lib/chat-utils';
+
+/**
+ * Process content and replace [IMAGE:X] placeholders with HTML for display
+ */
+const processContentWithImages = (rawContent: string, images: ReportImage[]): string => {
+  let processed = rawContent;
+  
+  // Replace [IMAGE:X] placeholders with two-column layout
+  images.forEach((img, index) => {
+    const placeholder = `[IMAGE:${index + 1}]`;
+    
+    // Find the placeholder and the text around it
+    const placeholderRegex = new RegExp(`([^\\n]*?)\\s*\\[IMAGE:${index + 1}\\]`, 'g');
+    
+    const imageHtml = `
+<div style="display: flex; margin: 0.25rem 0; gap: 1rem; align-items: flex-start;">
+  <div style="flex: 1; padding-right: 1rem;">
+    $1
+  </div>
+  <div style="flex: 1; text-align: center;">
+    <img src="${img.url}" alt="${img.description || 'Report image'}" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px;" />
+    <p style="font-size: 0.75rem; color: #666; margin: 0; font-style: italic;">
+      Photo ${index + 1}: ${img.description || 'No description available'}
+    </p>
+  </div>
+</div>`;
+    
+    // Replace the pattern with the two-column layout
+    processed = processed.replace(placeholderRegex, imageHtml);
+    
+    // Also handle case where placeholder is on its own line
+    const standaloneRegex = new RegExp(`\\[IMAGE:${index + 1}\\]`, 'g');
+    const standaloneImageHtml = `
+<div style="display: flex; margin: 0.25rem 0; gap: 1rem; align-items: flex-start;">
+  <div style="flex: 1;">
+    <!-- Text content appears here -->
+  </div>
+  <div style="flex: 1; text-align: center;">
+    <img src="${img.url}" alt="${img.description || 'Report image'}" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 0.25rem;" />
+    <p style="font-size: 0.75rem; color: #666; margin: 0; font-style: italic;">
+      Photo ${index + 1}: ${img.description || 'No description available'}
+    </p>
+  </div>
+</div>`;
+    
+    processed = processed.replace(standaloneRegex, standaloneImageHtml);
+  });
+  
+  return processed;
+};
 
 export default function ReportEditor() {
   const [report, setReport] = useState<Report | null>(null);

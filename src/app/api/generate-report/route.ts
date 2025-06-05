@@ -1,16 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
-//generate report api route - includes training documents
-
-interface ReportImage {
-  url: string;
-  description: string;
-}
-
-interface ReferenceDocument {
-  url: string;
-}
+import { ReportImage, ProjectImage } from '@/lib/supabase';
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -24,8 +15,8 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 export async function POST(req: NextRequest) {
   try {
-    const { bulletPoints, contractName, location, reportId } = await req.json();
-    console.log('Received request data:', { bulletPoints, contractName, location, reportId });
+    const { bulletPoints, contractName, location, reportId, images } = await req.json();
+    console.log('Received request data:', { bulletPoints, contractName, location, reportId, images });
 
     if (!bulletPoints) {
       return NextResponse.json(
@@ -34,163 +25,178 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Fetch report images if reportId is provided
-    let imagesWithUrls: ReportImage[] = [];
-    if (reportId) {
-      console.log('Fetching images for report:', reportId);
-      const { data: images, error: imagesError } = await supabase
-        .from('report_images')
-        .select('url, description')
-        .eq('report_id', reportId);
-
-      if (imagesError) {
-        console.error('Error fetching images:', imagesError);
-      }
-
-      console.log('Fetched images:', images);
-
-      if (images) {
-        imagesWithUrls = await Promise.all(images.map(async image => {
-          const { data, error } = await supabase.storage
-            .from('reports-images')
-            .createSignedUrl(image.url, 60 * 60 * 8); // 8 hours in seconds
-
-          if (error) {
-            console.error('Error generating signed URL:', error);
-            return image;
-          }
-
-          console.log('Generated signed URL for image:', {
-            original: image.url,
-            signed: data.signedUrl
-          });
-          return {
-            ...image,
-            url: data.signedUrl
-          };
-        }));
-      }
-    }
-
-    console.log('Final images with URLs:', imagesWithUrls);
-
-    // Generate signed URLs for reference documents
-    let referenceDocsWithUrls: ReferenceDocument[] = [];
-    const { data: referenceDocs, error: referenceError } = await supabase
-      .from('report_references')
-      .select('file_path')
-      .limit(5)
-      .order('created_at', { ascending: false });
+    // Use images passed in the request body first (since report isn't created yet)
+    let imagesToUse: (ReportImage)[] = [];
     
-    if (referenceError) {
-      console.error('Error fetching reference documents:', referenceError);
+    if (images && images.length > 0) {
+      console.log('Using images passed in request:', images);
+      imagesToUse = images;
+    } else{
+      console.log('No images in request, trying to fetch project images');
     }
 
-    if (referenceDocs) {
-      referenceDocsWithUrls = await Promise.all(referenceDocs.map(async doc => {
-        const { data, error } = await supabase.storage
-          .from('reference-reports')
-          .createSignedUrl(doc.file_path, 60 * 60 * 8); // 8 hours in seconds
-
-        if (error) {
-          console.error('Error generating signed URL for reference document:', error);
-          return { url: '' }; // Return empty URL on error
-        }
-
-        console.log('Generated signed URL for reference document:', {
-          original: doc.file_path,
-          signed: data.signedUrl
-        });
-
-        return {
-          url: data.signedUrl
-        };
-      }));
-    }
-
-    // Fetch the template document
-    const { data: templateDoc, error: templateError } = await supabase
-      .from('report_templates')
-      .select('file_path')
-      .eq('is_active', true)
-      .single();
-    
-    if (templateError) {
-      console.error('Error fetching template document:', templateError);
-      return NextResponse.json(
-        { error: 'Failed to fetch report template' },
-        { status: 500 }
-      );
-    }
-
-    // Get signed URL for the template
-    const { data: templateUrl, error: templateUrlError } = await supabase.storage
-      .from('report-templates')
-      .createSignedUrl(templateDoc.file_path, 60 * 60 * 8); // 8 hours in seconds
-
-    if (templateUrlError) {
-      console.error('Error generating signed URL for template:', templateUrlError);
-      return NextResponse.json(
-        { error: 'Failed to access report template' },
-        { status: 500 }
-      );
-    }
+    console.log('images to use:', imagesToUse.length, 'images');
 
     // Create a prompt for GPT
-    let prompt = `
-You are an expert engineering report writer for a professional engineering firm. 
-Generate a detailed, professional report based on the following observations for ${contractName || 'a contract'} located at ${location || 'the specified location'}.
 
-CRITICAL: You MUST use the provided template document as your exact structure. The template is available at: ${templateUrl.signedUrl}
+    //### PROMPT 1 ###
+    const prompt = `
+    ### WRITING INSTRUCTIONS:
 
-Instructions for using the template:
-1. Download and open the template document
-2. Fill in each section with relevant content based on the observations and images
-3. Maintain all formatting, styles, and structure from the template
-4. Do not add or remove any sections
-5. Keep all headers, footers, and page numbers as they appear in the template
 
-${imagesWithUrls.length > 0 ? `
-IMPORTANT INSTRUCTIONS FOR IMAGE ANALYSIS:
-- Each image must be referenced in the appropriate section of the report
-- When referencing an image, describe what it shows and how it relates to your analysis
-- Use the images to support your observations and recommendations
-- If an image shows a problem or issue, explain its significance
-- If an image shows a feature or condition, describe its importance
-- The image URLs are direct links that can be opened in a browser to view the full images
+    You are a senior engineering report writer at Pretium, a professional engineering consulting firm. Your assignment is to produce a highly technical, detailed, and professionally written site observation report for the project titled ${contractName || 'a contract'}, located at ${location || 'the specified location'}.
 
-Images to be referenced:
-${imagesWithUrls.map((img, index) => `Image ${index + 1}${img.description ? ` (${img.description})` : ''}: ${img.url}`).join('\n')}` : ''}
+You will be provided with:
 
-Bullet point observations to expand upon:
-${bulletPoints}
+A series of site photographs, each accompanied by a brief description and a tag indicating whether it is an overview or a deficiency photo.
 
-${referenceDocsWithUrls.length > 0 ? `Reference documents to guide your writing style and format:
-${referenceDocsWithUrls.map((doc, index) => `Reference Report ${index + 1}: ${doc.url}`).join('\n')}` : ''}
+A set of bullet-point observations that offer additional insights. These points may include general site observations not directly tied to a specific photo but are essential to include in the report.
 
-Remember to:
-1. Maintain a professional and technical tone throughout
-2. Be specific and detailed in your observations
-3. Support all findings with evidence from the images
-4. Provide clear, actionable recommendations
-5. Follow the exact template structure provided`;
+Your task is to thoroughly expand upon and integrate both the photo descriptions and the bullet-point observations into a cohesive and professional report.
+
+Key Instructions:
+
+Every photo must be explicitly referenced and described in the report. Use the image descriptions and tags to guide your interpretation.
+
+Bullet-point observations must be fully incorporated, especially where they provide context or important findings that are not visually documented.
+
+Do not omit or generalize content. All information provided should be represented with technical precision and completeness.
+
+Maintain a clear, logical structure throughout the report, and use a formal engineering tone.
+
+    ---
+
+    You will be provided with:
+    - Bullet point observations made on site
+    - A set of site photos, each with a short description and a tag: either "overview" or "deficiency" to help you identify the type of photo.
+
+    Information provided here:
+
+    ${imagesToUse.length > 0 ? `
+    SITE PHOTOS WITH DESCRIPTIONS:
+    ${imagesToUse.map((img, index) => {
+      return `Photo ${index + 1} (${img.tag?.toUpperCase() || 'OVERVIEW'}): ${img.description || 'No description provided'}`;
+    }).join('\n\n')}
+    ` : 'Note: No photos were provided with this report.'}
+
+    GENERAL OBSERVATIONS:
+    ${bulletPoints}
+
+    ---
+
+    ### FORMATTING INSTRUCTIONS:
+    Please carefully integrate the images (with descriptions) into the appropriate section of the report. The report follows the two column format with the left column being the description and the right column being the images.
+
+    **IMPORTANT: When referencing an image, use the placeholder format [IMAGE:X] where X is the photo number. Each image placeholder is to be assigned exactly once.**
+
+    For example:
+    - To reference Photo 1, use: [IMAGE:1]
+    - To reference Photo 2, use: [IMAGE:2]
+    - And so on...
+
+    For each image you reference:
+    - Describe what the photo shows based on its description
+    - Explain how it relates to the observations
+    - For DEFICIENCY photos: Focus on the problem/issue shown and its implications
+    - For OVERVIEW photos: Use them to provide context about the work area or general conditions
+    - Place the [IMAGE:X] placeholder where the image should appear in the report
+
+    ---
+    ### STRUCTURE:
+    Use the following section headers in UPPERCASE (not markdown):
+
+    OBSERVATIONS / COMMENTS
+        1. GENERAL
+        2. SITE / STAGING AREA
+        3. ROOF SECTIONS
+        4. DEFICIENCY SUMMARY
+
+    ---
+
+    ### WRITING GUIDELINES:
+    - Use a **professional, technical tone** consistent with engineering field reports.
+    - Expand on each observation with technical reasoning and possible implications if relevant.
+    - For **Deficiency-tagged photos**, describe the specific deficiency and its impact.
+    - For **Overview-tagged photos**, use them to provide general context of work areas.
+    - Be **precise and detailed**: Avoid generic language. Reference specific elements, materials, or observations where possible.
+    - **MUST reference every provided photo** in the appropriate section based on its description and tag.
+    - DO NOT add any content not grounded in the provided bullets or photos.
+    - Return the final result as a **plain text report** (NO markdown or formatting like asterisks). Use UPPERCASE and colons to differentiate section headers if needed.
+
+    ---
+
+    Example of proper image referencing:
+    "During the inspection, a safety concern was identified in the playground area. As shown in the image, the placement of equipment creates a potential hazard...   [IMAGE:1]"
+
+    ---
+
+    Start writing the report only after interpreting and organizing the observations and photo data in a meaningful way.
+    `;
 
     console.log('Generated prompt:', prompt);
 
+
+    //### Passing images  and prompt to the agent ###
+    const messages: OpenAI.ChatCompletionMessageParam[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          // Add each image with its description
+          ...imagesToUse.flatMap((img, index) => [
+            // First add the description as text
+            {
+              type: 'text' as const,
+              text: `\n\nPhoto ${index + 1} Description (${img.tag?.toUpperCase() || 'OVERVIEW'}): ${img.description || 'No description provided'}`
+            },
+            // Then add the actual image
+            {
+              type: 'image_url' as const,
+              image_url: {
+                url: img.url,
+                detail: 'auto' as const,
+              },
+            }
+          ])
+        ],
+      },
+    ];
+
+    // Log what we're sending to OpenAI
+    console.log('Messages structure being sent to OpenAI:');
+    const messageContent = messages[0]?.content;
+    if (Array.isArray(messageContent)) {
+      console.log('Total content items:', messageContent.length);
+      messageContent.forEach((item: any, index: number) => {
+        if (item.type === 'text') {
+          console.log(`Content ${index}: TEXT - ${item.text.substring(0, 100)}...`);
+        } else if (item.type === 'image_url') {
+          console.log(`Content ${index}: IMAGE - URL: ${item.image_url.url.substring(0, 50)}...`);
+        }
+      });
+    } else {
+      console.log('Content is not an array:', typeof messageContent);
+    }
+    
     // Call OpenAI API
+    // const response = await openai.chat.completions.create({
+    //   model: 'gpt-4o',
+    //   messages: [{ role: 'user', content: prompt }],
+    //   temperature: 0.7,
+    // });
     const response = await openai.chat.completions.create({
-      model: 'gpt-4',
-      messages: [{ role: 'user', content: prompt }],
+      model: 'gpt-4o',
+      messages: messages,
       temperature: 0.7,
     });
 
     // Extract the generated content
     const generatedContent = response.choices[0]?.message.content || '';
-    console.log('Generated content:', generatedContent);
 
     return NextResponse.json({
       generatedContent,
-      templateUrl: templateUrl.signedUrl
+      images: imagesToUse, // Return the images array so frontend can map placeholders to actual images
+      imagesUsed: imagesToUse.length
     });
   } catch (error: any) {
     console.error('Error generating report:', error);

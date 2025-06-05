@@ -3,6 +3,13 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { supabase, ProjectImage } from '@/lib/supabase';
 
+// Extended interface to track rotation and changes
+interface ExtendedProjectImage extends ProjectImage {
+  rotation?: number;
+  hasChanges?: boolean;
+  originalDescription?: string;
+  originalTag?: 'overview' | 'deficiency' | null;
+}
 
 export default function ProjectImagesPage() {
   const router = useRouter();
@@ -12,19 +19,31 @@ export default function ProjectImagesPage() {
   const selectionMode = searchParams.get('mode') === 'select';
   const returnTo = searchParams.get('returnTo');
   
-  const [images, setImages] = useState<ProjectImage[]>([]);
-  const [filteredImages, setFilteredImages] = useState<ProjectImage[]>([]);
+  const [images, setImages] = useState<ExtendedProjectImage[]>([]);
+  const [filteredImages, setFilteredImages] = useState<ExtendedProjectImage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
-  const [selectedImage, setSelectedImage] = useState<ProjectImage | null>(null);
+  const [selectedImage, setSelectedImage] = useState<ExtendedProjectImage | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [editDescription, setEditDescription] = useState('');
   const [editTag, setEditTag] = useState<'overview' | 'deficiency' | null>(null);
   const [updateLoading, setUpdateLoading] = useState(false);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string>('');
+  
+  // New state for view toggle and bulk save
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  
+  // Drag and drop state
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  
+  // Sort state
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc' | 'manual'>('desc'); // desc = newest first, asc = oldest first, manual = user reordered
   
   // Selection and filtering state
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
@@ -57,8 +76,17 @@ export default function ProjectImagesPage() {
           
         if (error) throw error;
         
-        setImages(data || []);
-        setFilteredImages(data || []);
+        // Initialize extended properties
+        const extendedData = (data || []).map(img => ({
+          ...img,
+          rotation: 0,
+          hasChanges: false,
+          originalDescription: img.description,
+          originalTag: img.tag
+        }));
+        
+        setImages(extendedData);
+        setFilteredImages(extendedData);
         
         // Fetch which images are used in reports
         const { data: reportImagesData, error: reportImagesError } = await supabase
@@ -83,6 +111,12 @@ export default function ProjectImagesPage() {
     
     if (projectId) fetchImages();
   }, [projectId]);
+
+  // Check for unsaved changes
+  useEffect(() => {
+    const hasChanges = images.some(img => img.hasChanges);
+    setHasUnsavedChanges(hasChanges);
+  }, [images]);
 
   // Filter images based on criteria
   useEffect(() => {
@@ -123,10 +157,167 @@ export default function ProjectImagesPage() {
       filtered = filtered.filter(img => imagesInReports.has(img.url));
     }
     
+    // Sort by date (only if not manual reordering)
+    if (sortOrder === 'desc') {
+      filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    } else if (sortOrder === 'asc') {
+      filtered.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    }
+    // If sortOrder is 'manual', preserve the current order (no sorting)
+    
     setFilteredImages(filtered);
-  }, [images, dateFilter, tagFilter, descriptionFilter, userFilter, reportUsageFilter, imagesInReports, currentUser]);
+  }, [images, dateFilter, tagFilter, descriptionFilter, userFilter, reportUsageFilter, imagesInReports, currentUser, sortOrder]);
 
-  const handleImageClick = (image: ProjectImage) => {
+  // Handle sort order change
+  const handleSortChange = () => {
+    if (sortOrder === 'desc') {
+      setSortOrder('asc');
+    } else if (sortOrder === 'asc') {
+      setSortOrder('manual');
+    } else {
+      setSortOrder('desc');
+    }
+  };
+
+  // New functions for list view functionality
+  const rotateImage = (imageId: string) => {
+    setImages(prev => prev.map(img => 
+      img.id === imageId 
+        ? { ...img, rotation: ((img.rotation || 0) + 90) % 360 }
+        : img
+    ));
+  };
+
+  const updateImageInList = (imageId: string, field: 'description' | 'tag', value: string | 'overview' | 'deficiency' | null) => {
+    setImages(prev => prev.map(img => {
+      if (img.id === imageId) {
+        const updated = { ...img, [field]: value };
+        
+        // Check if this creates a change from original
+        const hasDescriptionChange = updated.description !== img.originalDescription;
+        const hasTagChange = updated.tag !== img.originalTag;
+        updated.hasChanges = hasDescriptionChange || hasTagChange;
+        
+        return updated;
+      }
+      return img;
+    }));
+  };
+
+  const bulkSaveChanges = async () => {
+    const changedImages = images.filter(img => img.hasChanges);
+    if (changedImages.length === 0) return;
+
+    setSaveLoading(true);
+    setError(null);
+
+    try {
+      // Update all changed images in parallel
+      const updatePromises = changedImages.map(img => 
+        supabase
+          .from('project_images')
+          .update({
+            description: img.description,
+            tag: img.tag
+          })
+          .eq('id', img.id)
+      );
+
+      const results = await Promise.all(updatePromises);
+      
+      // Check for errors
+      const errors = results.filter(result => result.error);
+      if (errors.length > 0) {
+        throw new Error(`Failed to update ${errors.length} image(s)`);
+      }
+
+      // Reset change tracking
+      setImages(prev => prev.map(img => ({
+        ...img,
+        hasChanges: false,
+        originalDescription: img.description,
+        originalTag: img.tag
+      })));
+
+      setSuccessMessage(`Successfully saved changes to ${changedImages.length} image(s)!`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+
+    } catch (error: any) {
+      setError(error.message);
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
+  // Drag and drop handlers
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', ''); // Required for some browsers
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverIndex(index);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    // Only clear drag over if we're actually leaving the container
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX;
+    const y = e.clientY;
+    
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+      setDragOverIndex(null);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    
+    if (draggedIndex === null || draggedIndex === dropIndex) {
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+
+    // Switch to manual sort mode when user manually reorders
+    setSortOrder('manual');
+
+    // Reorder the filtered images array
+    const newFilteredImages = [...filteredImages];
+    const [draggedItem] = newFilteredImages.splice(draggedIndex, 1);
+    newFilteredImages.splice(dropIndex, 0, draggedItem);
+    
+    setFilteredImages(newFilteredImages);
+    
+    // Also update the main images array to maintain consistency
+    // This is a simple approach - in a more complex app you might want to save order to DB
+    const reorderedImages = [...images];
+    const draggedImage = filteredImages[draggedIndex];
+    const dropImage = filteredImages[dropIndex];
+    
+    // Find and swap positions in main array
+    const draggedMainIndex = reorderedImages.findIndex(img => img.id === draggedImage.id);
+    const dropMainIndex = reorderedImages.findIndex(img => img.id === dropImage.id);
+    
+    if (draggedMainIndex !== -1 && dropMainIndex !== -1) {
+      const [draggedMainItem] = reorderedImages.splice(draggedMainIndex, 1);
+      reorderedImages.splice(dropMainIndex, 0, draggedMainItem);
+      setImages(reorderedImages);
+    }
+    
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleImageClick = (image: ExtendedProjectImage) => {
     setSelectedImage(image);
     setEditDescription(image.description || '');
     setEditTag(image.tag);
@@ -201,7 +392,7 @@ export default function ProjectImagesPage() {
     setUploadLoading(true);
 
     try {
-      const uploadedImages: ProjectImage[] = [];
+      const uploadedImages: ExtendedProjectImage[] = [];
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
@@ -253,7 +444,13 @@ export default function ProjectImagesPage() {
           continue;
         }
 
-        uploadedImages.push(imageData);
+        uploadedImages.push({
+          ...imageData,
+          rotation: 0,
+          hasChanges: false,
+          originalDescription: imageData.description,
+          originalTag: imageData.tag
+        });
       }
 
       // Add uploaded images to local state
@@ -317,6 +514,41 @@ export default function ProjectImagesPage() {
 
   return (
     <div className="container page-content" style={{ background: 'var(--color-bg)', minHeight: '100vh' }}>
+      {/* Fixed Save Button */}
+      {hasUnsavedChanges && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          zIndex: 1000,
+          background: 'var(--color-primary)',
+          color: 'white',
+          padding: '1rem',
+          borderRadius: '0.5rem',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '1rem'
+        }}>
+          <span>
+            {images.filter(img => img.hasChanges).length} unsaved change(s)
+          </span>
+          <button
+            onClick={bulkSaveChanges}
+            disabled={saveLoading}
+            className="btn btn-sm"
+            style={{
+              background: 'white',
+              color: 'var(--color-primary)',
+              border: 'none',
+              fontWeight: 'bold'
+            }}
+          >
+            {saveLoading ? 'Saving...' : 'Save All'}
+          </button>
+        </div>
+      )}
+
       <h1 style={{ marginBottom: '2rem', color: 'var(--color-primary)' }}>
         {selectionMode ? 'Select Photos for Report' : 'All Project Images'}
       </h1>
@@ -332,6 +564,42 @@ export default function ProjectImagesPage() {
         
         {!selectionMode && (
           <>
+            {/* View Toggle */}
+            <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
+              <button
+                className={`btn ${viewMode === 'grid' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setViewMode('grid')}
+              >
+                📄 Grid View
+              </button>
+              <button
+                className={`btn ${viewMode === 'list' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setViewMode('list')}
+              >
+                📋 List View
+              </button>
+            </div>
+            
+            {/* Sort Button */}
+            <button
+              className="btn btn-secondary"
+              onClick={handleSortChange}
+              title={
+                sortOrder === 'desc' ? 'Currently: Newest First (click for Oldest First)' :
+                sortOrder === 'asc' ? 'Currently: Oldest First (click for Manual Order)' :
+                'Currently: Manual Order (click for Newest First)'
+              }
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}
+            >
+              {sortOrder === 'desc' && '📅↓ Newest First'}
+              {sortOrder === 'asc' && '📅↑ Oldest First'} 
+              {sortOrder === 'manual' && '📅✋ Manual Order'}
+            </button>
+            
             <input
               type="file"
               accept="image/*"
@@ -464,6 +732,16 @@ export default function ProjectImagesPage() {
           </div>
           <div style={{ marginTop: '1rem', fontSize: '0.875rem', color: 'var(--color-text-light)' }}>
             Showing {filteredImages.length} of {images.length} photos
+            {sortOrder !== 'manual' && (
+              <span style={{ marginLeft: '0.5rem' }}>
+                • Sorted by {sortOrder === 'desc' ? 'newest first' : 'oldest first'}
+              </span>
+            )}
+            {sortOrder === 'manual' && (
+              <span style={{ marginLeft: '0.5rem' }}>
+                • Custom order (drag to reorder in list view)
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -488,132 +766,349 @@ export default function ProjectImagesPage() {
       ) : images.length === 0 ? (
         <div style={{ color: 'var(--color-text-light)' }}>No images found for this project.</div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '1.5rem' }}>
-          {filteredImages.map(img => (
-            <div
-              key={img.id}
-              className="card"
-              style={{
-                padding: '1rem',
-                position: 'relative',
-                background: 'var(--color-bg-card)',
-                color: 'var(--color-text)',
-                border: selectionMode && selectedImages.has(img.id) 
-                  ? '3px solid var(--color-primary)' 
-                  : '1px solid var(--color-border-dark)',
-                boxShadow: 'var(--shadow-sm)',
-                cursor: 'pointer',
-              }}
-              onClick={() => selectionMode ? toggleImageSelection(img.id) : handleImageClick(img)}
-            >
-              {selectionMode && (
+        <>
+          {/* Grid View (existing) */}
+          {viewMode === 'grid' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '1.5rem' }}>
+              {filteredImages.map(img => (
                 <div
+                  key={img.id}
+                  className="card"
                   style={{
-                    position: 'absolute',
-                    top: '0.5rem',
-                    left: '0.5rem',
-                    width: '20px',
-                    height: '20px',
-                    borderRadius: '3px',
-                    border: '2px solid var(--color-primary)',
-                    backgroundColor: selectedImages.has(img.id) ? 'var(--color-primary)' : 'white',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    zIndex: 2
+                    padding: '1rem',
+                    position: 'relative',
+                    background: 'var(--color-bg-card)',
+                    color: 'var(--color-text)',
+                    border: selectionMode && selectedImages.has(img.id) 
+                      ? '3px solid var(--color-primary)' 
+                      : '1px solid var(--color-border-dark)',
+                    boxShadow: 'var(--shadow-sm)',
+                    cursor: 'pointer',
                   }}
+                  onClick={() => selectionMode ? toggleImageSelection(img.id) : handleImageClick(img)}
                 >
-                  {selectedImages.has(img.id) && (
-                    <span style={{ color: 'white', fontSize: '12px', fontWeight: 'bold' }}>✓</span>
+                  {selectionMode && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '0.5rem',
+                        left: '0.5rem',
+                        width: '20px',
+                        height: '20px',
+                        borderRadius: '3px',
+                        border: '2px solid var(--color-primary)',
+                        backgroundColor: selectedImages.has(img.id) ? 'var(--color-primary)' : 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 2
+                      }}
+                    >
+                      {selectedImages.has(img.id) && (
+                        <span style={{ color: 'white', fontSize: '12px', fontWeight: 'bold' }}>✓</span>
+                      )}
+                    </div>
+                  )}
+                  <img
+                    src={img.url}
+                    alt={img.description || 'Project image'}
+                    style={{
+                      width: '100%',
+                      height: '200px',
+                      objectFit: 'cover',
+                      borderRadius: '0.25rem',
+                      marginBottom: '1rem',
+                      background: 'var(--color-primary)',
+                      opacity: selectionMode && selectedImages.has(img.id) ? 0.8 : 1,
+                      transform: `rotate(${img.rotation || 0}deg)`,
+                    }}
+                  />
+                  <div style={{ marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--color-text-light)' }}>
+                    {img.description}
+                  </div>
+                  {img.tag && (
+                    <span 
+                      className={`badge ${img.tag === 'deficiency' ? 'badge-danger' : 'badge-info'}`}
+                      style={{ fontSize: '0.75rem', marginBottom: '0.5rem' }}
+                    >
+                      {img.tag}
+                    </span>
+                  )}
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-light)', marginBottom: '0.5rem' }}>
+                    {new Date(img.created_at).toLocaleDateString()}
+                    {img.user_id && (
+                      <span style={{ marginLeft: '0.5rem' }}>
+                        • {img.user_id === currentUser?.id ? (
+                          <span style={{ color: 'var(--color-primary)' }}>You</span>
+                        ) : (
+                          <span style={{ color: 'var(--color-text-lighter)' }}>Other User</span>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                  {/* Report usage indicator */}
+                  {imagesInReports.has(img.url) ? (
+                    <div style={{ 
+                      fontSize: '0.7rem', 
+                      color: 'var(--color-warning)', 
+                      backgroundColor: 'rgba(255, 193, 7, 0.1)',
+                      padding: '0.25rem 0.5rem',
+                      borderRadius: '0.25rem',
+                      marginBottom: '0.5rem',
+                      display: 'inline-block'
+                    }}>
+                      ✓ Used in Report
+                    </div>
+                  ) : (
+                    <div style={{ 
+                      fontSize: '0.7rem', 
+                      color: 'var(--color-success)', 
+                      backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                      padding: '0.25rem 0.5rem',
+                      borderRadius: '0.25rem',
+                      marginBottom: '0.5rem',
+                      display: 'inline-block'
+                    }}>
+                      ○ Not Used in Reports
+                    </div>
+                  )}
+                  {!selectionMode && (
+                    <button
+                      className="btn btn-danger btn-sm"
+                      style={{ 
+                        position: 'absolute', 
+                        top: '1rem', 
+                        right: '1rem', 
+                        background: 'var(--color-danger)', 
+                        color: 'white', 
+                        border: 'none',
+                        zIndex: 1
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(img.id);
+                      }}
+                      disabled={deleteLoading === img.id}
+                    >
+                      {deleteLoading === img.id ? 'Deleting...' : '×'}
+                    </button>
                   )}
                 </div>
-              )}
-              <img
-                src={img.url}
-                alt={img.description || 'Project image'}
-                style={{
-                  width: '100%',
-                  height: '200px',
-                  objectFit: 'cover',
-                  borderRadius: '0.25rem',
-                  marginBottom: '1rem',
-                  background: 'var(--color-primary)',
-                  opacity: selectionMode && selectedImages.has(img.id) ? 0.8 : 1,
-                }}
-              />
-              <div style={{ marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--color-text-light)' }}>
-                {img.description}
-              </div>
-              {img.tag && (
-                <span 
-                  className={`badge ${img.tag === 'deficiency' ? 'badge-danger' : 'badge-info'}`}
-                  style={{ fontSize: '0.75rem', marginBottom: '0.5rem' }}
-                >
-                  {img.tag}
-                </span>
-              )}
-              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-light)', marginBottom: '0.5rem' }}>
-                {new Date(img.created_at).toLocaleDateString()}
-                {img.user_id && (
-                  <span style={{ marginLeft: '0.5rem' }}>
-                    • {img.user_id === currentUser?.id ? (
-                      <span style={{ color: 'var(--color-primary)' }}>You</span>
-                    ) : (
-                      <span style={{ color: 'var(--color-text-lighter)' }}>Other User</span>
-                    )}
-                  </span>
-                )}
-              </div>
-              {/* Report usage indicator */}
-              {imagesInReports.has(img.url) ? (
-                <div style={{ 
-                  fontSize: '0.7rem', 
-                  color: 'var(--color-warning)', 
-                  backgroundColor: 'rgba(255, 193, 7, 0.1)',
-                  padding: '0.25rem 0.5rem',
-                  borderRadius: '0.25rem',
-                  marginBottom: '0.5rem',
-                  display: 'inline-block'
-                }}>
-                  ✓ Used in Report
-                </div>
-              ) : (
-                <div style={{ 
-                  fontSize: '0.7rem', 
-                  color: 'var(--color-success)', 
-                  backgroundColor: 'rgba(40, 167, 69, 0.1)',
-                  padding: '0.25rem 0.5rem',
-                  borderRadius: '0.25rem',
-                  marginBottom: '0.5rem',
-                  display: 'inline-block'
-                }}>
-                  ○ Not Used in Reports
-                </div>
-              )}
-              {!selectionMode && (
-                <button
-                  className="btn btn-danger btn-sm"
-                  style={{ 
-                    position: 'absolute', 
-                    top: '1rem', 
-                    right: '1rem', 
-                    background: 'var(--color-danger)', 
-                    color: 'white', 
-                    border: 'none',
-                    zIndex: 1
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDelete(img.id);
-                  }}
-                  disabled={deleteLoading === img.id}
-                >
-                  {deleteLoading === img.id ? 'Deleting...' : '×'}
-                </button>
-              )}
+              ))}
             </div>
-          ))}
-        </div>
+          )}
+
+          {/* List View (new - matching new_report_page layout) */}
+          {viewMode === 'list' && (
+            <div>
+              {filteredImages.map((img, idx) => (
+                <div 
+                  key={img.id} 
+                  className="card" 
+                  draggable={!selectionMode}
+                  onDragStart={(e) => handleDragStart(e, idx)}
+                  onDragOver={(e) => handleDragOver(e, idx)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, idx)}
+                  onDragEnd={handleDragEnd}
+                  style={{ 
+                    display: 'flex', 
+                    gap: '1.5rem', 
+                    padding: '1rem', 
+                    marginBottom: '2rem',
+                    position: 'relative',
+                    cursor: !selectionMode ? 'grab' : 'default',
+                    opacity: draggedIndex === idx ? 0.5 : 1,
+                    transform: draggedIndex === idx ? 'rotate(5deg)' : 'none',
+                    transition: draggedIndex === idx ? 'none' : 'all 0.2s ease',
+                    border: dragOverIndex === idx && draggedIndex !== idx 
+                      ? '2px dashed var(--color-primary)' 
+                      : '1px solid var(--color-border-dark)',
+                    backgroundColor: dragOverIndex === idx && draggedIndex !== idx 
+                      ? 'rgba(43, 87, 154, 0.05)' 
+                      : 'var(--color-bg-card)'
+                  }}
+                >
+                  {/* Drag Handle */}
+                  {!selectionMode && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: '0.5rem',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        cursor: 'grab',
+                        color: 'var(--color-text-light)',
+                        fontSize: '1.2rem',
+                        padding: '0.5rem',
+                        zIndex: 1
+                      }}
+                      title="Drag to reorder"
+                    >
+                      ⋮⋮
+                    </div>
+                  )}
+
+                  {selectionMode && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '1rem',
+                        left: '1rem',
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '3px',
+                        border: '2px solid var(--color-primary)',
+                        backgroundColor: selectedImages.has(img.id) ? 'var(--color-primary)' : 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 2,
+                        cursor: 'pointer'
+                      }}
+                      onClick={() => toggleImageSelection(img.id)}
+                    >
+                      {selectedImages.has(img.id) && (
+                        <span style={{ color: 'white', fontSize: '14px', fontWeight: 'bold' }}>✓</span>
+                      )}
+                    </div>
+                  )}
+                  
+                  <div style={{ 
+                    flex: '1', 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    gap: '1rem',
+                    marginLeft: !selectionMode ? '2rem' : '0' // Add margin for drag handle
+                  }}>
+                    <div>
+                      <textarea
+                        value={img.description || ''}
+                        onChange={(e) => updateImageInList(img.id, 'description', e.target.value)}
+                        placeholder="Enter notes for this image..."
+                        disabled={selectionMode}
+                        style={{
+                          width: '100%',
+                          minHeight: '200px',
+                          padding: '0.75rem',
+                          fontSize: '0.875rem',
+                          border: '1px solid var(--color-border)',
+                          borderRadius: '0.25rem',
+                          resize: 'vertical',
+                          backgroundColor: img.hasChanges ? 'rgba(255, 255, 0, 0.1)' : 'var(--color-bg)'
+                        }}
+                      />
+                    </div>
+                    
+                    <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.5rem' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <input
+                          type="radio"
+                          name={`noteType-${idx}`}
+                          checked={img.tag === 'overview'}
+                          onChange={() => updateImageInList(img.id, 'tag', 'overview')}
+                          disabled={selectionMode}
+                          style={{ margin: 0 }}
+                        />
+                        Overview
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <input
+                          type="radio"
+                          name={`noteType-${idx}`}
+                          checked={img.tag === 'deficiency'}
+                          onChange={() => updateImageInList(img.id, 'tag', 'deficiency')}
+                          disabled={selectionMode}
+                          style={{ margin: 0 }}
+                        />
+                        Deficiency
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <input
+                          type="radio"
+                          name={`noteType-${idx}`}
+                          checked={img.tag === null}
+                          onChange={() => updateImageInList(img.id, 'tag', null)}
+                          disabled={selectionMode}
+                          style={{ margin: 0 }}
+                        />
+                        No Tag
+                      </label>
+                    </div>
+                    
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      {!selectionMode && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => rotateImage(img.id)}
+                            className="btn btn-secondary btn-sm"
+                          >
+                            🔄 Rotate
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(img.id)}
+                            className="btn btn-danger btn-sm"
+                            disabled={deleteLoading === img.id}
+                          >
+                            {deleteLoading === img.id ? 'Deleting...' : 'Delete'}
+                          </button>
+                        </>
+                      )}
+                      
+                      {img.hasChanges && (
+                        <span style={{ 
+                          fontSize: '0.75rem', 
+                          color: 'var(--color-warning)', 
+                          backgroundColor: 'rgba(255, 193, 7, 0.1)',
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '0.25rem'
+                        }}>
+                          • Unsaved changes
+                        </span>
+                      )}
+                    </div>
+                    
+                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-light)' }}>
+                      Created: {new Date(img.created_at).toLocaleDateString()}
+                      {img.user_id && (
+                        <span style={{ marginLeft: '0.5rem' }}>
+                          • {img.user_id === currentUser?.id ? (
+                            <span style={{ color: 'var(--color-primary)' }}>You</span>
+                          ) : (
+                            <span style={{ color: 'var(--color-text-lighter)' }}>Other User</span>
+                          )}
+                        </span>
+                      )}
+                      {imagesInReports.has(img.url) && (
+                        <span style={{ marginLeft: '0.5rem', color: 'var(--color-warning)' }}>
+                          • Used in Report
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div style={{ flex: '1' }}>
+                    <img
+                      src={img.url}
+                      alt={img.description || 'Project image'}
+                      style={{
+                        width: '100%',
+                        height: 'auto',
+                        maxHeight: '300px',
+                        objectFit: 'contain',
+                        borderRadius: '0.25rem',
+                        transform: `rotate(${img.rotation || 0}deg)`,
+                        pointerEvents: draggedIndex === idx ? 'none' : 'auto', // Prevent image interaction during drag
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {/* Modal */}

@@ -8,53 +8,86 @@ import { createWordDocumentWithImages} from '@/lib/word-utils';
 import { useChatMessages } from '@/lib/chat-utils';
 
 /**
- * Process content and replace [IMAGE:X] placeholders with HTML for display
+ * Process content to create mixed layout: full-width for text without images, 2-column for sections with images
  */
 const processContentWithImages = (rawContent: string, images: ReportImage[]): string => {
-  let processed = rawContent;
+  if (images.length === 0) {
+    return `<div style="white-space: pre-wrap; line-height: 1.6;">${rawContent}</div>`;
+  }
+
+  // Split content into sections and track which images are referenced where
+  const lines = rawContent.split('\n');
+  const sections: { content: string; images: number[] }[] = [];
+  let currentSection = { content: '', images: [] as number[] };
   
-  // Replace [IMAGE:X] placeholders with two-column layout
-  images.forEach((img, index) => {
-    const placeholder = `[IMAGE:${index + 1}]`;
-    
-    // Find the placeholder and the text around it
-    const placeholderRegex = new RegExp(`([^\\n]*?)\\s*\\[IMAGE:${index + 1}\\]`, 'g');
-    
-    const imageHtml = `
-<div style="display: flex; margin: 0.25rem 0; gap: 1rem; align-items: flex-start;">
-  <div style="flex: 1; padding-right: 1rem;">
-    $1
-  </div>
-  <div style="flex: 1; text-align: center;">
-    <img src="${img.url}" alt="${img.description || 'Report image'}" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px;" />
-    <p style="font-size: 0.75rem; color: #666; margin: 0; font-style: italic;">
-      Photo ${index + 1}: ${img.description || 'No description available'}
-    </p>
-  </div>
-</div>`;
-    
-    // Replace the pattern with the two-column layout
-    processed = processed.replace(placeholderRegex, imageHtml);
-    
-    // Also handle case where placeholder is on its own line
-    const standaloneRegex = new RegExp(`\\[IMAGE:${index + 1}\\]`, 'g');
-    const standaloneImageHtml = `
-<div style="display: flex; margin: 0.25rem 0; gap: 1rem; align-items: flex-start;">
-  <div style="flex: 1;">
-    <!-- Text content appears here -->
-  </div>
-  <div style="flex: 1; text-align: center;">
-    <img src="${img.url}" alt="${img.description || 'Report image'}" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 0.25rem;" />
-    <p style="font-size: 0.75rem; color: #666; margin: 0; font-style: italic;">
-      Photo ${index + 1}: ${img.description || 'No description available'}
-    </p>
-  </div>
-</div>`;
-    
-    processed = processed.replace(standaloneRegex, standaloneImageHtml);
-  });
+  for (const line of lines) {
+    // Check if this line contains image references
+    const imageMatches = line.match(/\[IMAGE:(\d+)\]/g);
+    if (imageMatches) {
+      // If we have accumulated content without images, save it as a full-width section
+      if (currentSection.content && currentSection.images.length === 0) {
+        sections.push({ ...currentSection });
+        currentSection = { content: '', images: [] };
+      }
+      
+      // Add the line to current section and track image numbers
+      currentSection.content += (currentSection.content ? '\n' : '') + line;
+      imageMatches.forEach(match => {
+        const imageNum = parseInt(match.match(/\d+/)?.[0] || '0');
+        if (!currentSection.images.includes(imageNum)) {
+          currentSection.images.push(imageNum);
+        }
+      });
+    } else {
+      // Regular text line
+      currentSection.content += (currentSection.content ? '\n' : '') + line;
+    }
+  }
   
-  return processed;
+  // Don't forget the last section
+  if (currentSection.content) {
+    sections.push(currentSection);
+  }
+
+  // Render each section
+  return sections.map(section => {
+    if (section.images.length === 0) {
+      // Full-width section for text without images
+      return `<div style="white-space: pre-wrap; line-height: 1.6; margin-bottom: 2rem;">${section.content}</div>`;
+    } else {
+      // 2-column section for text with images
+      const cleanedText = section.content.replace(/\s*\[IMAGE:\d+\]/g, '');
+      const sectionImages = section.images
+        .map(imageNum => images[imageNum - 1])
+        .filter(img => img); // Remove undefined images
+      
+      const textColumn = `<div style="flex: 1; padding-right: 2rem; white-space: pre-wrap; line-height: 1.6;">${cleanedText}</div>`;
+      
+      const imageColumn = sectionImages.length > 0 ? `
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 1.5rem;">
+          ${sectionImages.map((img, index) => {
+            const originalIndex = images.findIndex(i => i.id === img.id);
+            return `
+              <div style="text-align: center;">
+                <img src="${img.url}" alt="${img.description || 'Report image'}" 
+                     style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 0.5rem;" />
+                <p style="font-size: 0.75rem; color: #666; margin: 0; font-style: italic; text-align: left;">
+                  <strong>Photo ${originalIndex + 1}:</strong> ${img.description || 'No description available'}
+                </p>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      ` : '';
+      
+      return `
+        <div style="display: flex; gap: 2rem; align-items: flex-start; margin-bottom: 2rem;">
+          ${textColumn}
+          ${imageColumn}
+        </div>
+      `;
+    }
+  }).join('');
 };
 
 export default function ReportEditor() {

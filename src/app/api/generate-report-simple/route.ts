@@ -13,6 +13,41 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+// Helper function to resize image
+async function resizeImageForAI(imageUrl: string, maxWidth: number = 1024, maxHeight: number = 1024, quality: number = 0.8): Promise<string> {
+  try {
+    // Fetch the original image
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: ${response.statusText}`);
+    }
+    
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    
+    // Import sharp dynamically (install with: npm install sharp @types/sharp)
+    const sharp = require('sharp');
+    
+    // Resize and compress the image
+    const resizedImageBuffer = await sharp(buffer)
+      .resize(maxWidth, maxHeight, { 
+        fit: 'inside', 
+        withoutEnlargement: true 
+      })
+      .jpeg({ quality: Math.round(quality * 100) })
+      .toBuffer();
+    
+    // Convert to base64 data URL
+    const base64Image = resizedImageBuffer.toString('base64');
+    return `data:image/jpeg;base64,${base64Image}`;
+    
+  } catch (error) {
+    console.error('Error resizing image:', error);
+    // Fallback to original URL if resizing fails
+    return imageUrl;
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { bulletPoints, contractName, location, reportId, images } = await req.json();
@@ -36,6 +71,17 @@ export async function POST(req: NextRequest) {
     }
 
     console.log('images to use:', imagesToUse.length, 'images');
+
+    // Resize images for AI processing
+    console.log('Resizing images for AI processing...');
+    const resizedImages = await Promise.all(
+      imagesToUse.map(async (img, index) => {
+        console.log(`Resizing image ${index + 1}/${imagesToUse.length}`);
+        const resizedUrl = await resizeImageForAI(img.url, 1024, 1024, 0.7);
+        return { ...img, url: resizedUrl };
+      })
+    );
+    console.log('Image resizing completed');
 
     // Create a prompt for GPT
 
@@ -65,7 +111,7 @@ export async function POST(req: NextRequest) {
       - Right column: Corresponding images
 
     Each photo must be referenced using the placeholder format [IMAGE:X], where X is the photo number (e.g., [IMAGE:1], [IMAGE:2], etc.).
-      - Each photo must be referenced exactly once.
+      - Each photo must be referenced and placed in the reportexactly once.
       - Place the placeholder where the image should appear in the report.
 
     For each image:
@@ -93,10 +139,15 @@ export async function POST(req: NextRequest) {
 
     ---
 
+    BULLET POINT OBSERVATIONS:
+    ${bulletPoints}
+
+    ---
+
     Start writing the report only after interpreting and organizing the observations and photo data in a meaningful way.
     `;
 
-    console.log('Generated prompt:', prompt);
+    console.log('Generated prompt');
 
 
     //### Passing images  and prompt to the agent ###
@@ -106,7 +157,7 @@ export async function POST(req: NextRequest) {
         content: [
           { type: 'text', text: prompt },
           // Add each image with its description
-          ...imagesToUse.flatMap((img, index) => [
+          ...resizedImages.flatMap((img, index) => [
             // First add the description as text
             {
               type: 'text' as const,
@@ -117,7 +168,7 @@ export async function POST(req: NextRequest) {
               type: 'image_url' as const,
               image_url: {
                 url: img.url,
-                detail: 'auto' as const,
+                detail: 'low' as const, // Use 'low' detail for better performance with many images
               },
             }
           ])
@@ -134,7 +185,7 @@ export async function POST(req: NextRequest) {
         if (item.type === 'text') {
           console.log(`Content ${index}: TEXT - ${item.text.substring(0, 100)}...`);
         } else if (item.type === 'image_url') {
-          console.log(`Content ${index}: IMAGE - URL: ${item.image_url.url.substring(0, 50)}...`);
+          console.log(`Content ${index}: IMAGE - Detail: ${item.image_url.detail}`);
         }
       });
     } else {
@@ -142,13 +193,8 @@ export async function POST(req: NextRequest) {
     }
     
     // Call OpenAI API
-    // const response = await openai.chat.completions.create({
-    //   model: 'gpt-4o',
-    //   messages: [{ role: 'user', content: prompt }],
-    //   temperature: 0.7,
-    // });
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-4o-mini',
       messages: messages,
       temperature: 0.7,
     });
@@ -158,7 +204,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       generatedContent,
-      images: imagesToUse, // Return the images array so frontend can map placeholders to actual images
+      images: imagesToUse, // Return the original images array so frontend can map placeholders to actual images
       imagesUsed: imagesToUse.length
     });
   } catch (error: any) {

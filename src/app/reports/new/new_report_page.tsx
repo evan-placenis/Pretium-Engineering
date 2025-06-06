@@ -92,45 +92,7 @@ export default function NewReport() {
     loadSelectedImages();
   }, [selectedImageIds, projectId]);
 
-  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files) return;
 
-    for (const file of Array.from(files)) {
-      if (!file.type.startsWith('image/')) {
-        setError('Please upload only image files');
-        return;
-      }
-      // Upload to Supabase Storage
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Date.now()}-${Math.random()}.${fileExt}`;
-      const filePath = fileName;
-      const { data, error: uploadError } = await supabase.storage
-        .from('reports-images')
-        .upload(filePath, file);
-      if (uploadError) {
-        setError('Error uploading image');
-        continue;
-      }
-      // Get signed URL (valid for 8 hours)
-      const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-        .from('reports-images')
-        .createSignedUrl(filePath, 60 * 60 * 8);
-      if (signedUrlError || !signedUrlData) {
-        setError('Error generating image URL');
-        continue;
-      }
-      setAllImages(prev => [
-        ...prev,
-        {
-          id: filePath,
-          url: signedUrlData.signedUrl,
-          tag: 'overview',
-          description: ''
-        }
-      ]);
-    }
-  };
 
   const handleImportProjectImages = async () => {
     if (!projectId) return;
@@ -278,20 +240,11 @@ export default function NewReport() {
           </div>
         </header>
         
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
-          <div>
-            <h1 style={{ marginTop: "1.5rem", marginBottom: "0.5rem" }}>New Report for {project.name}</h1>
-            <p className="text-secondary">
-              Location: {project.location}
-            </p>
-          </div>
-          <button
-            onClick={generateReport}
-            disabled={loading || !bulletPoints.trim()}
-            className="btn btn-primary"
-          >
-            {loading ? 'Generating Report...' : 'Generate Report'}
-          </button>
+        <div style={{ marginBottom: "1.5rem" }}>
+          <h1 style={{ marginTop: "1.5rem", marginBottom: "0.5rem" }}>New Report for {project.name}</h1>
+          <p className="text-secondary">
+            Location: {project.location}
+          </p>
         </div>
 
         {error && (
@@ -304,15 +257,6 @@ export default function NewReport() {
           <div className="card-body">
             <h3 style={{ marginBottom: "1rem" }}>Report Images</h3>
             <div style={{ marginBottom: "1rem", display: 'flex', gap: '1rem' }}>
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handleImageUpload}
-                style={{ display: 'none' }}
-                id="image-upload"
-              />
-              
               <button 
                 type="button"
                 onClick={() => router.push(`/projects/${projectId}/images?mode=select&returnTo=reports`)}
@@ -321,9 +265,6 @@ export default function NewReport() {
               >
                 Select Photos
               </button>
-              <label htmlFor="image-upload" className="btn btn-secondary">
-                Import From Local Files
-              </label>
             </div>
 
             {allImages.length > 0 && (
@@ -467,6 +408,17 @@ export default function NewReport() {
               </div>
             )}
           </div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "center", marginTop: "2rem", marginBottom: "2rem" }}>
+          <button
+            onClick={generateReport}
+            disabled={loading || !bulletPoints.trim()}
+            className="btn btn-primary"
+            style={{ fontSize: "1.125rem", padding: "0.75rem 2rem" }}
+          >
+            {loading ? 'Generating Report...' : 'Generate Report'}
+          </button>
         </div>
       </div>
     </>

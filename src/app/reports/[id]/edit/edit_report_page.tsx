@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Project, Report, ChatMessage, ReportImage } from '@/lib/supabase';
 import { createWordDocumentWithImages} from '@/lib/word-utils';
@@ -9,81 +9,81 @@ import { useChatMessages } from '@/lib/chat-utils';
 
 /**
  * Process content to create mixed layout: full-width for text without images, 2-column for sections with images
+ * Each image is placed directly beside the paragraph that references it
  */
 const processContentWithImages = (rawContent: string, images: ReportImage[]): string => {
   if (images.length === 0) {
     return `<div style="white-space: pre-wrap; line-height: 1.6;">${rawContent}</div>`;
   }
 
-  // Split content into sections and track which images are referenced where
-  const lines = rawContent.split('\n');
-  const sections: { content: string; images: number[] }[] = [];
-  let currentSection = { content: '', images: [] as number[] };
+  // Split content into paragraphs and process each one
+  const paragraphs = rawContent.split(/\n\s*\n/);
   
-  for (const line of lines) {
-    // Check if this line contains image references
-    const imageMatches = line.match(/\[IMAGE:(\d+)\]/g);
-    if (imageMatches) {
-      // If we have accumulated content without images, save it as a full-width section
-      if (currentSection.content && currentSection.images.length === 0) {
-        sections.push({ ...currentSection });
-        currentSection = { content: '', images: [] };
+  return paragraphs.map(paragraph => {
+    const imageMatches = paragraph.match(/\[IMAGE:(\d+)\]/g);
+    
+    if (!imageMatches) {
+      // Full-width paragraph with no images
+      return `<div style="white-space: pre-wrap; line-height: 1.6; margin-bottom: 1.5rem;">${paragraph}</div>`;
+    }
+    
+    // Process paragraph with images - create one row per image reference
+    const imageNumbers = imageMatches.map(match => {
+      return parseInt(match.match(/\d+/)?.[0] || '0');
+    });
+    
+    // For paragraphs with multiple images, we'll show the text with each image separately
+    if (imageNumbers.length === 1) {
+      // Single image case - simple two column layout
+      const imageNum = imageNumbers[0];
+      const img = images[imageNum - 1];
+      const cleanedText = paragraph.replace(/\s*\[IMAGE:\d+\]/g, '');
+      
+      if (!img) {
+        return `<div style="white-space: pre-wrap; line-height: 1.6; margin-bottom: 1.5rem;">${cleanedText}</div>`;
       }
       
-      // Add the line to current section and track image numbers
-      currentSection.content += (currentSection.content ? '\n' : '') + line;
-      imageMatches.forEach(match => {
-        const imageNum = parseInt(match.match(/\d+/)?.[0] || '0');
-        if (!currentSection.images.includes(imageNum)) {
-          currentSection.images.push(imageNum);
-        }
-      });
-    } else {
-      // Regular text line
-      currentSection.content += (currentSection.content ? '\n' : '') + line;
-    }
-  }
-  
-  // Don't forget the last section
-  if (currentSection.content) {
-    sections.push(currentSection);
-  }
-
-  // Render each section
-  return sections.map(section => {
-    if (section.images.length === 0) {
-      // Full-width section for text without images
-      return `<div style="white-space: pre-wrap; line-height: 1.6; margin-bottom: 2rem;">${section.content}</div>`;
-    } else {
-      // 2-column section for text with images
-      const cleanedText = section.content.replace(/\s*\[IMAGE:\d+\]/g, '');
-      const sectionImages = section.images
-        .map(imageNum => images[imageNum - 1])
-        .filter(img => img); // Remove undefined images
-      
-      const textColumn = `<div style="flex: 1; padding-right: 2rem; white-space: pre-wrap; line-height: 1.6;">${cleanedText}</div>`;
-      
-      const imageColumn = sectionImages.length > 0 ? `
-        <div style="flex: 1; display: flex; flex-direction: column; gap: 1.5rem;">
-          ${sectionImages.map((img, index) => {
-            const originalIndex = images.findIndex(i => i.id === img.id);
-            return `
-              <div style="text-align: center;">
-                <img src="${img.url}" alt="${img.description || 'Report image'}" 
-                     style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 0.5rem;" />
-                <p style="font-size: 0.75rem; color: #666; margin: 0; font-style: italic; text-align: left;">
-                  <strong>Photo ${originalIndex + 1}:</strong> ${img.description || 'No description available'}
-                </p>
-              </div>
-            `;
-          }).join('')}
+      return `
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; margin-bottom: 2rem;">
+          <div style="white-space: pre-wrap; line-height: 1.6;">
+            ${cleanedText}
+          </div>
+          <div style="text-align: center;">
+            <img src="${img.url}" alt="${img.description || 'Report image'}" 
+                 style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 0.5rem;" />
+            <p style="font-size: 0.75rem; color: #666; margin: 0; font-style: italic; text-align: left;">
+              <strong>Photo ${imageNum}:</strong> ${img.description || 'No description available'}
+            </p>
+          </div>
         </div>
-      ` : '';
+      `;
+    } else {
+      // Multiple images case - stack them more compactly
+      const cleanedText = paragraph.replace(/\s*\[IMAGE:\d+\]/g, '');
+      const validImages = imageNumbers
+        .map(num => ({ num, img: images[num - 1] }))
+        .filter(({ img }) => img);
+      
+      if (validImages.length === 0) {
+        return `<div style="white-space: pre-wrap; line-height: 1.6; margin-bottom: 1.5rem;">${cleanedText}</div>`;
+      }
       
       return `
-        <div style="display: flex; gap: 2rem; align-items: flex-start; margin-bottom: 2rem;">
-          ${textColumn}
-          ${imageColumn}
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; margin-bottom: 2rem;">
+          <div style="white-space: pre-wrap; line-height: 1.6;">
+            ${cleanedText}
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 1rem;">
+            ${validImages.map(({ num, img }) => `
+              <div style="text-align: center;">
+                <img src="${img.url}" alt="${img.description || 'Report image'}" 
+                     style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 0.3rem;" />
+                <p style="font-size: 0.7rem; color: #666; margin: 0; font-style: italic; text-align: left;">
+                  <strong>Photo ${num}:</strong> ${img.description || 'No description available'}
+                </p>
+              </div>
+            `).join('')}
+          </div>
         </div>
       `;
     }
@@ -103,10 +103,16 @@ export default function ReportEditor() {
   const [error, setError] = useState<string | null>(null);
   const [showChat, setShowChat] = useState(true);
   const [user, setUser] = useState<any>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingStatus, setStreamingStatus] = useState('');
+  const [streamingSections, setStreamingSections] = useState<string[]>([]);
+  const [combinedDraft, setCombinedDraft] = useState('');
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const reportId = params.id as string;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
   // Use the chat hook
   const {
@@ -134,7 +140,7 @@ export default function ReportEditor() {
     // Add a class to the document body for better styling
     document.body.classList.add('word-editor-page');
     
-    // Add CSS animation for typing dots
+    // Add CSS animation for typing dots and streaming indicator
     const style = document.createElement('style');
     style.textContent = `
       @keyframes typing-dot {
@@ -143,6 +149,20 @@ export default function ReportEditor() {
           transform: scale(0.8);
         }
         30% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+      @keyframes pulse {
+        0% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.5;
+          transform: scale(1.2);
+        }
+        100% {
           opacity: 1;
           transform: scale(1);
         }
@@ -167,7 +187,7 @@ export default function ReportEditor() {
     }
   }, [content, reportImages]);
 
-  // Check if user is authenticated
+  // Check if user is authenticated and handle streaming
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -216,6 +236,15 @@ export default function ReportEditor() {
         } else {
           setReportImages(imagesData || []);
         }
+
+        // Check if we should start streaming
+        const isStreamingMode = searchParams.get('streaming') === 'true';
+        const modelUsed = searchParams.get('model');
+        
+        if (isStreamingMode) {
+          console.log('Starting streaming mode for report:', reportId);
+          startStreaming(reportId, modelUsed);
+        }
       } catch (error: any) {
         console.error('Error fetching data:', error);
         setError(error.message);
@@ -224,7 +253,116 @@ export default function ReportEditor() {
 
     checkAuth();
     fetchData();
-  }, [reportId, router]);
+
+    // Cleanup streaming connection on unmount
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+    };
+  }, [reportId, router, searchParams]);
+
+  // Start streaming connection
+  const startStreaming = (reportId: string, model: string | null) => {
+    setIsStreaming(true);
+    setStreamingStatus('Connecting to AI model...');
+    setStreamingSections([]);
+    setCombinedDraft('');
+
+    // EventSource doesn't support POST, so we need to trigger the stream differently
+    // The streaming should already be started from the new report page
+    // Here we just need to listen for database updates and show progress
+    pollForUpdates(reportId);
+  };
+
+    // Poll for database updates during streaming
+  const pollForUpdates = async (reportId: string) => {
+    let pollCount = 0;
+    const maxPolls = 180; // 3 minutes max
+    
+    console.log('Starting polling for report:', reportId);
+    
+    const pollInterval = setInterval(async () => {
+      try {
+        pollCount++;
+        console.log(`Polling attempt ${pollCount}/${maxPolls} for report ${reportId}`);
+        
+        if (pollCount > maxPolls) {
+          clearInterval(pollInterval);
+          setIsStreaming(false);
+          setStreamingStatus('Generation timeout - please refresh and try again');
+          setError('Report generation timed out');
+          return;
+        }
+
+        // Fetch the current report content
+        const { data: reportData, error } = await supabase
+          .from('reports')
+          .select('generated_content, updated_at')
+          .eq('id', reportId)
+          .single();
+
+        if (error) {
+          console.error('Error polling for updates:', error);
+          return;
+        }
+
+        if (reportData?.generated_content) {
+          const currentContent = reportData.generated_content;
+          console.log('Poll result - content length:', currentContent.length, 'has processing marker:', currentContent.includes('[PROCESSING IN PROGRESS...]'));
+          
+          // Update content regardless (even if still processing)
+          setContent(currentContent);
+          
+          // Check if generation is complete (no longer has "PROCESSING IN PROGRESS")
+          if (!currentContent.includes('[PROCESSING IN PROGRESS...]')) {
+            // Generation is complete
+            console.log('Generation complete - stopping polling');
+            setIsStreaming(false);
+            setStreamingStatus('Report generation complete!');
+            clearInterval(pollInterval);
+            
+            // Clear URL parameters
+            const newUrl = new URL(window.location.href);
+            newUrl.searchParams.delete('streaming');
+            newUrl.searchParams.delete('model');
+            window.history.replaceState({}, '', newUrl.toString());
+            
+            setTimeout(() => {
+              setStreamingStatus('');
+            }, 3000);
+          } else {
+            // Still processing, update status based on content
+            if (currentContent.includes('Starting report generation')) {
+              setStreamingStatus('Initializing generation...');
+            } else if (currentContent.includes('Images resized')) {
+              setStreamingStatus('Images processed, generating content...');
+            } else if (currentContent.includes('Processing batch')) {
+              const batchMatch = currentContent.match(/Processing batch (\d+)\/(\d+)/);
+              if (batchMatch) {
+                setStreamingStatus(`Processing batch ${batchMatch[1]} of ${batchMatch[2]}...`);
+              } else {
+                setStreamingStatus('Generating report sections...');
+              }
+            } else if (currentContent.includes('Starting final review')) {
+              setStreamingStatus('Reviewing and polishing report...');
+            } else {
+              setStreamingStatus('Generating report content...');
+            }
+          }
+        } else {
+          console.log('No content yet in database');
+          setStreamingStatus('Waiting for generation to start...');
+        }
+      } catch (error) {
+        console.error('Error during polling:', error);
+      }
+    }, 2000); // Poll every 2 seconds
+
+    // Store interval reference for cleanup
+    eventSourceRef.current = { close: () => clearInterval(pollInterval) } as any;
+  };
 
   // Focus textarea and adjust height on initial load and when content changes
   useEffect(() => {
@@ -308,19 +446,31 @@ export default function ReportEditor() {
           <div>
             <button 
               onClick={saveReport}
-              disabled={isSaving}
+              disabled={isSaving || isStreaming}
               style={{ 
                 background: 'transparent', 
                 border: 'none', 
                 color: 'white', 
                 cursor: 'pointer',
-                opacity: isSaving ? 0.7 : 1
+                opacity: (isSaving || isStreaming) ? 0.7 : 1
               }}
             >
               {isSaving ? 'Saving...' : 'Save'}
             </button>
             {saveStatus && <span style={{ marginLeft: '0.5rem', fontSize: '0.875rem' }}>{saveStatus}</span>}
           </div>
+          {isStreaming && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <div style={{
+                width: '12px',
+                height: '12px',
+                borderRadius: '50%',
+                backgroundColor: '#4CAF50',
+                animation: 'pulse 1.5s ease-in-out infinite'
+              }} />
+              <span style={{ fontSize: '0.875rem' }}>{streamingStatus}</span>
+            </div>
+          )}
           <div style={{ marginLeft: '1rem' }}>
             <button 
               onClick={async () => {
@@ -457,21 +607,62 @@ export default function ReportEditor() {
                   whiteSpace: 'pre-wrap',
                   overflowWrap: 'break-word',
                   color: '#333',
-                  textAlign: 'left'
+                  textAlign: 'left',
+                  opacity: isStreaming && !content ? 0.3 : 1
                 }}
                 dangerouslySetInnerHTML={{ __html: processedContent }}
               />
+              
+              {/* Loading Overlay for Streaming */}
+              {isStreaming && !content && (
+                <div style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: "rgba(255, 255, 255, 0.95)",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  zIndex: 5,
+                  minHeight: "400px"
+                }}>
+                  <div style={{
+                    width: "60px",
+                    height: "60px",
+                    border: "5px solid #f3f3f3",
+                    borderTop: "5px solid #2b579a",
+                    borderRadius: "50%",
+                    animation: "spin 1s linear infinite",
+                    marginBottom: "1rem"
+                  }} />
+                  <p style={{ fontSize: "1.125rem", fontWeight: 500, marginBottom: "0.5rem" }}>
+                    Generating Your Report
+                  </p>
+                  <p style={{ color: "#666", maxWidth: "400px", textAlign: "center", fontSize: "0.875rem" }}>
+                    {streamingStatus || 'Initializing AI generation...'}
+                  </p>
+                  <p style={{ color: "#888", fontSize: "0.75rem", marginTop: "1rem", textAlign: "center" }}>
+                    This may take 2-3 minutes. Content will appear as sections are completed.
+                  </p>
+                </div>
+              )}
               
               {/* Hidden textarea for editing */}
               <textarea
                 ref={textareaRef}
                 value={content}
                 onChange={(e) => {
-                  setContent(e.target.value);
-                  // Auto-expand immediately on input
-                  e.target.style.height = 'auto';
-                  e.target.style.height = e.target.scrollHeight + 'px';
+                  if (!isStreaming) {
+                    setContent(e.target.value);
+                    // Auto-expand immediately on input
+                    e.target.style.height = 'auto';
+                    e.target.style.height = e.target.scrollHeight + 'px';
+                  }
                 }}
+                disabled={isStreaming}
                 className="word-editor-textarea"
                 style={{
                   position: 'absolute',
@@ -492,7 +683,8 @@ export default function ReportEditor() {
                   overflow: 'hidden',
                   color: 'transparent',
                   background: 'transparent',
-                  zIndex: 2
+                  zIndex: 2,
+                  cursor: isStreaming ? 'wait' : 'text'
                 }}
               />
               

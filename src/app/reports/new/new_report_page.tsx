@@ -6,6 +6,15 @@ import { supabase, Project } from '@/lib/supabase';
 import Link from 'next/link';
 import { Document, Packer, Paragraph, ImageRun, HeadingLevel, AlignmentType } from 'docx';
 
+// Define available models and their corresponding API routes
+const AVAILABLE_MODELS = [
+  { id: 'advanced-streaming', name: 'Advanced Model (Streaming)', route: '/api/models/generate-report-advanced-stream', streamRoute: '/api/models/generate-report-advanced-stream', description: 'Real-time generation with live updates', supportsStreaming: true },
+  { id: 'advanced', name: 'Advanced Model (Standard)', route: '/api/models/generate-report-advanced', description: 'Higher quality, slower processing', supportsStreaming: false },
+  { id: 'lightweight', name: 'Lightweight Model', route: '/api/models/generate-report-lite', description: 'Faster processing, basic quality', supportsStreaming: false },
+  { id: 'custom', name: 'Custom Fine-tuned', route: '/api/models/generate-report-custom', description: 'Your fine-tuned model', supportsStreaming: false },
+  { id: 'standard', name: 'Standard Model', route: '/api/generate-report-simple', description: 'Balanced performance and speed', supportsStreaming: false },
+];
+
 export default function NewReport() {
   const [project, setProject] = useState<Project | null>(null);
   const [bulletPoints, setBulletPoints] = useState<string>('');
@@ -13,6 +22,10 @@ export default function NewReport() {
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
   const [allImages, setAllImages] = useState<{ id: string; url: string; tag: 'overview' | 'deficiency' | null; description: string }[]>([]);
+  const [selectedModel, setSelectedModel] = useState(AVAILABLE_MODELS[0].id);
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<any>(null);
+  const [showDebugInfo, setShowDebugInfo] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get('project_id');
@@ -53,6 +66,22 @@ export default function NewReport() {
     getUser();
     fetchProject();
   }, [projectId, router]);
+
+  // Handle clicking outside dropdown to close it
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showModelDropdown) {
+        const target = event.target as Element;
+        const dropdown = target.closest('[data-dropdown="model-selector"]');
+        if (!dropdown) {
+          setShowModelDropdown(false);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showModelDropdown]);
 
   // Load selected images when returning from image selection
   useEffect(() => {
@@ -155,10 +184,52 @@ export default function NewReport() {
       if (saveError) throw saveError;
       console.log('Created report record:', reportData);
 
-      // Now generate the report with the report ID
-      console.log('Calling generate-report API with reportId:', reportData.id);
+      // Insert all images into report_images with report_id first
+      await supabase.from('report_images').insert(allImages.map(img => ({
+        report_id: reportData.id,
+        url: img.url,
+        tag: img.tag,
+        description: img.description,
+        user_id: user.id // Add user tracking
+      })));
 
-      const response = await fetch('/api/generate-report-simple', { // WHERE YOU CHANGE THE API CALL
+      const selectedModelConfig = AVAILABLE_MODELS.find(model => model.id === selectedModel) || AVAILABLE_MODELS[0];
+      console.log('Starting report generation with reportId:', reportData.id, 'using model:', selectedModelConfig.name);
+
+      // Check if model supports streaming
+      if (selectedModelConfig.supportsStreaming && selectedModelConfig.streamRoute) {
+        // For streaming models, redirect immediately and let the edit page handle the streaming
+        router.push(`/reports/${reportData.id}/edit?streaming=true&model=${selectedModel}`);
+        
+        // Start the streaming generation in the background
+        fetch(selectedModelConfig.streamRoute, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            bulletPoints,
+            projectName: project?.name,
+            contractName: project?.["Client Name"], // Also send as contractName for backend compatibility
+            location: project?.location,
+            reportId: reportData.id,
+            images: allImages,
+            modelType: selectedModel
+          }),
+        }).then(response => {
+          console.log('Streaming API response:', response.status);
+          return response.json();
+        }).then(data => {
+          console.log('Streaming API response data:', data);
+        }).catch(error => {
+          console.error('Streaming generation failed:', error);
+        });
+        
+        return; // Exit early for streaming models
+      }
+
+      // For non-streaming models, use the original approach
+      const response = await fetch(selectedModelConfig.route, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -168,7 +239,8 @@ export default function NewReport() {
           projectName: project?.name,
           location: project?.location,
           reportId: reportData.id,
-          images: allImages // Send the images we just uploaded
+          images: allImages,
+          modelType: selectedModel
         }),
       });
 
@@ -177,7 +249,18 @@ export default function NewReport() {
         throw new Error(errorData.error || 'Failed to generate report');
       }
 
-      const { generatedContent, images: responseImages } = await response.json();
+      const responseData = await response.json();
+      const { generatedContent, images: responseImages, batchDetails, combinedDraft, processingStats } = responseData;
+      
+      // Store debug information if available
+      if (batchDetails || combinedDraft || processingStats) {
+        setDebugInfo({
+          batchDetails,
+          combinedDraft,
+          processingStats,
+          modelUsed: selectedModelConfig.name
+        });
+      }
 
       // Update the report with the generated content
       const { error: updateError } = await supabase
@@ -186,15 +269,6 @@ export default function NewReport() {
         .eq('id', reportData.id);
 
       if (updateError) throw updateError;
-
-      // Insert all images into report_images with report_id
-      await supabase.from('report_images').insert(allImages.map(img => ({
-        report_id: reportData.id,
-        url: img.url,
-        tag: img.tag,
-        description: img.description,
-        user_id: user.id // Add user tracking
-      })));
 
       // Redirect to the report editor
       router.push(`/reports/${reportData.id}/edit`);
@@ -255,7 +329,115 @@ export default function NewReport() {
 
         <div className="card" style={{ marginBottom: "1.5rem" }}>
           <div className="card-body">
-            <h3 style={{ marginBottom: "1rem" }}>Report Images</h3>
+            <h3 style={{ marginBottom: "1rem" }}>Report Configuration</h3>
+            
+            {/* Model Selection Dropdown */}
+            <div style={{ marginBottom: "1.5rem" }}>
+              <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "500" }}>
+                AI Model Selection
+              </label>
+              <div style={{ position: "relative", display: "inline-block" }} data-dropdown="model-selector">
+                <button
+                  type="button"
+                  onClick={() => setShowModelDropdown(!showModelDropdown)}
+                  className="btn btn-outline"
+                  style={{ 
+                    display: "flex", 
+                    alignItems: "center", 
+                    gap: "0.5rem",
+                    minWidth: "250px",
+                    justifyContent: "space-between"
+                  }}
+                  disabled={loading}
+                >
+                  <span>
+                    {AVAILABLE_MODELS.find(model => model.id === selectedModel)?.name || 'Select Model'}
+                  </span>
+                  <span style={{ fontSize: "0.75rem" }}>▼</span>
+                </button>
+                
+                {showModelDropdown && (
+                  <div 
+                    style={{
+                      position: "absolute",
+                      top: "100%",
+                      left: 0,
+                      right: 0,
+                      backgroundColor: "white",
+                      border: "1px solid #d1d5db",
+                      borderRadius: "0.5rem",
+                      boxShadow: "0 10px 25px rgba(0, 0, 0, 0.15)",
+                      zIndex: 1000,
+                      marginTop: "0.25rem",
+                      maxHeight: "200px",
+                      overflowY: "scroll",
+                      overflowX: "hidden"
+                    }}
+                    onWheel={(e) => e.stopPropagation()}
+                  >
+                    {AVAILABLE_MODELS.map((model, index) => (
+                      <button
+                        key={model.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedModel(model.id);
+                          setShowModelDropdown(false);
+                        }}
+                        style={{
+                          width: "100%",
+                          padding: "0.875rem",
+                          textAlign: "left",
+                          border: "none",
+                          backgroundColor: selectedModel === model.id ? "#e3f2fd" : "transparent",
+                          cursor: "pointer",
+                          borderBottom: index < AVAILABLE_MODELS.length - 1 ? "1px solid #f3f4f6" : "none",
+                          transition: "background-color 0.15s ease"
+                        }}
+                        onMouseEnter={(e) => {
+                          if (selectedModel !== model.id) {
+                            e.currentTarget.style.backgroundColor = "#f8fafc";
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (selectedModel !== model.id) {
+                            e.currentTarget.style.backgroundColor = "transparent";
+                          }
+                        }}
+                      >
+                        <div style={{ 
+                          fontWeight: "500", 
+                          marginBottom: "0.25rem",
+                          color: selectedModel === model.id ? "#1565c0" : "#374151"
+                        }}>
+                          {model.name}
+                          {selectedModel === model.id && (
+                            <span style={{ 
+                              marginLeft: "0.5rem", 
+                              color: "#1565c0",
+                              fontSize: "0.875rem"
+                            }}>
+                              ✓
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ 
+                          fontSize: "0.75rem", 
+                          color: selectedModel === model.id ? "#1976d2" : "#6b7280",
+                          lineHeight: "1.3"
+                        }}>
+                          {model.description}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
+                Choose the AI model for generating your report. Different models offer varying levels of quality and processing speed.
+              </p>
+            </div>
+
+            <h4 style={{ marginBottom: "1rem" }}>Report Images</h4>
             <div style={{ marginBottom: "1rem", display: 'flex', gap: '1rem' }}>
               <button 
                 type="button"
@@ -346,6 +528,81 @@ export default function NewReport() {
           </div>
         </div>
 
+        {debugInfo && (
+          <div className="card" style={{ marginBottom: "1.5rem" }}>
+            <div className="card-body">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                <h3>Debug Information</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowDebugInfo(!showDebugInfo)}
+                  className="btn btn-outline btn-sm"
+                >
+                  {showDebugInfo ? 'Hide Details' : 'Show Details'}
+                </button>
+              </div>
+              
+              {debugInfo.processingStats && (
+                <div style={{ marginBottom: "1rem", padding: "0.75rem", backgroundColor: "#f8f9fa", borderRadius: "0.25rem" }}>
+                  <strong>Processing Stats:</strong>
+                  <ul style={{ margin: "0.5rem 0 0 0", listStyle: "none", padding: "0" }}>
+                    <li>Model: {debugInfo.modelUsed}</li>
+                    <li>Total Batches: {debugInfo.processingStats.totalBatches}</li>
+                    <li>Total Images: {debugInfo.processingStats.totalImages}</li>
+                    <li>Review Time: {debugInfo.processingStats.reviewTime}</li>
+                    <li>Total Processing Time: {debugInfo.processingStats.totalProcessingTime}</li>
+                  </ul>
+                </div>
+              )}
+
+              {showDebugInfo && debugInfo.batchDetails && (
+                <div style={{ marginBottom: "1rem" }}>
+                  <h4>Batch Processing Details:</h4>
+                  {debugInfo.batchDetails.map((batch: any, index: number) => (
+                    <div key={index} style={{ marginBottom: "1rem", padding: "0.75rem", border: "1px solid #dee2e6", borderRadius: "0.25rem" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                        <strong>Batch {batch.batchNumber}</strong>
+                        <span style={{ fontSize: "0.875rem", color: "#6c757d" }}>
+                          {batch.imageCount} images • {batch.processingTime}
+                        </span>
+                      </div>
+                      <div style={{ 
+                        maxHeight: "200px", 
+                        overflowY: "auto", 
+                        fontSize: "0.875rem", 
+                        backgroundColor: "#f8f9fa", 
+                        padding: "0.5rem",
+                        borderRadius: "0.25rem",
+                        whiteSpace: "pre-wrap"
+                      }}>
+                        {batch.content}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {showDebugInfo && debugInfo.combinedDraft && (
+                <div style={{ marginBottom: "1rem" }}>
+                  <h4>Combined Draft (Before Final Review):</h4>
+                  <div style={{ 
+                    maxHeight: "300px", 
+                    overflowY: "auto", 
+                    fontSize: "0.875rem", 
+                    backgroundColor: "#f8f9fa", 
+                    padding: "0.75rem",
+                    borderRadius: "0.25rem",
+                    whiteSpace: "pre-wrap",
+                    border: "1px solid #dee2e6"
+                  }}>
+                    {debugInfo.combinedDraft}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="card" style={{ minHeight: "400px", position: "relative" }}>
           <div className="card-body">
             <p style={{ fontSize: "0.875rem", marginBottom: "0.75rem" }} className="text-secondary">
@@ -410,7 +667,10 @@ export default function NewReport() {
           </div>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "center", marginTop: "2rem", marginBottom: "2rem" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: "2rem", marginBottom: "2rem" }}>
+          <p style={{ fontSize: "0.875rem", color: "var(--color-text-secondary)", marginBottom: "1rem" }}>
+            Using: <strong>{AVAILABLE_MODELS.find(model => model.id === selectedModel)?.name}</strong>
+          </p>
           <button
             onClick={generateReport}
             disabled={loading || !bulletPoints.trim()}

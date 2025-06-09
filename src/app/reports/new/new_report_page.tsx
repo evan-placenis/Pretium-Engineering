@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase, Project } from '@/lib/supabase';
 import Link from 'next/link';
 import { Document, Packer, Paragraph, ImageRun, HeadingLevel, AlignmentType } from 'docx';
+import ImageListView, { ImageItem } from '@/components/ImageListView';
 
 // Define available models and their corresponding API routes
 const AVAILABLE_MODELS = [
@@ -22,7 +23,7 @@ export default function NewReport() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
-  const [allImages, setAllImages] = useState<{ id: string; url: string; tag: 'overview' | 'deficiency' | null; description: string }[]>([]);
+  const [allImages, setAllImages] = useState<ImageItem[]>([]);
   const [selectedModel, setSelectedModel] = useState(AVAILABLE_MODELS[0].id);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [debugInfo, setDebugInfo] = useState<any>(null);
@@ -473,81 +474,22 @@ export default function NewReport() {
                 Select Photos
               </button>
             </div>
-
+            {/* Image List View */}
             {allImages.length > 0 && (
               <div style={{ marginBottom: "2rem" }}>
                 <h4 style={{ marginBottom: "1rem" }}>Project Images</h4>
-                {allImages.map((image, idx) => (
-                  <div key={image.id} className="card" style={{ display: 'flex', gap: '1.5rem', padding: '1rem', marginBottom: '2rem' }}>
-                    <div style={{ flex: '1', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                      <div>
-                        <textarea
-                          value={image.description || ''}
-                          onChange={(e) => {
-                            setAllImages(prev => prev.map((img, i) => i === idx ? { ...img, description: e.target.value } : img));
-                          }}
-                          placeholder="Enter notes for this image..."
-                          style={{
-                            width: '100%',
-                            minHeight: '200px',
-                            padding: '0.75rem',
-                            fontSize: '0.875rem',
-                            border: '1px solid var(--color-border)',
-                            borderRadius: '0.25rem',
-                            resize: 'vertical'
-                          }}
-                        />
-                      </div>
-                      <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.5rem' }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <input
-                            type="radio"
-                            name={`noteType-${idx}`}
-                            checked={image.tag === 'overview'}
-                            onChange={() => {
-                              setAllImages(prev => prev.map((img, i) => i === idx ? { ...img, tag: 'overview' } : img));
-                            }}
-                            style={{ margin: 0 }}
-                          />
-                          Overview
-                        </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <input
-                            type="radio"
-                            name={`noteType-${idx}`}
-                            checked={image.tag === 'deficiency'}
-                            onChange={() => {
-                              setAllImages(prev => prev.map((img, i) => i === idx ? { ...img, tag: 'deficiency' } : img));
-                            }}
-                            style={{ margin: 0 }}
-                          />
-                          Deficiency
-                        </label>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setAllImages(prev => prev.filter((_, i) => i !== idx))}
-                        className="btn btn-danger btn-sm"
-                        style={{ alignSelf: 'flex-start' }}
-                      >
-                        Remove Image
-                      </button>
-                    </div>
-                    <div style={{ flex: '1' }}>
-                      <img
-                        src={image.url}
-                        alt={image.description || 'Project image'}
-                        style={{
-                          width: '100%',
-                          height: 'auto',
-                          maxHeight: '300px',
-                          objectFit: 'contain',
-                          borderRadius: '0.25rem'
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
+                <ImageListView
+                  images={allImages}
+                  onUpdateImage={(imageId, field, value) => {
+                    setAllImages(prev => prev.map(img => 
+                      img.id === imageId ? { ...img, [field]: value } : img
+                    ));
+                  }}
+                  onRemoveImage={(imageId) => {
+                    setAllImages(prev => prev.filter(img => img.id !== imageId));
+                  }}
+                  showRotateButton={true}
+                />
               </div>
             )}
           </div>

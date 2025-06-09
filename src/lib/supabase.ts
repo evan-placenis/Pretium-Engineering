@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { TagValue } from './tagConfig';
 
 // These environment variables need to be set in .env.local
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -114,7 +115,7 @@ export type ReportImage = {
   report_id: string
   url: string;
   description: string;
-  tag: 'overview' | 'deficiency' | null;
+  tag: TagValue;
   user_id?: string;
 };
 
@@ -122,7 +123,7 @@ export type ProjectImage = {
   id: string;
   url: string;
   description: string;
-  tag: 'overview' | 'deficiency' | null;
+  tag: TagValue;
   created_at: string;
   project_id: string;
   user_id?: string;

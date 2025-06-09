@@ -2,13 +2,15 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { supabase, ProjectImage } from '@/lib/supabase';
+import ImageListView, { ImageItem } from '@/components/ImageListView';
+import { TagValue, getAllTagOptions, getTagLabel, getTagBadgeClass } from '@/lib/tagConfig';
 
 // Extended interface to track rotation and changes
 interface ExtendedProjectImage extends ProjectImage {
   rotation?: number;
   hasChanges?: boolean;
   originalDescription?: string;
-  originalTag?: 'overview' | 'deficiency' | null;
+  originalTag?: TagValue;
 }
 
 export default function ProjectImagesPage() {
@@ -28,7 +30,7 @@ export default function ProjectImagesPage() {
   const [selectedImage, setSelectedImage] = useState<ExtendedProjectImage | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [editDescription, setEditDescription] = useState('');
-  const [editTag, setEditTag] = useState<'overview' | 'deficiency' | null>(null);
+  const [editTag, setEditTag] = useState<TagValue>(null);
   const [updateLoading, setUpdateLoading] = useState(false);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string>('');
@@ -180,15 +182,8 @@ export default function ProjectImagesPage() {
   };
 
   // New functions for list view functionality
-  const rotateImage = (imageId: string) => {
-    setImages(prev => prev.map(img => 
-      img.id === imageId 
-        ? { ...img, rotation: ((img.rotation || 0) + 90) % 360 }
-        : img
-    ));
-  };
 
-  const updateImageInList = (imageId: string, field: 'description' | 'tag', value: string | 'overview' | 'deficiency' | null) => {
+  const updateImageInList = (imageId: string, field: 'description' | 'tag' | 'rotation', value: string | 'overview' | 'deficiency' | null | number) => {
     setImages(prev => prev.map(img => {
       if (img.id === imageId) {
         const updated = { ...img, [field]: value };
@@ -262,7 +257,8 @@ export default function ProjectImagesPage() {
     setDragOverIndex(index);
   };
 
-  const handleDragLeave = (e: React.DragEvent) => {
+  const handleDragLeave = (e?: React.DragEvent) => {
+    if (!e) return;
     // Only clear drag over if we're actually leaving the container
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX;
@@ -671,9 +667,12 @@ export default function ProjectImagesPage() {
                 className="form-input"
                 style={{ width: '100%' }}
               >
-                <option value="">All Tags</option>
-                <option value="overview">Overview</option>
-                <option value="deficiency">Deficiency</option>
+                <option value="">All Categories</option>
+                {getAllTagOptions().slice(1).map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -898,215 +897,37 @@ export default function ProjectImagesPage() {
             </div>
           )}
 
-          {/* List View (new - matching new_report_page layout) */}
+          {/* List View (using shared component) */}
           {viewMode === 'list' && (
-            <div>
-              {filteredImages.map((img, idx) => (
-                <div 
-                  key={img.id} 
-                  className="card" 
-                  draggable={!selectionMode}
-                  onDragStart={(e) => handleDragStart(e, idx)}
-                  onDragOver={(e) => handleDragOver(e, idx)}
-                  onDragLeave={handleDragLeave}
-                  onDrop={(e) => handleDrop(e, idx)}
-                  onDragEnd={handleDragEnd}
-                  style={{ 
-                    display: 'flex', 
-                    gap: '1.5rem', 
-                    padding: '1rem', 
-                    marginBottom: '2rem',
-                    position: 'relative',
-                    cursor: !selectionMode ? 'grab' : 'default',
-                    opacity: draggedIndex === idx ? 0.5 : 1,
-                    transform: draggedIndex === idx ? 'rotate(5deg)' : 'none',
-                    transition: draggedIndex === idx ? 'none' : 'all 0.2s ease',
-                    border: dragOverIndex === idx && draggedIndex !== idx 
-                      ? '2px dashed var(--color-primary)' 
-                      : '1px solid var(--color-border-dark)',
-                    backgroundColor: dragOverIndex === idx && draggedIndex !== idx 
-                      ? 'rgba(43, 87, 154, 0.05)' 
-                      : 'var(--color-bg-card)'
-                  }}
-                >
-                  {/* Drag Handle */}
-                  {!selectionMode && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        left: '0.5rem',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        cursor: 'grab',
-                        color: 'var(--color-text-light)',
-                        fontSize: '1.2rem',
-                        padding: '0.5rem',
-                        zIndex: 1
-                      }}
-                      title="Drag to reorder"
-                    >
-                      ⋮⋮
-                    </div>
-                  )}
-
-                  {selectionMode && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: '1rem',
-                        left: '1rem',
-                        width: '24px',
-                        height: '24px',
-                        borderRadius: '3px',
-                        border: '2px solid var(--color-primary)',
-                        backgroundColor: selectedImages.has(img.id) ? 'var(--color-primary)' : 'white',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        zIndex: 2,
-                        cursor: 'pointer'
-                      }}
-                      onClick={() => toggleImageSelection(img.id)}
-                    >
-                      {selectedImages.has(img.id) && (
-                        <span style={{ color: 'white', fontSize: '14px', fontWeight: 'bold' }}>✓</span>
-                      )}
-                    </div>
-                  )}
-                  
-                  <div style={{ 
-                    flex: '1', 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    gap: '1rem',
-                    marginLeft: !selectionMode ? '2rem' : '0' // Add margin for drag handle
-                  }}>
-                    <div>
-                      <textarea
-                        value={img.description || ''}
-                        onChange={(e) => updateImageInList(img.id, 'description', e.target.value)}
-                        placeholder="Enter notes for this image..."
-                        disabled={selectionMode}
-                        style={{
-                          width: '100%',
-                          minHeight: '200px',
-                          padding: '0.75rem',
-                          fontSize: '0.875rem',
-                          border: '1px solid var(--color-border)',
-                          borderRadius: '0.25rem',
-                          resize: 'vertical',
-                          backgroundColor: img.hasChanges ? 'rgba(255, 255, 0, 0.1)' : 'var(--color-bg)'
-                        }}
-                      />
-                    </div>
-                    
-                    <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.5rem' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <input
-                          type="radio"
-                          name={`noteType-${idx}`}
-                          checked={img.tag === 'overview'}
-                          onChange={() => updateImageInList(img.id, 'tag', 'overview')}
-                          disabled={selectionMode}
-                          style={{ margin: 0 }}
-                        />
-                        Overview
-                      </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <input
-                          type="radio"
-                          name={`noteType-${idx}`}
-                          checked={img.tag === 'deficiency'}
-                          onChange={() => updateImageInList(img.id, 'tag', 'deficiency')}
-                          disabled={selectionMode}
-                          style={{ margin: 0 }}
-                        />
-                        Deficiency
-                      </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <input
-                          type="radio"
-                          name={`noteType-${idx}`}
-                          checked={img.tag === null}
-                          onChange={() => updateImageInList(img.id, 'tag', null)}
-                          disabled={selectionMode}
-                          style={{ margin: 0 }}
-                        />
-                        No Tag
-                      </label>
-                    </div>
-                    
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                      {!selectionMode && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => rotateImage(img.id)}
-                            className="btn btn-secondary btn-sm"
-                          >
-                            🔄 Rotate
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(img.id)}
-                            className="btn btn-danger btn-sm"
-                            disabled={deleteLoading === img.id}
-                          >
-                            {deleteLoading === img.id ? 'Deleting...' : 'Delete'}
-                          </button>
-                        </>
-                      )}
-                      
-                      {img.hasChanges && (
-                        <span style={{ 
-                          fontSize: '0.75rem', 
-                          color: 'var(--color-warning)', 
-                          backgroundColor: 'rgba(255, 193, 7, 0.1)',
-                          padding: '0.25rem 0.5rem',
-                          borderRadius: '0.25rem'
-                        }}>
-                          • Unsaved changes
-                        </span>
-                      )}
-                    </div>
-                    
-                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-light)' }}>
-                      Created: {new Date(img.created_at).toLocaleDateString()}
-                      {img.user_id && (
-                        <span style={{ marginLeft: '0.5rem' }}>
-                          • {img.user_id === currentUser?.id ? (
-                            <span style={{ color: 'var(--color-primary)' }}>You</span>
-                          ) : (
-                            <span style={{ color: 'var(--color-text-lighter)' }}>Other User</span>
-                          )}
-                        </span>
-                      )}
-                      {imagesInReports.has(img.url) && (
-                        <span style={{ marginLeft: '0.5rem', color: 'var(--color-warning)' }}>
-                          • Used in Report
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div style={{ flex: '1' }}>
-                    <img
-                      src={img.url}
-                      alt={img.description || 'Project image'}
-                      style={{
-                        width: '100%',
-                        height: 'auto',
-                        maxHeight: '300px',
-                        objectFit: 'contain',
-                        borderRadius: '0.25rem',
-                        transform: `rotate(${img.rotation || 0}deg)`,
-                        pointerEvents: draggedIndex === idx ? 'none' : 'auto', // Prevent image interaction during drag
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
+                          <ImageListView
+                images={filteredImages.map(img => ({
+                  id: img.id,
+                  url: img.url,
+                  description: img.description || '',
+                  tag: img.tag,
+                  created_at: img.created_at,
+                  user_id: img.user_id || undefined,
+                  hasChanges: img.hasChanges,
+                  rotation: img.rotation
+                }))}
+                onUpdateImage={updateImageInList}
+                onRemoveImage={handleDelete}
+                showUserInfo={true}
+                showRotateButton={true}
+                currentUserId={currentUser?.id}
+                imagesInReports={imagesInReports}
+                selectionMode={selectionMode}
+                selectedImages={selectedImages}
+                onToggleSelection={toggleImageSelection}
+                dragAndDrop={true}
+                onDragStart={handleDragStart}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onDragEnd={handleDragEnd}
+                draggedIndex={draggedIndex}
+                dragOverIndex={dragOverIndex}
+              />
           )}
         </>
       )}

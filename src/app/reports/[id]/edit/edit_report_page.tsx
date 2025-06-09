@@ -94,6 +94,8 @@ export default function ReportEditor() {
   const [report, setReport] = useState<Report | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [content, setContent] = useState('');
+  const [reportTitle, setReportTitle] = useState('');
+  const [deliveredAt, setDeliveredAt] = useState('');
   const [reportImages, setReportImages] = useState<ReportImage[]>([]);
   const [processedContent, setProcessedContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -214,6 +216,8 @@ export default function ReportEditor() {
 
         setReport(reportData);
         setContent(reportData.generated_content);
+        setReportTitle(reportData.title || '');
+        setDeliveredAt(reportData.delivered_at || '');
 
         // Fetch project details
         const { data: projectData, error: projectError } = await supabase
@@ -395,6 +399,8 @@ export default function ReportEditor() {
         .from('reports')
         .update({ 
           generated_content: content,
+          title: reportTitle.trim() || null,
+          delivered_at: deliveredAt || null,
           updated_at: new Date().toISOString()
         })
         .eq('id', reportId);
@@ -532,6 +538,71 @@ export default function ReportEditor() {
               {showChat ? 'Hide Chat' : 'Show Chat'}
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Report Details Section */}
+      <div style={{ 
+        background: '#f8f9fa',
+        borderBottom: '1px solid #dee2e6',
+        padding: '1rem',
+        display: 'flex',
+        gap: '2rem',
+        alignItems: 'center',
+        maxWidth: "1200px", 
+        width: "100%", 
+        margin: "0 auto"
+      }}>
+        <div style={{ flex: 1 }}>
+          <label style={{ 
+            display: 'block', 
+            fontSize: '0.875rem', 
+            fontWeight: '500', 
+            marginBottom: '0.25rem',
+            color: '#374151'
+          }}>
+            Report Title
+          </label>
+          <input
+            type="text"
+            value={reportTitle}
+            onChange={(e) => setReportTitle(e.target.value)}
+            placeholder="Enter report title..."
+            style={{
+              width: '100%',
+              padding: '0.5rem',
+              fontSize: '0.875rem',
+              border: '1px solid #d1d5db',
+              borderRadius: '0.25rem',
+              backgroundColor: 'white'
+            }}
+            disabled={isStreaming}
+          />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={{ 
+            display: 'block', 
+            fontSize: '0.875rem', 
+            fontWeight: '500', 
+            marginBottom: '0.25rem',
+            color: '#374151'
+          }}>
+            Delivered Date
+          </label>
+          <input
+            type="date"
+            value={deliveredAt ? deliveredAt.split('T')[0] : ''}
+            onChange={(e) => setDeliveredAt(e.target.value ? new Date(e.target.value).toISOString() : '')}
+            style={{
+              width: '100%',
+              padding: '0.5rem',
+              fontSize: '0.875rem',
+              border: '1px solid #d1d5db',
+              borderRadius: '0.25rem',
+              backgroundColor: 'white'
+            }}
+            disabled={isStreaming}
+          />
         </div>
       </div>
       

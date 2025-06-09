@@ -99,9 +99,11 @@ export type Project = {
 
 export type Report = {
   id: string;
+  title?: string;
   project_id: string;
   bullet_points: string;
   generated_content: string;
+  delivered_at?: string;
   created_at: string;
   updated_at: string;
   user_id?: string;

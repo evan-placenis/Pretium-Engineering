@@ -446,9 +446,21 @@ export default function ProjectPage({ id }: { id: string }) {
                       </svg>
                     </div>
                     <div className="card-body">
-                      <h4 style={{ marginBottom: "0.5rem" }}>Report {index + 1}</h4>
+                      <h4 style={{ marginBottom: "0.5rem" }}>
+                        {report.title || `Report ${index + 1}`}
+                      </h4>
                       <p className="text-secondary" style={{ marginBottom: "0.5rem", fontSize: "0.875rem" }}>
                         Created on {new Date(report.created_at).toLocaleDateString()}
+                      </p>
+                      <p className="text-secondary" style={{ marginBottom: "0.75rem", fontSize: "0.875rem" }}>
+                        {report.delivered_at 
+                          ? `Delivered on ${new Date(report.delivered_at).toLocaleDateString('en-US', { 
+                              month: 'long', 
+                              day: 'numeric', 
+                              year: 'numeric' 
+                            })}`
+                          : 'Not Delivered'
+                        }
                       </p>
                       <div className="report-actions">
                         <Link
@@ -478,14 +490,36 @@ export default function ProjectPage({ id }: { id: string }) {
                 ))}
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {reports.map((report, index) => (
-                  <div key={report.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', padding: '1rem' }}>
-                    <div style={{ flex: 1 }}>
-                      <h4 style={{ marginBottom: "0.5rem" }}>Report {index + 1}</h4>
-                      <p className="text-secondary" style={{ marginBottom: "0.5rem", fontSize: "0.875rem" }}>
-                        Created on {new Date(report.created_at).toLocaleDateString()}
-                      </p>
+                  <div key={report.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', padding: '0.75rem 1rem' }}>
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <span style={{ fontWeight: "500", fontSize: "1rem" }}>
+                        {report.title || `Report ${index + 1}`}
+                      </span>
+                      <span style={{ color: "var(--color-text-secondary)", fontSize: "0.875rem" }}>
+                        |
+                      </span>
+                      <span style={{ color: "var(--color-text-secondary)", fontSize: "0.875rem" }}>
+                        Created {new Date(report.created_at).toLocaleDateString('en-US', { 
+                          month: 'long', 
+                          day: 'numeric', 
+                          year: 'numeric' 
+                        })}
+                      </span>
+                      <span style={{ color: "var(--color-text-secondary)", fontSize: "0.875rem" }}>
+                        |
+                      </span>
+                      <span style={{ color: "var(--color-text-secondary)", fontSize: "0.875rem" }}>
+                        {report.delivered_at
+                         ? `Delivered ${new Date(report.delivered_at).toLocaleDateString('en-US', { 
+                           month: 'long', 
+                           day: 'numeric', 
+                           year: 'numeric' 
+                         })}`
+                         : 'Not Delivered'
+                       }
+                      </span>
                     </div>
                     <div className="report-actions">
                       <Link

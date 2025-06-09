@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { supabase, Project, Report, ChatMessage } from '@/lib/supabase';
+import { supabase, Project, Report, ChatMessage, ReportImage } from '@/lib/supabase';
+import { createWordDocumentWithImages } from '@/lib/word-utils';
 
 interface ReportViewProps {
   id: string;
@@ -13,12 +14,13 @@ export default function ReportView({ id }: ReportViewProps) {
   const [report, setReport] = useState<Report | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [images, setImages] = useState<{ url: string; description: string }[]>([]);
+  const [images, setImages] = useState<ReportImage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const router = useRouter();
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -63,7 +65,7 @@ export default function ReportView({ id }: ReportViewProps) {
       // Fetch report images
       const { data: imagesData } = await supabase
         .from('report_images')
-        .select('url, description')
+        .select('id, report_id, url, description, tag, user_id')
         .eq('report_id', id);
 
       if (imagesData) {
@@ -191,34 +193,19 @@ export default function ReportView({ id }: ReportViewProps) {
     if (!report) return;
     
     try {
-      const response = await fetch(`/api/export-word?reportId=${id}`, {
-        method: 'GET',
-      });
+      setIsDownloading(true);
       
-      if (!response.ok) {
-        throw new Error('Failed to export report to Word');
-      }
+      // Generate a filename
+      const filename = `${project?.project_name || 'Report'}_${new Date().toISOString().split('T')[0]}.docx`;
       
-      // Get the blob
-      const blob = await response.blob();
+      // Use the working Word document function with actual images
+      await createWordDocumentWithImages(report.generated_content, images, filename, project);
       
-      // Create download link
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = `Report_${project?.name || 'Project'}_${new Date().toISOString().split('T')[0]}.docx`;
-      
-      // Append to the document and trigger the download
-      document.body.appendChild(a);
-      a.click();
-      
-      // Clean up
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (error: any) {
-      console.error('Error exporting to Word:', error);
-      setError(error.message || 'An error occurred during export');
+    } catch (error) {
+      console.error('Error generating Word document:', error);
+      setError('Error downloading Word document');
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -316,14 +303,15 @@ export default function ReportView({ id }: ReportViewProps) {
           </div>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <h1>
-              Report for {project?.name || 'Project'}
+              {project?.project_name || 'Project'}: {report?.title || 'Report 1'}
             </h1>
             <div style={{ display: "flex", gap: "0.75rem" }}>
               <button
                 onClick={handleExportWord}
+                disabled={isDownloading}
                 className="btn btn-primary"
               >
-                Export to Word
+                {isDownloading ? 'Downloading...' : 'Export to Word'}
               </button>
               <Link
                 href={`/reports/${id}/edit`}

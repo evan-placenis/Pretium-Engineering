@@ -17,6 +17,7 @@ const AVAILABLE_MODELS = [
 
 export default function NewReport() {
   const [project, setProject] = useState<Project | null>(null);
+  const [reportTitle, setReportTitle] = useState<string>('');
   const [bulletPoints, setBulletPoints] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -173,6 +174,7 @@ export default function NewReport() {
         .insert([
           {
             project_id: project!.id,
+            title: reportTitle.trim() || null, // Save title if provided
             bullet_points: bulletPoints,
             generated_content: '', // Will be updated after generation
             user_id: user.id, // Add user tracking
@@ -330,6 +332,29 @@ export default function NewReport() {
         <div className="card" style={{ marginBottom: "1.5rem" }}>
           <div className="card-body">
             <h3 style={{ marginBottom: "1rem" }}>Report Configuration</h3>
+            {/* Report Title Input */}
+            <div style={{ marginBottom: "1.5rem" }}>
+              <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "500" }}>
+                Report Title (Optional)
+              </label>
+              <input
+                type="text"
+                value={reportTitle}
+                onChange={(e) => setReportTitle(e.target.value)}
+                placeholder="Enter a custom title for this report..."
+                style={{
+                  width: "100%",
+                  padding: "0.75rem",
+                  fontSize: "1rem",
+                  border: "1px solid var(--color-border)",
+                  borderRadius: "0.25rem"
+                }}
+                disabled={loading}
+              />
+              <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
+                If left blank, the report will be automatically numbered (e.g., "Report 1", "Report 2", etc.)
+              </p>
+            </div>
             
             {/* Model Selection Dropdown */}
             <div style={{ marginBottom: "1.5rem" }}>

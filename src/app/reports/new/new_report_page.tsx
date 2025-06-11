@@ -6,6 +6,15 @@ import { supabase, Project } from '@/lib/supabase';
 import Link from 'next/link';
 import { Document, Packer, Paragraph, ImageRun, HeadingLevel, AlignmentType } from 'docx';
 import ImageListView, { ImageItem } from '@/components/ImageListView';
+import { TagValue } from '@/lib/tagConfig';
+import { useImageManagement } from '@/hooks/useImageManagement';
+import Toast from '@/components/Toast';
+
+// Extended interface to track original values
+interface ExtendedImageItem extends ImageItem {
+  originalDescription?: string;
+  originalTag?: TagValue;
+}
 
 // Define available models and their corresponding API routes
 const AVAILABLE_MODELS = [
@@ -23,16 +32,25 @@ export default function NewReport() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
-  const [allImages, setAllImages] = useState<ImageItem[]>([]);
+  const [allImages, setAllImages] = useState<ExtendedImageItem[]>([]);
   const [selectedModel, setSelectedModel] = useState(AVAILABLE_MODELS[0].id);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [debugInfo, setDebugInfo] = useState<any>(null);
   const [showDebugInfo, setShowDebugInfo] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get('project_id');
   const reportId = searchParams.get('reportId');
   const selectedImageIds = searchParams.get('selected_images');
+  
+
+
+  // Use the shared image management hook
+  const { updateImageFromAutoSave, handleImageUpdate, handleShowSuccessMessage } = useImageManagement({
+    projectId: projectId ?? undefined,
+    onSuccessMessage: (message) => setSuccessMessage(message)
+  });
 
   useEffect(() => {
     const getUser = async () => {
@@ -103,8 +121,15 @@ export default function NewReport() {
         if (error) throw error;
         
         setAllImages(prev => {
-          // Avoid duplicates by id
-          const newImages = (data || []).filter(img => !prev.some(existing => existing.id === img.id));
+          // Avoid duplicates by id and initialize original values
+          const newImages = (data || [])
+            .filter(img => !prev.some(existing => existing.id === img.id))
+            .map(img => ({
+              ...img,
+              originalDescription: img.description,
+              originalTag: img.tag,
+              hasChanges: false
+            }));
           return [...prev, ...newImages];
         });
         
@@ -136,10 +161,17 @@ export default function NewReport() {
         .eq('project_id', projectId)
         .order('created_at', { ascending: false });
       if (error) throw error;
-      // Avoid duplicates by id
+      // Avoid duplicates by id and initialize original values
       setAllImages(prev => ([
         ...prev,
-        ...((data || []).filter(img => !prev.some(existing => existing.id === img.id)))
+        ...((data || [])
+          .filter(img => !prev.some(existing => existing.id === img.id))
+          .map(img => ({
+            ...img,
+            originalDescription: img.description,
+            originalTag: img.tag,
+            hasChanges: false
+          })))
       ]));
     } catch (error: any) {
       setError('Failed to load project images: ' + error.message);
@@ -292,362 +324,378 @@ export default function NewReport() {
   }
 
   return (
-    <>
-      <div className="container page-content">
-        <header style={{ marginBottom: "2rem" }}>
-          <div style={{ marginBottom: "0.5rem", display: "flex" }}>
-            {project && (
-              <Link
-                href={`/projects/${project.id}`}
-                className="text-accent"
-                style={{ marginRight: "0.5rem", fontSize: "0.875rem" }}
-              >
-                ← Back to Project
-              </Link>
-            )}
-            {reportId && (
-              <Link
-                href={`/reports/${reportId}`}
-                className="text-accent"
-                style={{ marginRight: "0.5rem", fontSize: "0.875rem" }}
-              >
-                ← Back to Report Details
-              </Link>
-            )}
-          </div>
-        </header>
-        
-        <div style={{ marginBottom: "1.5rem" }}>
-          <h1 style={{ marginTop: "1.5rem", marginBottom: "0.5rem" }}>New Report for {project.name}</h1>
-          <p className="text-secondary">
-            Location: {project.location}
-          </p>
+    <div className="container page-content" style={{ background: 'var(--color-bg)', minHeight: '100vh' }}>
+      <h1 style={{ marginBottom: '2rem', color: 'var(--color-primary)' }}>
+        Create New Report
+      </h1>
+
+      <header style={{ marginBottom: "2rem" }}>
+        <div style={{ marginBottom: "0.5rem", display: "flex" }}>
+          {project && (
+            <Link
+              href={`/projects/${project.id}`}
+              className="text-accent"
+              style={{ marginRight: "0.5rem", fontSize: "0.875rem" }}
+            >
+              ← Back to Project
+            </Link>
+          )}
+          {reportId && (
+            <Link
+              href={`/reports/${reportId}`}
+              className="text-accent"
+              style={{ marginRight: "0.5rem", fontSize: "0.875rem" }}
+            >
+              ← Back to Report Details
+            </Link>
+          )}
         </div>
+      </header>
+      
+      <div style={{ marginBottom: "1.5rem" }}>
+        <h1 style={{ marginTop: "1.5rem", marginBottom: "0.5rem" }}>New Report for {project.name}</h1>
+        <p className="text-secondary">
+          Location: {project.location}
+        </p>
+      </div>
 
-        {error && (
-          <div className="alert alert-error" style={{ marginBottom: "1rem" }}>
-            {error}
+      {error && (
+        <Toast message={error} type="error" />
+      )}
+
+      <div className="card" style={{ marginBottom: "1.5rem" }}>
+        <div className="card-body">
+          <h3 style={{ marginBottom: "1rem" }}>Report Configuration</h3>
+          {/* Report Title Input */}
+          <div style={{ marginBottom: "1.5rem" }}>
+            <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "500" }}>
+              Report Title (Optional)
+            </label>
+            <input
+              type="text"
+              value={reportTitle}
+              onChange={(e) => setReportTitle(e.target.value)}
+              placeholder="Enter a custom title for this report..."
+              style={{
+                width: "100%",
+                padding: "0.75rem",
+                fontSize: "1rem",
+                border: "1px solid var(--color-border)",
+                borderRadius: "0.25rem"
+              }}
+              disabled={loading}
+            />
+            <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
+              If left blank, the report will be automatically numbered (e.g., "Report 1", "Report 2", etc.)
+            </p>
           </div>
-        )}
-
-        <div className="card" style={{ marginBottom: "1.5rem" }}>
-          <div className="card-body">
-            <h3 style={{ marginBottom: "1rem" }}>Report Configuration</h3>
-            {/* Report Title Input */}
-            <div style={{ marginBottom: "1.5rem" }}>
-              <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "500" }}>
-                Report Title (Optional)
-              </label>
-              <input
-                type="text"
-                value={reportTitle}
-                onChange={(e) => setReportTitle(e.target.value)}
-                placeholder="Enter a custom title for this report..."
-                style={{
-                  width: "100%",
-                  padding: "0.75rem",
-                  fontSize: "1rem",
-                  border: "1px solid var(--color-border)",
-                  borderRadius: "0.25rem"
+          
+          {/* Model Selection Dropdown */}
+          <div style={{ marginBottom: "1.5rem" }}>
+            <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "500" }}>
+              AI Model Selection
+            </label>
+            <div style={{ position: "relative", display: "inline-block" }} data-dropdown="model-selector">
+              <button
+                type="button"
+                onClick={() => setShowModelDropdown(!showModelDropdown)}
+                className="btn btn-outline"
+                style={{ 
+                  display: "flex", 
+                  alignItems: "center", 
+                  gap: "0.5rem",
+                  minWidth: "250px",
+                  justifyContent: "space-between"
                 }}
                 disabled={loading}
-              />
-              <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
-                If left blank, the report will be automatically numbered (e.g., "Report 1", "Report 2", etc.)
-              </p>
-            </div>
-            
-            {/* Model Selection Dropdown */}
-            <div style={{ marginBottom: "1.5rem" }}>
-              <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "500" }}>
-                AI Model Selection
-              </label>
-              <div style={{ position: "relative", display: "inline-block" }} data-dropdown="model-selector">
-                <button
-                  type="button"
-                  onClick={() => setShowModelDropdown(!showModelDropdown)}
-                  className="btn btn-outline"
-                  style={{ 
-                    display: "flex", 
-                    alignItems: "center", 
-                    gap: "0.5rem",
-                    minWidth: "250px",
-                    justifyContent: "space-between"
-                  }}
-                  disabled={loading}
-                >
-                  <span>
-                    {AVAILABLE_MODELS.find(model => model.id === selectedModel)?.name || 'Select Model'}
-                  </span>
-                  <span style={{ fontSize: "0.75rem" }}>▼</span>
-                </button>
-                
-                {showModelDropdown && (
-                  <div 
-                    style={{
-                      position: "absolute",
-                      top: "100%",
-                      left: 0,
-                      right: 0,
-                      backgroundColor: "white",
-                      border: "1px solid #d1d5db",
-                      borderRadius: "0.5rem",
-                      boxShadow: "0 10px 25px rgba(0, 0, 0, 0.15)",
-                      zIndex: 1000,
-                      marginTop: "0.25rem",
-                      maxHeight: "200px",
-                      overflowY: "scroll",
-                      overflowX: "hidden"
-                    }}
-                    onWheel={(e) => e.stopPropagation()}
-                  >
-                    {AVAILABLE_MODELS.map((model, index) => (
-                      <button
-                        key={model.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedModel(model.id);
-                          setShowModelDropdown(false);
-                        }}
-                        style={{
-                          width: "100%",
-                          padding: "0.875rem",
-                          textAlign: "left",
-                          border: "none",
-                          backgroundColor: selectedModel === model.id ? "#e3f2fd" : "transparent",
-                          cursor: "pointer",
-                          borderBottom: index < AVAILABLE_MODELS.length - 1 ? "1px solid #f3f4f6" : "none",
-                          transition: "background-color 0.15s ease"
-                        }}
-                        onMouseEnter={(e) => {
-                          if (selectedModel !== model.id) {
-                            e.currentTarget.style.backgroundColor = "#f8fafc";
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (selectedModel !== model.id) {
-                            e.currentTarget.style.backgroundColor = "transparent";
-                          }
-                        }}
-                      >
-                        <div style={{ 
-                          fontWeight: "500", 
-                          marginBottom: "0.25rem",
-                          color: selectedModel === model.id ? "#1565c0" : "#374151"
-                        }}>
-                          {model.name}
-                          {selectedModel === model.id && (
-                            <span style={{ 
-                              marginLeft: "0.5rem", 
-                              color: "#1565c0",
-                              fontSize: "0.875rem"
-                            }}>
-                              ✓
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ 
-                          fontSize: "0.75rem", 
-                          color: selectedModel === model.id ? "#1976d2" : "#6b7280",
-                          lineHeight: "1.3"
-                        }}>
-                          {model.description}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
-                Choose the AI model for generating your report. Different models offer varying levels of quality and processing speed.
-              </p>
-            </div>
-
-            <h4 style={{ marginBottom: "1rem" }}>Report Images</h4>
-            <div style={{ marginBottom: "1rem", display: 'flex', gap: '1rem' }}>
-              <button 
-                type="button"
-                onClick={() => router.push(`/projects/${projectId}/images?mode=select&returnTo=reports`)}
-                className="btn btn-secondary"
-                disabled={loading}
               >
-                Select Photos
+                <span>
+                  {AVAILABLE_MODELS.find(model => model.id === selectedModel)?.name || 'Select Model'}
+                </span>
+                <span style={{ fontSize: "0.75rem" }}>▼</span>
               </button>
-            </div>
-            {/* Image List View */}
-            {allImages.length > 0 && (
-              <div style={{ marginBottom: "2rem" }}>
-                <h4 style={{ marginBottom: "1rem" }}>Project Images</h4>
-                <ImageListView
-                  images={allImages}
-                  onUpdateImage={(imageId, field, value) => {
-                    setAllImages(prev => prev.map(img => 
-                      img.id === imageId ? { ...img, [field]: value } : img
-                    ));
-                  }}
-                  onRemoveImage={(imageId) => {
-                    setAllImages(prev => prev.filter(img => img.id !== imageId));
-                  }}
-                  showRotateButton={true}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-
-        {debugInfo && (
-          <div className="card" style={{ marginBottom: "1.5rem" }}>
-            <div className="card-body">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-                <h3>Debug Information</h3>
-                <button
-                  type="button"
-                  onClick={() => setShowDebugInfo(!showDebugInfo)}
-                  className="btn btn-outline btn-sm"
-                >
-                  {showDebugInfo ? 'Hide Details' : 'Show Details'}
-                </button>
-              </div>
               
-              {debugInfo.processingStats && (
-                <div style={{ marginBottom: "1rem", padding: "0.75rem", backgroundColor: "#f8f9fa", borderRadius: "0.25rem" }}>
-                  <strong>Processing Stats:</strong>
-                  <ul style={{ margin: "0.5rem 0 0 0", listStyle: "none", padding: "0" }}>
-                    <li>Model: {debugInfo.modelUsed}</li>
-                    <li>Total Batches: {debugInfo.processingStats.totalBatches}</li>
-                    <li>Total Images: {debugInfo.processingStats.totalImages}</li>
-                    <li>Review Time: {debugInfo.processingStats.reviewTime}</li>
-                    <li>Total Processing Time: {debugInfo.processingStats.totalProcessingTime}</li>
-                  </ul>
-                </div>
-              )}
-
-              {showDebugInfo && debugInfo.batchDetails && (
-                <div style={{ marginBottom: "1rem" }}>
-                  <h4>Batch Processing Details:</h4>
-                  {debugInfo.batchDetails.map((batch: any, index: number) => (
-                    <div key={index} style={{ marginBottom: "1rem", padding: "0.75rem", border: "1px solid #dee2e6", borderRadius: "0.25rem" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-                        <strong>Batch {batch.batchNumber}</strong>
-                        <span style={{ fontSize: "0.875rem", color: "#6c757d" }}>
-                          {batch.imageCount} images • {batch.processingTime}
-                        </span>
+              {showModelDropdown && (
+                <div 
+                  style={{
+                    position: "absolute",
+                    top: "100%",
+                    left: 0,
+                    right: 0,
+                    backgroundColor: "white",
+                    border: "1px solid #d1d5db",
+                    borderRadius: "0.5rem",
+                    boxShadow: "0 10px 25px rgba(0, 0, 0, 0.15)",
+                    zIndex: 1000,
+                    marginTop: "0.25rem",
+                    maxHeight: "200px",
+                    overflowY: "scroll",
+                    overflowX: "hidden"
+                  }}
+                  onWheel={(e) => e.stopPropagation()}
+                >
+                  {AVAILABLE_MODELS.map((model, index) => (
+                    <button
+                      key={model.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedModel(model.id);
+                        setShowModelDropdown(false);
+                      }}
+                      style={{
+                        width: "100%",
+                        padding: "0.875rem",
+                        textAlign: "left",
+                        border: "none",
+                        backgroundColor: selectedModel === model.id ? "#e3f2fd" : "transparent",
+                        cursor: "pointer",
+                        borderBottom: index < AVAILABLE_MODELS.length - 1 ? "1px solid #f3f4f6" : "none",
+                        transition: "background-color 0.15s ease"
+                      }}
+                      onMouseEnter={(e) => {
+                        if (selectedModel !== model.id) {
+                          e.currentTarget.style.backgroundColor = "#f8fafc";
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (selectedModel !== model.id) {
+                          e.currentTarget.style.backgroundColor = "transparent";
+                        }
+                      }}
+                    >
+                      <div style={{ 
+                        fontWeight: "500", 
+                        marginBottom: "0.25rem",
+                        color: selectedModel === model.id ? "#1565c0" : "#374151"
+                      }}>
+                        {model.name}
+                        {selectedModel === model.id && (
+                          <span style={{ 
+                            marginLeft: "0.5rem", 
+                            color: "#1565c0",
+                            fontSize: "0.875rem"
+                          }}>
+                            ✓
+                          </span>
+                        )}
                       </div>
                       <div style={{ 
-                        maxHeight: "200px", 
-                        overflowY: "auto", 
-                        fontSize: "0.875rem", 
-                        backgroundColor: "#f8f9fa", 
-                        padding: "0.5rem",
-                        borderRadius: "0.25rem",
-                        whiteSpace: "pre-wrap"
+                        fontSize: "0.75rem", 
+                        color: selectedModel === model.id ? "#1976d2" : "#6b7280",
+                        lineHeight: "1.3"
                       }}>
-                        {batch.content}
+                        {model.description}
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
-
-              {showDebugInfo && debugInfo.combinedDraft && (
-                <div style={{ marginBottom: "1rem" }}>
-                  <h4>Combined Draft (Before Final Review):</h4>
-                  <div style={{ 
-                    maxHeight: "300px", 
-                    overflowY: "auto", 
-                    fontSize: "0.875rem", 
-                    backgroundColor: "#f8f9fa", 
-                    padding: "0.75rem",
-                    borderRadius: "0.25rem",
-                    whiteSpace: "pre-wrap",
-                    border: "1px solid #dee2e6"
-                  }}>
-                    {debugInfo.combinedDraft}
-                  </div>
-                </div>
-              )}
             </div>
-          </div>
-        )}
-
-        <div className="card" style={{ minHeight: "400px", position: "relative" }}>
-          <div className="card-body">
-            <p style={{ fontSize: "0.875rem", marginBottom: "0.75rem" }} className="text-secondary">
-              Enter your observation notes as bullet points below. These will be used to generate a detailed report. Press "Generate Report" when you're ready.
+            <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
+              Choose the AI model for generating your report. Different models offer varying levels of quality and processing speed.
             </p>
-            <textarea
-              value={bulletPoints}
-              onChange={(e) => setBulletPoints(e.target.value)}
-              style={{ 
-                width: "100%", 
-                minHeight: "300px",
-                padding: "1rem",
-                fontSize: "1rem",
-                lineHeight: "1.5",
-                border: "1px solid var(--color-border)",
-                borderRadius: "0.25rem",
-                resize: "vertical"
-              }}
-              placeholder={'• Observed water damage in northwest corner \n \
+          </div>
+
+          <h4 style={{ marginBottom: "1rem" }}>Report Images</h4>
+          <div style={{ marginBottom: "1rem", display: 'flex', gap: '1rem' }}>
+            <button 
+              type="button"
+              onClick={() => router.push(`/projects/${projectId}/images?mode=select&returnTo=reports`)}
+              className="btn btn-secondary"
+              disabled={loading}
+            >
+              Select Photos
+            </button>
+          </div>
+          {/* Image List View */}
+          {allImages.length > 0 && (
+            <div style={{ marginBottom: "2rem" }}>
+              <h4 style={{ marginBottom: "1rem" }}>Project Images</h4>
+              <ImageListView
+                images={allImages}
+                onUpdateImage={(imageId, field, value) => {
+                  const update = handleImageUpdate(imageId, field, value);
+                  setAllImages(prev => prev.map(img => {
+                    if (img.id === update.imageId) {
+                      const updated = { ...img, [update.field]: update.value };
+                      
+                      // Check if this creates a change from original
+                      const hasDescriptionChange = updated.description !== img.originalDescription;
+                      updated.hasChanges = hasDescriptionChange;
+                      
+                      return updated;
+                    }
+                    return img;
+                  }));
+                }}
+                onAutoSaveUpdate={updateImageFromAutoSave}
+                onShowSuccessMessage={handleShowSuccessMessage}
+                onRemoveImage={(imageId) => {
+                  setAllImages(prev => prev.filter(img => img.id !== imageId));
+                }}
+                showRotateButton={true}
+                currentUserId={user?.id}
+                projectId={searchParams.get('project_id') ?? undefined}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {debugInfo && (
+        <div className="card" style={{ marginBottom: "1.5rem" }}>
+          <div className="card-body">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+              <h3>Debug Information</h3>
+              <button
+                type="button"
+                onClick={() => setShowDebugInfo(!showDebugInfo)}
+                className="btn btn-outline btn-sm"
+              >
+                {showDebugInfo ? 'Hide Details' : 'Show Details'}
+              </button>
+            </div>
+            
+            {debugInfo.processingStats && (
+              <div style={{ marginBottom: "1rem", padding: "0.75rem", backgroundColor: "#f8f9fa", borderRadius: "0.25rem" }}>
+                <strong>Processing Stats:</strong>
+                <ul style={{ margin: "0.5rem 0 0 0", listStyle: "none", padding: "0" }}>
+                  <li>Model: {debugInfo.modelUsed}</li>
+                  <li>Total Batches: {debugInfo.processingStats.totalBatches}</li>
+                  <li>Total Images: {debugInfo.processingStats.totalImages}</li>
+                  <li>Review Time: {debugInfo.processingStats.reviewTime}</li>
+                  <li>Total Processing Time: {debugInfo.processingStats.totalProcessingTime}</li>
+                </ul>
+              </div>
+            )}
+
+            {showDebugInfo && debugInfo.batchDetails && (
+              <div style={{ marginBottom: "1rem" }}>
+                <h4>Batch Processing Details:</h4>
+                {debugInfo.batchDetails.map((batch: any, index: number) => (
+                  <div key={index} style={{ marginBottom: "1rem", padding: "0.75rem", border: "1px solid #dee2e6", borderRadius: "0.25rem" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                      <strong>Batch {batch.batchNumber}</strong>
+                      <span style={{ fontSize: "0.875rem", color: "#6c757d" }}>
+                        {batch.imageCount} images • {batch.processingTime}
+                      </span>
+                    </div>
+                    <div style={{ 
+                      maxHeight: "200px", 
+                      overflowY: "auto", 
+                      fontSize: "0.875rem", 
+                      backgroundColor: "#f8f9fa", 
+                      padding: "0.5rem",
+                      borderRadius: "0.25rem",
+                      whiteSpace: "pre-wrap"
+                    }}>
+                      {batch.content}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {showDebugInfo && debugInfo.combinedDraft && (
+              <div style={{ marginBottom: "1rem" }}>
+                <h4>Combined Draft (Before Final Review):</h4>
+                <div style={{ 
+                  maxHeight: "300px", 
+                  overflowY: "auto", 
+                  fontSize: "0.875rem", 
+                  backgroundColor: "#f8f9fa", 
+                  padding: "0.75rem",
+                  borderRadius: "0.25rem",
+                  whiteSpace: "pre-wrap",
+                  border: "1px solid #dee2e6"
+                }}>
+                  {debugInfo.combinedDraft}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="card" style={{ minHeight: "400px", position: "relative" }}>
+        <div className="card-body">
+          <p style={{ fontSize: "0.875rem", marginBottom: "0.75rem" }} className="text-secondary">
+            Enter your observation notes as bullet points below. These will be used to generate a detailed report. Press "Generate Report" when you're ready.
+          </p>
+          <textarea
+            value={bulletPoints}
+            onChange={(e) => setBulletPoints(e.target.value)}
+            style={{ 
+              width: "100%", 
+              minHeight: "300px",
+              padding: "1rem",
+              fontSize: "1rem",
+              lineHeight: "1.5",
+              border: "1px solid var(--color-border)",
+              borderRadius: "0.25rem",
+              resize: "vertical"
+            }}
+            placeholder={'• Observed water damage in northwest corner \n \
 • Ceiling tiles showing discoloration \n \
 • HVAC system making unusual noise \n \
 • Foundation appears to be settling on the east side \n \
 • ...'}
-              disabled={loading}
-            />
-            
-            {loading && (
+            disabled={loading}
+          />
+          
+          {loading && (
+            <div style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(255, 255, 255, 0.8)",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
+              zIndex: 10
+            }}>
               <div style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                backgroundColor: "rgba(255, 255, 255, 0.8)",
-                display: "flex",
-                flexDirection: "column",
-                justifyContent: "center",
-                alignItems: "center",
-                zIndex: 10
-              }}>
-                <div style={{
-                  width: "60px",
-                  height: "60px",
-                  border: "5px solid #f3f3f3",
-                  borderTop: "5px solid #2b579a",
-                  borderRadius: "50%",
-                  animation: "spin 1s linear infinite",
-                  marginBottom: "1rem"
-                }} />
-                <style jsx>{`
-                  @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                  }
-                `}</style>
-                <p style={{ fontSize: "1.125rem", fontWeight: 500 }}>Generating Your Report</p>
-                <p style={{ color: "#666", maxWidth: "400px", textAlign: "center", marginTop: "0.5rem" }}>
-                  This may take up to a minute as we analyze your bullet points and create a detailed engineering report.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: "2rem", marginBottom: "2rem" }}>
-          <p style={{ fontSize: "0.875rem", color: "var(--color-text-secondary)", marginBottom: "1rem" }}>
-            Using: <strong>{AVAILABLE_MODELS.find(model => model.id === selectedModel)?.name}</strong>
-          </p>
-          <button
-            onClick={generateReport}
-            disabled={loading || !bulletPoints.trim()}
-            className="btn btn-primary"
-            style={{ fontSize: "1.125rem", padding: "0.75rem 2rem" }}
-          >
-            {loading ? 'Generating Report...' : 'Generate Report'}
-          </button>
+                width: "60px",
+                height: "60px",
+                border: "5px solid #f3f3f3",
+                borderTop: "5px solid #2b579a",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite",
+                marginBottom: "1rem"
+              }} />
+              <style jsx>{`
+                @keyframes spin {
+                  0% { transform: rotate(0deg); }
+                  100% { transform: rotate(360deg); }
+                }
+              `}</style>
+              <p style={{ fontSize: "1.125rem", fontWeight: 500 }}>Generating Your Report</p>
+              <p style={{ color: "#666", maxWidth: "400px", textAlign: "center", marginTop: "0.5rem" }}>
+                This may take up to a minute as we analyze your bullet points and create a detailed engineering report.
+              </p>
+            </div>
+          )}
         </div>
       </div>
-    </>
+
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: "2rem", marginBottom: "2rem" }}>
+        <p style={{ fontSize: "0.875rem", color: "var(--color-text-secondary)", marginBottom: "1rem" }}>
+          Using: <strong>{AVAILABLE_MODELS.find(model => model.id === selectedModel)?.name}</strong>
+        </p>
+        <button
+          onClick={generateReport}
+          disabled={loading || !bulletPoints.trim()}
+          className="btn btn-primary"
+          style={{ fontSize: "1.125rem", padding: "0.75rem 2rem" }}
+        >
+          {loading ? 'Generating Report...' : 'Generate Report'}
+        </button>
+      </div>
+
+      <Toast message={successMessage} type="success" />
+    </div>
   );
 } 

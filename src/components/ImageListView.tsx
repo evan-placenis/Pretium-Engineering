@@ -1,9 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import ImageZoomModal from './ImageZoomModal';
+import DescriptionInput from './DescriptionInput';
 import { TagValue, getAllTagOptions, getTagLabel, getTagBadgeClass } from '@/lib/tagConfig';
+import { supabase } from '@/lib/supabase';
 
+/**
+ * Interface for individual image items in the list
+ */
 export interface ImageItem {
   id: string;
   url: string;
@@ -15,20 +20,26 @@ export interface ImageItem {
   rotation?: number;
 }
 
+/**
+ * Props for the ImageListView component
+ */
 interface ImageListViewProps {
-  images: ImageItem[];
+  images: ImageItem[];                                    // List of images to display
   onUpdateImage?: (imageId: string, field: 'description' | 'tag' | 'rotation', value: string | TagValue | number) => void;
+  onAutoSaveUpdate?: (imageId: string, description: string) => void;
   onRemoveImage?: (imageId: string) => void;
-  readonly?: boolean;
-  showUserInfo?: boolean;
-  showRotateButton?: boolean;
-  showRemoveButton?: boolean;
-  currentUserId?: string;
-  imagesInReports?: Set<string>;
-  selectionMode?: boolean;
-  selectedImages?: Set<string>;
-  onToggleSelection?: (imageId: string) => void;
-  dragAndDrop?: boolean;
+  onShowSuccessMessage?: (message: string) => void;
+  readonly?: boolean;                                     // Whether the list is read-only
+  showUserInfo?: boolean;                                 // Whether to show user info
+  showRotateButton?: boolean;                             // Whether to show rotate button
+  showRemoveButton?: boolean;                             // Whether to show remove button
+  currentUserId?: string;                                 // Current user's ID
+  projectId?: string;                                     // Current project's ID
+  imagesInReports?: Set<string>;                          // Set of image URLs used in reports
+  selectionMode?: boolean;                                // Whether in selection mode
+  selectedImages?: Set<string>;                           // Set of selected image IDs
+  onToggleSelection?: (imageId: string) => void;          // Handler for selection toggle
+  dragAndDrop?: boolean;                                  // Whether drag and drop is enabled
   onDragStart?: (e: React.DragEvent, index: number) => void;
   onDragOver?: (e: React.DragEvent, index: number) => void;
   onDragLeave?: (e?: React.DragEvent) => void;
@@ -38,15 +49,30 @@ interface ImageListViewProps {
   dragOverIndex?: number | null;
 }
 
+/**
+ * ImageListView Component
+ * 
+ * A list view component for displaying and managing project images.
+ * Features:
+ * - Grid/list view of images with descriptions and tags
+ * - Auto-saving descriptions
+ * - Image rotation
+ * - Drag and drop reordering
+ * - Selection mode for report creation
+ * - Image zooming
+ */
 export default function ImageListView({
   images,
   onUpdateImage,
+  onAutoSaveUpdate,
   onRemoveImage,
+  onShowSuccessMessage,
   readonly = false,
   showUserInfo = false,
   showRotateButton = false,
   showRemoveButton = true,
   currentUserId,
+  projectId,
   imagesInReports,
   selectionMode = false,
   selectedImages,
@@ -60,14 +86,68 @@ export default function ImageListView({
   draggedIndex,
   dragOverIndex,
 }: ImageListViewProps) {
+  // State for the zoom modal
   const [zoomedImage, setZoomedImage] = useState<{ url: string; description: string } | null>(null);
 
+  /**
+   * Handle image click - either zoom the image or toggle selection
+   */
   const handleImageClick = (image: ImageItem) => {
     if (!selectionMode) {
       setZoomedImage({ url: image.url, description: image.description || '' });
     }
   };
-  
+
+  /**
+   * Auto-save description when user blurs the input field
+   * This triggers a database update and refreshes the suggestions cache
+   */
+  const handleAutoSave = async (imageId: string, originalDescription: string, newValue: string) => {
+    // Don't save empty descriptions
+    if (!newValue || !newValue.trim()) {
+      return;
+    }
+    
+    try {
+      console.log('Attempting to save description:', { imageId, newValue });
+      
+      const { data, error } = await supabase
+        .from('project_images')
+        .update({ description: newValue.trim() })
+        .eq('id', imageId)
+        .select();
+
+      if (error) {
+        console.error('Save failed:', error);
+        onShowSuccessMessage?.('Failed to save description');
+        return;
+      }
+      
+      if (!data || data.length === 0) {
+        console.error('No data returned from save');
+        onShowSuccessMessage?.('Failed to save description');
+        return;
+      }
+      
+      console.log('Save successful:', data);
+      
+      // First update the parent component to reset hasChanges
+      onUpdateImage?.(imageId, 'description', newValue.trim());
+      
+      // Then notify about the auto-save
+      onAutoSaveUpdate?.(imageId, newValue.trim());
+      onShowSuccessMessage?.('Description auto-saved');
+      
+      // Invalidate the suggestions cache to refresh all components
+      if (projectId && (window as any).invalidateDescriptionCache) {
+        (window as any).invalidateDescriptionCache(projectId);
+      }
+      
+    } catch (error: any) {
+      console.error('Unexpected error during save:', error);
+      onShowSuccessMessage?.('Failed to save description');
+    }
+  };
 
   return (
     <>
@@ -100,7 +180,7 @@ export default function ImageListView({
                 : 'var(--color-bg-card)'
             }}
           >
-            {/* Drag Handle */}
+            {/* Drag handle for reordering */}
             {dragAndDrop && !selectionMode && (
               <div
                 style={{
@@ -120,7 +200,7 @@ export default function ImageListView({
               </div>
             )}
 
-            {/* Selection Checkbox */}
+            {/* Selection checkbox */}
             {selectionMode && (
               <div
                 style={{
@@ -146,7 +226,7 @@ export default function ImageListView({
               </div>
             )}
             
-            {/* Content Section */}
+            {/* Main content section */}
             <div style={{ 
               flex: '1', 
               display: 'flex', 
@@ -154,34 +234,51 @@ export default function ImageListView({
               gap: '1rem',
               marginLeft: dragAndDrop && !selectionMode ? '2rem' : '0'
             }}>
-              {/* Description Textarea */}
-              <div>
-                <textarea
+              {/* Description input with autocomplete */}
+              <div style={{ marginBottom: '1rem' }}>
+                <DescriptionInput
                   value={image.description || ''}
-                  onChange={(e) => onUpdateImage?.(image.id, 'description', e.target.value)}
+                  onChange={(value) => {
+                    // When the value changes, update the image and set hasChanges to true
+                    onUpdateImage?.(image.id, 'description', value);
+                  }}
+                  onBlur={(value) => handleAutoSave(image.id, image.description || '', value)}
                   placeholder="Enter notes for this image..."
                   disabled={readonly || selectionMode}
-                  style={{
-                    width: '100%',
-                    minHeight: '200px',
-                    padding: '0.75rem',
-                    fontSize: '0.875rem',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '0.25rem',
-                    resize: 'vertical',
-                    backgroundColor: image.hasChanges ? 'rgba(255, 255, 0, 0.1)' : 'var(--color-bg)'
-                  }}
+                  hasChanges={image.hasChanges}
+                  userId={currentUserId}
+                  projectId={projectId}
                 />
               </div>
               
-              {/* Tag Dropdown */}
+              {/* Tag selection dropdown */}
               <div style={{ marginBottom: '0.5rem' }}>
                 <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '500', marginBottom: '0.25rem', color: 'var(--color-text)' }}>
                   Category:
                 </label>
                 <select
                   value={image.tag || ''}
-                  onChange={(e) => onUpdateImage?.(image.id, 'tag', e.target.value === '' ? null : e.target.value as TagValue)}
+                  onChange={async (e) => {
+                    const newTag = e.target.value === '' ? null : e.target.value as TagValue;
+                    onUpdateImage?.(image.id, 'tag', newTag);
+                    
+                    // Auto-save tag change
+                    try {
+                      const { error } = await supabase
+                        .from('project_images')
+                        .update({ tag: newTag })
+                        .eq('id', image.id);
+
+                      if (error) {
+                        onShowSuccessMessage?.('Failed to save tag');
+                        return;
+                      }
+                      
+                      onShowSuccessMessage?.('Tag auto-saved');
+                    } catch (error: any) {
+                      onShowSuccessMessage?.('Failed to save tag');
+                    }
+                  }}
                   disabled={readonly || selectionMode}
                   style={{
                     width: '100%',
@@ -202,7 +299,7 @@ export default function ImageListView({
                 </select>
               </div>
               
-              {/* Action Buttons */}
+              {/* Action buttons */}
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 {!selectionMode && !readonly && (
                   <>
@@ -231,6 +328,7 @@ export default function ImageListView({
                   </>
                 )}
                 
+                {/* Unsaved changes indicator */}
                 {image.hasChanges && (
                   <span style={{ 
                     fontSize: '0.75rem', 
@@ -244,7 +342,7 @@ export default function ImageListView({
                 )}
               </div>
               
-              {/* Image Info */}
+              {/* Image metadata */}
               {showUserInfo && (
                 <div style={{ fontSize: '0.75rem', color: 'var(--color-text-light)' }}>
                   {image.created_at && (
@@ -268,7 +366,7 @@ export default function ImageListView({
               )}
             </div>
             
-            {/* Image Display */}
+            {/* Image display */}
             <div style={{ flex: '1' }}>
               <img
                 src={image.url}
@@ -290,7 +388,7 @@ export default function ImageListView({
         ))}
       </div>
 
-      {/* Zoom Modal */}
+      {/* Image zoom modal */}
       <ImageZoomModal
         imageUrl={zoomedImage?.url || null}
         imageDescription={zoomedImage?.description}

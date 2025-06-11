@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { Project, Report } from '@/lib/supabase';
 import { handleExcelUpload } from '@/lib/utils';
 import * as XLSX from 'xlsx';
+import { useViewPreference } from '@/hooks/useViewPreference';
 
 export default function ProjectPage({ id }: { id: string }) {
   const [project, setProject] = useState<Project | null>(null);
@@ -16,8 +17,10 @@ export default function ProjectPage({ id }: { id: string }) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [fileData, setFileData] = useState<any>(null);
   const [uploadLoading, setUploadLoading] = useState(false);
-  const [reportViewMode, setReportViewMode] = useState<'grid' | 'list'>('grid');
   const router = useRouter();
+  
+  // Use the view preference hook for persistent view state
+  const { viewMode: reportViewMode, toggleViewMode: toggleReportViewMode } = useViewPreference('project-reports');
 
   useEffect(() => {
     const fetchProjectAndReports = async () => {
@@ -410,7 +413,7 @@ export default function ProjectPage({ id }: { id: string }) {
             <button
               className="btn btn-secondary btn-sm"
               style={{ marginLeft: '1rem' }}
-              onClick={() => setReportViewMode(mode => mode === 'grid' ? 'list' : 'grid')}
+              onClick={toggleReportViewMode}
             >
               {reportViewMode === 'grid' ? 'List View' : 'Grid View'}
             </button>

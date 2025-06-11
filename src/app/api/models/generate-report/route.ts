@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import { createClient } from '@supabase/supabase-js';
+import { createServerSupabaseClient } from '@/lib/supabase';
 import { ReportImage, ProjectImage } from '@/lib/supabase';
 
 // Initialize OpenAI client
@@ -11,7 +11,7 @@ const openai = new OpenAI({
 // Initialize Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabase = createServerSupabaseClient();
 
 export async function POST(req: NextRequest) {
   try {

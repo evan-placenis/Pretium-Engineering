@@ -10,28 +10,47 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
+// Singleton pattern to ensure only one client instance
+let clientInstance: ReturnType<typeof createClientComponentClient> | null = null;
+
 // Create a browser-compatible Supabase client with proper cookie handling
 // This uses the automatic Next.js helpers that handle auth correctly
-export const supabase = createClientComponentClient({
-  supabaseUrl,
-  supabaseKey: supabaseAnonKey
-});
+export const supabase = (() => {
+  if (typeof window !== 'undefined') {
+    // Browser environment - use singleton pattern
+    if (!clientInstance) {
+      clientInstance = createClientComponentClient({
+        supabaseUrl,
+        supabaseKey: supabaseAnonKey
+      });
+    }
+    return clientInstance;
+  }
+  
+  // Server environment - create fresh instance
+  return createClientComponentClient({
+    supabaseUrl,
+    supabaseKey: supabaseAnonKey
+  });
+})();
 
-// Standard client as fallback or for server functions
-export const supabaseAdmin = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-  },
-  db: {
-    schema: 'public',
-  },
-  global: {
-    headers: {
-      'x-application-name': 'pretium',
+// Server-only client for API routes (should not be used in browser)
+export const createServerSupabaseClient = () => {
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false, // Don't persist sessions on server
+      autoRefreshToken: false,
     },
-  },
-});
+    db: {
+      schema: 'public',
+    },
+    global: {
+      headers: {
+        'x-application-name': 'pretium',
+      },
+    },
+  });
+};
 
 // Types for our database tables
 export type Project = {

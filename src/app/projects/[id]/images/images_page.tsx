@@ -3,7 +3,11 @@ import { useEffect, useState } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { supabase, ProjectImage } from '@/lib/supabase';
 import ImageListView, { ImageItem } from '@/components/ImageListView';
+import DescriptionInput from '@/components/DescriptionInput';
 import { TagValue, getAllTagOptions, getTagLabel, getTagBadgeClass } from '@/lib/tagConfig';
+import { useViewPreference } from '@/hooks/useViewPreference';
+import { useImageManagement } from '@/hooks/useImageManagement';
+import Toast from '@/components/Toast';
 
 // Extended interface to track rotation and changes
 interface ExtendedProjectImage extends ProjectImage {
@@ -35,10 +39,8 @@ export default function ProjectImagesPage() {
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string>('');
   
-  // New state for view toggle and bulk save
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [saveLoading, setSaveLoading] = useState(false);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  // Use the view preference hook for persistent view state
+  const { viewMode, setViewMode, toggleViewMode } = useViewPreference('project-images');
   
   // Drag and drop state
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -58,6 +60,12 @@ export default function ProjectImagesPage() {
   // State for tracking images in reports and current user
   const [imagesInReports, setImagesInReports] = useState<Set<string>>(new Set());
   const [currentUser, setCurrentUser] = useState<any>(null);
+
+  // Use the shared image management hook
+  const { updateImageFromAutoSave, handleImageUpdate, handleShowSuccessMessage } = useImageManagement({
+    projectId,
+    onSuccessMessage: (message) => setSuccessMessage(message)
+  });
 
   useEffect(() => {
     const fetchImages = async () => {
@@ -113,12 +121,6 @@ export default function ProjectImagesPage() {
     
     if (projectId) fetchImages();
   }, [projectId]);
-
-  // Check for unsaved changes
-  useEffect(() => {
-    const hasChanges = images.some(img => img.hasChanges);
-    setHasUnsavedChanges(hasChanges);
-  }, [images]);
 
   // Filter images based on criteria
   useEffect(() => {
@@ -188,60 +190,25 @@ export default function ProjectImagesPage() {
       if (img.id === imageId) {
         const updated = { ...img, [field]: value };
         
-        // Check if this creates a change from original
-        const hasDescriptionChange = updated.description !== img.originalDescription;
-        const hasTagChange = updated.tag !== img.originalTag;
-        updated.hasChanges = hasDescriptionChange || hasTagChange;
+        // If this is an auto-save update, reset hasChanges to false
+        if (field === 'description') {
+          // Check if this is an auto-save (value matches current description)
+          if (value === img.description) {
+            updated.hasChanges = false;
+            updated.originalDescription = value as string;
+          } else {
+            // This is a new change
+            updated.hasChanges = true;
+          }
+        } else if (field === 'tag') {
+          // For tag updates, check if it differs from original
+          updated.hasChanges = updated.tag !== img.originalTag;
+        }
         
         return updated;
       }
       return img;
     }));
-  };
-
-  const bulkSaveChanges = async () => {
-    const changedImages = images.filter(img => img.hasChanges);
-    if (changedImages.length === 0) return;
-
-    setSaveLoading(true);
-    setError(null);
-
-    try {
-      // Update all changed images in parallel
-      const updatePromises = changedImages.map(img => 
-        supabase
-          .from('project_images')
-          .update({
-            description: img.description,
-            tag: img.tag
-          })
-          .eq('id', img.id)
-      );
-
-      const results = await Promise.all(updatePromises);
-      
-      // Check for errors
-      const errors = results.filter(result => result.error);
-      if (errors.length > 0) {
-        throw new Error(`Failed to update ${errors.length} image(s)`);
-      }
-
-      // Reset change tracking
-      setImages(prev => prev.map(img => ({
-        ...img,
-        hasChanges: false,
-        originalDescription: img.description,
-        originalTag: img.tag
-      })));
-
-      setSuccessMessage(`Successfully saved changes to ${changedImages.length} image(s)!`);
-      setTimeout(() => setSuccessMessage(null), 3000);
-
-    } catch (error: any) {
-      setError(error.message);
-    } finally {
-      setSaveLoading(false);
-    }
   };
 
   // Drag and drop handlers
@@ -349,27 +316,36 @@ export default function ProjectImagesPage() {
     if (!selectedImage) return;
     
     setUpdateLoading(true);
-    const { error } = await supabase
-      .from('project_images')
-      .update({
-        description: editDescription,
-        tag: editTag
-      })
-      .eq('id', selectedImage.id);
+    setError(null);
 
-    if (error) {
+    try {
+      const { error } = await supabase
+        .from('project_images')
+        .update({
+          description: editDescription,
+          tag: editTag
+        })
+        .eq('id', selectedImage.id);
+
+      if (error) {
+        setError(error.message);
+      } else {
+        // Update the local state
+        setImages(prev => prev.map(img => 
+          img.id === selectedImage.id 
+            ? { ...img, description: editDescription, tag: editTag }
+            : img
+        ));
+        setSelectedImage(prev => prev ? { ...prev, description: editDescription, tag: editTag } : null);
+        setEditMode(false);
+        
+        // Refresh autocomplete descriptions happens automatically in component
+      }
+    } catch (error: any) {
       setError(error.message);
-    } else {
-      // Update the local state
-      setImages(prev => prev.map(img => 
-        img.id === selectedImage.id 
-          ? { ...img, description: editDescription, tag: editTag }
-          : img
-      ));
-      setSelectedImage(prev => prev ? { ...prev, description: editDescription, tag: editTag } : null);
-      setEditMode(false);
+    } finally {
+      setUpdateLoading(false);
     }
-    setUpdateLoading(false);
   };
 
   const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -388,75 +364,111 @@ export default function ProjectImagesPage() {
     setUploadLoading(true);
 
     try {
+      const fileArray = Array.from(files);
+      const validFiles = fileArray.filter(file => file.type.startsWith('image/'));
+      
+      if (validFiles.length === 0) {
+        setError('No valid image files selected');
+        return;
+      }
+
+      // Show initial progress
+      setUploadProgress(`Uploading ${validFiles.length} photos...`);
+
+      // Process uploads in parallel with controlled concurrency (10 at a time)
+      const BATCH_SIZE = 10;
       const uploadedImages: ExtendedProjectImage[] = [];
-
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        setUploadProgress(`Uploading ${file.name} (${i + 1}/${files.length})`);
+      const errors: string[] = [];
+      
+      for (let i = 0; i < validFiles.length; i += BATCH_SIZE) {
+        const batch = validFiles.slice(i, i + BATCH_SIZE);
+        setUploadProgress(`Uploading batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(validFiles.length/BATCH_SIZE)} (${i + 1}-${Math.min(i + BATCH_SIZE, validFiles.length)} of ${validFiles.length})`);
         
-        if (!file.type.startsWith('image/')) {
-          setError(`Skipping ${file.name} - not an image file`);
-          continue;
-        }
+        // Process batch in parallel
+        const batchPromises = batch.map(async (file) => {
+          try {
+            // Upload to Supabase Storage
+            const fileExt = file.name.split('.').pop();
+            const fileName = `${Date.now()}-${Math.random()}.${fileExt}`;
+            const filePath = `${projectId}/${fileName}`;
 
-        // Upload to Supabase Storage
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${Date.now()}-${Math.random()}.${fileExt}`;
-        const filePath = `${projectId}/${fileName}`;
+            const { error: uploadError } = await supabase.storage
+              .from('project-images')
+              .upload(filePath, file);
 
-        const { error: uploadError } = await supabase.storage
-          .from('project-images')
-          .upload(filePath, file);
-
-        if (uploadError) {
-          console.error('Upload error:', uploadError);
-          setError(`Failed to upload ${file.name}: ${uploadError.message}`);
-          continue;
-        }
-
-        // Get public URL
-        const { data: { publicUrl } } = supabase.storage
-          .from('project-images')
-          .getPublicUrl(filePath);
-
-        // Save to database
-        const { data: imageData, error: dbError } = await supabase
-          .from('project_images')
-          .insert([
-            {
-              project_id: projectId,
-              url: publicUrl,
-              description: '',
-              tag: null,
-              user_id: currentUser.id
+            if (uploadError) {
+              throw new Error(`Storage upload failed for ${file.name}: ${uploadError.message}`);
             }
-          ])
-          .select()
-          .single();
 
-        if (dbError) {
-          console.error('Database error:', dbError);
-          setError(`Failed to save ${file.name} to database: ${dbError.message}`);
-          continue;
-        }
+            // Get public URL
+            const { data: { publicUrl } } = supabase.storage
+              .from('project-images')
+              .getPublicUrl(filePath);
 
-        uploadedImages.push({
-          ...imageData,
-          rotation: 0,
-          hasChanges: false,
-          originalDescription: imageData.description,
-          originalTag: imageData.tag
+            return {
+              file,
+              publicUrl,
+              filePath
+            };
+          } catch (error: any) {
+            errors.push(error.message);
+            return null;
+          }
         });
+
+        const batchResults = await Promise.all(batchPromises);
+        const successfulUploads = batchResults.filter(result => result !== null);
+
+        // Batch database inserts for successful uploads
+        if (successfulUploads.length > 0) {
+          const insertData = successfulUploads.map(result => ({
+            project_id: projectId,
+            url: result!.publicUrl,
+            description: '',
+            tag: null,
+            user_id: currentUser.id
+          }));
+
+          const { data: imageDataArray, error: dbError } = await supabase
+            .from('project_images')
+            .insert(insertData)
+            .select();
+
+          if (dbError) {
+            console.error('Database batch insert error:', dbError);
+            errors.push(`Database save failed for batch: ${dbError.message}`);
+          } else if (imageDataArray) {
+            // Add to uploaded images array
+            imageDataArray.forEach(imageData => {
+              uploadedImages.push({
+                ...imageData,
+                rotation: 0,
+                hasChanges: false,
+                originalDescription: imageData.description,
+                originalTag: imageData.tag
+              });
+            });
+          }
+        }
       }
 
       // Add uploaded images to local state
       if (uploadedImages.length > 0) {
         setImages(prev => [...uploadedImages, ...prev]);
-        setSuccessMessage(`Successfully uploaded ${uploadedImages.length} photo${uploadedImages.length !== 1 ? 's' : ''}!`);
-        setError(null);
         
-        // Clear success message after 3 seconds
-        setTimeout(() => setSuccessMessage(null), 3000);
+        const successMsg = `Successfully uploaded ${uploadedImages.length} photo${uploadedImages.length !== 1 ? 's' : ''}!`;
+        const errorMsg = errors.length > 0 ? ` (${errors.length} failed)` : '';
+        setSuccessMessage(successMsg + errorMsg);
+        
+        // Clear success message after 5 seconds for batch uploads
+        setTimeout(() => setSuccessMessage(null), 5000);
+      }
+
+      // Show errors if any
+      if (errors.length > 0 && uploadedImages.length === 0) {
+        setError(`All uploads failed. First error: ${errors[0]}`);
+      } else if (errors.length > 0) {
+        console.warn('Some uploads failed:', errors);
       }
 
     } catch (error: any) {
@@ -510,41 +522,6 @@ export default function ProjectImagesPage() {
 
   return (
     <div className="container page-content" style={{ background: 'var(--color-bg)', minHeight: '100vh' }}>
-      {/* Fixed Save Button */}
-      {hasUnsavedChanges && (
-        <div style={{
-          position: 'fixed',
-          top: '20px',
-          right: '20px',
-          zIndex: 1000,
-          background: 'var(--color-primary)',
-          color: 'white',
-          padding: '1rem',
-          borderRadius: '0.5rem',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '1rem'
-        }}>
-          <span>
-            {images.filter(img => img.hasChanges).length} unsaved change(s)
-          </span>
-          <button
-            onClick={bulkSaveChanges}
-            disabled={saveLoading}
-            className="btn btn-sm"
-            style={{
-              background: 'white',
-              color: 'var(--color-primary)',
-              border: 'none',
-              fontWeight: 'bold'
-            }}
-          >
-            {saveLoading ? 'Saving...' : 'Save All'}
-          </button>
-        </div>
-      )}
-
       <h1 style={{ marginBottom: '2rem', color: 'var(--color-primary)' }}>
         {selectionMode ? 'Select Photos for Report' : 'All Project Images'}
       </h1>
@@ -746,19 +723,10 @@ export default function ProjectImagesPage() {
       </div>
       
       {error && (
-        <div className="alert alert-error">{error}</div>
+        <Toast message={error} type="error" />
       )}
 
-      {successMessage && (
-        <div className="alert alert-success" style={{ 
-          backgroundColor: 'rgba(40, 167, 69, 0.1)', 
-          color: 'var(--color-success)', 
-          border: '1px solid rgba(40, 167, 69, 0.3)',
-          marginBottom: '1rem'
-        }}>
-          {successMessage}
-        </div>
-      )}
+      <Toast message={successMessage} type="success" />
 
       {loading ? (
         <div style={{ color: 'var(--color-primary)' }}>Loading...</div>
@@ -899,35 +867,53 @@ export default function ProjectImagesPage() {
 
           {/* List View (using shared component) */}
           {viewMode === 'list' && (
-                          <ImageListView
-                images={filteredImages.map(img => ({
-                  id: img.id,
-                  url: img.url,
-                  description: img.description || '',
-                  tag: img.tag,
-                  created_at: img.created_at,
-                  user_id: img.user_id || undefined,
-                  hasChanges: img.hasChanges,
-                  rotation: img.rotation
-                }))}
-                onUpdateImage={updateImageInList}
-                onRemoveImage={handleDelete}
-                showUserInfo={true}
-                showRotateButton={true}
-                currentUserId={currentUser?.id}
-                imagesInReports={imagesInReports}
-                selectionMode={selectionMode}
-                selectedImages={selectedImages}
-                onToggleSelection={toggleImageSelection}
-                dragAndDrop={true}
-                onDragStart={handleDragStart}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onDragEnd={handleDragEnd}
-                draggedIndex={draggedIndex}
-                dragOverIndex={dragOverIndex}
-              />
+            <ImageListView
+              images={filteredImages.map(img => ({
+                id: img.id,
+                url: img.url,
+                description: img.description || '',
+                tag: img.tag,
+                created_at: img.created_at,
+                user_id: img.user_id || undefined,
+                hasChanges: img.hasChanges,
+                rotation: img.rotation
+              }))}
+              onUpdateImage={(imageId, field, value) => {
+                const update = handleImageUpdate(imageId, field, value);
+                setImages(prev => prev.map(img => {
+                  if (img.id === update.imageId) {
+                    const updated = { ...img, [update.field]: update.value };
+                    
+                    // Check if this creates a change from original
+                    const hasDescriptionChange = updated.description !== img.originalDescription;
+                    const hasTagChange = updated.tag !== img.originalTag;
+                    updated.hasChanges = hasDescriptionChange || hasTagChange;
+                    
+                    return updated;
+                  }
+                  return img;
+                }));
+              }}
+              onAutoSaveUpdate={updateImageFromAutoSave}
+              onShowSuccessMessage={handleShowSuccessMessage}
+              onRemoveImage={handleDelete}
+              showUserInfo={true}
+              showRotateButton={true}
+              currentUserId={currentUser?.id}
+              projectId={projectId}
+              imagesInReports={imagesInReports}
+              selectionMode={selectionMode}
+              selectedImages={selectedImages}
+              onToggleSelection={toggleImageSelection}
+              dragAndDrop={true}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onDragEnd={handleDragEnd}
+              draggedIndex={draggedIndex}
+              dragOverIndex={dragOverIndex}
+            />
           )}
         </>
       )}
@@ -998,13 +984,13 @@ export default function ProjectImagesPage() {
               <div style={{ marginBottom: '1.5rem' }}>
                 <div style={{ marginBottom: '1rem' }}>
                   <label className="form-label" style={{ color: 'var(--color-text)' }}>Description</label>
-                  <textarea
+                  <DescriptionInput
                     value={editDescription}
-                    onChange={(e) => setEditDescription(e.target.value)}
-                    className="form-input"
-                    rows={3}
+                    onChange={setEditDescription}
                     placeholder="Enter image description..."
-                    style={{ width: '100%', resize: 'vertical' }}
+                    style={{ minHeight: '120px' }}
+                    userId={currentUser?.id}
+                    projectId={projectId}
                   />
                 </div>
                 <div style={{ marginBottom: '1rem' }}>

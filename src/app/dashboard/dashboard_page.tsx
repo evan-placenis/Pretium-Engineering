@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Project } from '@/lib/supabase';
+import { useViewPreference } from '@/hooks/useViewPreference';
 
 export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -12,9 +13,11 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [projectFilter, setProjectFilter] = useState<'all' | 'mine'>('all');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const router = useRouter();
+  
+  // Use the view preference hook for persistent view state
+  const { viewMode, toggleViewMode } = useViewPreference('dashboard-projects');
 
   useEffect(() => {
     // Check for user authentication
@@ -228,7 +231,7 @@ export default function Dashboard() {
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
         <button
           className="btn btn-secondary btn-sm"
-          onClick={() => setViewMode(mode => mode === 'grid' ? 'list' : 'grid')}
+          onClick={toggleViewMode}
         >
           {viewMode === 'grid' ? 'List View' : 'Grid View'}
         </button>

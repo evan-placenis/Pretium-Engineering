@@ -1,4 +1,4 @@
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, ImageRun, Header } from 'docx';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, ImageRun, Header, Numbering, LevelFormat } from 'docx';
 import { Project, ReportImage } from '@/lib/supabase';
 
 /**
@@ -468,10 +468,43 @@ export const createWordDocumentWithImages = async (
     bodyChildren.push(projectDetailsTable);
     bodyChildren.push(new Paragraph({ text: "" })); // Empty space
 
+    // Define numbering config for numbered paragraphs
+    const numbering = {
+      config: [
+        {
+          reference: 'ai-numbering',
+          levels: [
+            {
+              level: 0,
+              format: LevelFormat.DECIMAL,
+              text: '%1.',
+              alignment: AlignmentType.LEFT,
+              style: { paragraph: { indent: { left: 360, hanging: 360 } } },
+            },
+            {
+              level: 1,
+              format: LevelFormat.DECIMAL,
+              text: '%1.%2.',
+              alignment: AlignmentType.LEFT,
+              style: { paragraph: { indent: { left: 720, hanging: 360 } } },
+            },
+            {
+              level: 2,
+              format: LevelFormat.DECIMAL,
+              text: '%1.%2.%3.',
+              alignment: AlignmentType.LEFT,
+              style: { paragraph: { indent: { left: 1080, hanging: 360 } } },
+            },
+            // Add more levels if needed
+          ],
+        },
+      ],
+    };
+
     // Split content by lines and process each line
     const lines = content.split('\n');
     let currentParagraphText = '';
-    
+    const numberedLineRegex = /^(\d+(?:\.\d+)*)(?:[\.|\)]?)\s+(.*)$/;
     for (const line of lines) {
       // Check if line contains an image placeholder
       const imageMatch = line.match(/\[IMAGE:(\d+)\]/);
@@ -604,8 +637,38 @@ export const createWordDocumentWithImages = async (
           }));
         }
       } else {
-        // Regular text line
-        if (line.trim()) {
+        // Check for numbered line
+        const numberedMatch = line.match(numberedLineRegex);
+        if (numberedMatch) {
+          // Add any accumulated text as a paragraph before starting a numbered list
+          if (currentParagraphText.trim()) {
+            bodyChildren.push(new Paragraph({ 
+              children: [
+                new TextRun({
+                  text: currentParagraphText,
+                  font: "Segoe UI",
+                  size: 20, // 12pt for body text
+                }),
+              ],
+            }));
+            currentParagraphText = '';
+          }
+          // Determine level (1.1.1 = level 2, etc.)
+          const level = numberedMatch[1].split('.').length - 1;
+          bodyChildren.push(new Paragraph({
+            children: [
+              new TextRun({
+                text: numberedMatch[2],
+                font: "Segoe UI",
+                size: 20,
+              }),
+            ],
+            numbering: {
+              reference: 'ai-numbering',
+              level: level,
+            },
+          }));
+        } else if (line.trim()) {
           currentParagraphText += (currentParagraphText ? '\n' : '') + line;
         } else if (currentParagraphText.trim()) {
           // Empty line, add accumulated text as paragraph
@@ -639,6 +702,7 @@ export const createWordDocumentWithImages = async (
 
     // Create document with proper header
     const doc = new Document({
+      numbering,
       sections: [{
         properties: {
           page: {

@@ -15,72 +15,61 @@ function chunk<T>(array: T[], size: number): T[][] {
 //### PROMPT 1 ###
 const photoWritingPrompt  = `
 #ROLE:
-You are a senior engineering report writer for Pretium. Your task is to generate detailed and technically accurate observations based strictly on a batch of 5 site photographs. These are for internal draft use and will later be compiled and reviewed.
+You are a senior engineering report writer for Pretium. Your task is to generate detailed and technically accurate observations based strictly on the batch of site photographs provided. These observation narratives will form an internal draft, to be used at a later time to generate a full report. Start the draft directly. Do not include preambles. 
+
 
 #CONTEXT:
-Each image is provided with a short description and a tag indicating whether it's an OVERVIEW or DEFICIENCY photo. Use this to guide your interpretation.
+Each image is provided with a short description and a tag  (OVERVIEW or DEFICIENCY). Use this information to guide your interpretation.
 
 #INSTRUCTIONS:
-- Do NOT write an introduction or a conclusion.
-- Do NOT include or reference bullet points — those will be incorporated later.
-- Do NOT refer to previous or future batches.
-- Focus only on describing and analyzing the content of the images provided in this batch.
+- Refer to the provided description and the tags to guide your focus. Use this information to help analyze the content of the images.
+- For each photo, describe what is shown, enhance the description that was provided, and explain its technical significance.
+- You are encouraged to incorporate relevant general knowledge to enhance your analysis of the images.
+- The Tags influence the tone of the description in the following ways:
+  -- DEFICIENCY photos: emphasize the issue and its potential consequences.
+  -- OVERVIEW photos: describe the contents of the image in general terms 
+- Aim for concise observations (1–2 sentences).
+- If you have more than one point, split them into separate bullets with tab indentation.
+- Do NOT write an introduction or a conclusion section for your findings of the batch.
+- Do consider the reference bullet points about the overall site (provided to you) when making observations.
+
 
 #FORMATTING:
-- Use numbered subsections for each photo: e.g., 1.1, 1.2, 1.3, etc.
-- Use uppercase section headers to group related photos if appropriate (e.g., GENERAL, SITE / STAGING AREA, ROOF SECTIONS).
-- For each photo, describe what is shown, summarize the description, and explain its technical significance.
-- Reference each photo using the placeholder format [IMAGE:X] (e.g., [IMAGE:1], [IMAGE:2]). Each image must be referenced once.
-- DEFICIENCY photos: emphasize the issue and its potential consequences.
-- OVERVIEW photos: describe the area and its relevance or condition.
-
+- Reference each photo using the placeholder format [IMAGEID:X] (e.g., [IMAGE:1], [IMAGE:2]). 
+- Each image must be referenced once.
+ 
 #STYLE:
 - Professional engineering tone.
 - Precise, complete, and objective language.
-- Plain text only — no markdown, no asterisks, no styling.
-
-Start the draft directly. Do not include preambles.
+- Plain text only — no markdown, no asterisks, no styling. 
 `;
 
-const finalEditorPrompt = `
+
+const generalAndSummaryPrompt = `
 #ROLE:
-You are a senior engineering editor at Pretium. You are reviewing and finalizing a site observation report that was written in multiple sections by another writer based on batches of site photographs.
+-You are the final editor of a Report for a Civil Engineering firm called Pretium. Your role is to format and finalize building observation reports based on a rough draft composed of a series of site observations. The core content has already been generated. Your primary responsibility is to apply consistent formatting, structure the report with appropriate headers, and ensure clarity and professionalism. You are not expected to rewrite or elaborate on the observations—focus on organizing and polishing the report layout.
 
-#OBJECTIVE:
-- Your job is to refine and re-organize the draft text.
-- Integrate the bullet-point observations that contain information of the overall site.
-- Add a strong opening section and conclude the report as needed.
-- Maintain engineering tone, technical accuracy, and completeness.
 
-#SOURCE MATERIAL:
-You will be given all the raw draft sections written in a numbered format (e.g., 1.1, 1.2, etc.). These observations cover all image-based content but lack context and bullet-point integration.
+#CONTEXT:
+-Each chunk of text corresponds to an observation related to a specific image. In the final formatted report, the observation text will appear on the left, with the associated image on the right. These text-image pairs may not be in their optimal order initially. Your task is to ensure a logical and cohesive flow throughout the report by reordering them where appropriate.
 
-#EDITING TASKS:
-- Reorganize text to follow Pretium’s standard section format:
-  1. GENERAL
-  2. SITE / STAGING AREA
-  3. ROOF SECTIONS
-  4. DEFICIENCY SUMMARY
-- You may create or move content under these headers as appropriate.
-- ADD an introductory paragraph at the beginning of the GENERAL section.
-- ADD a final summary or closing statement at the end of the DEFICIENCY SUMMARY if appropriate.
-- INTEGRATE bullet-point observations into the most relevant sections.
-- Ensure every image placeholder (e.g., [IMAGE:X]) remains in the output exactly once and logically placed.
+#INSTRUCTIONS:
+-If reordering is required, you may do so by retyping the report and placing the relevant text-image pairs in the appropriate order. Do not alter or remove any of the original text in the editing process
+-Always begin the report with the main header: “OBSERVATION/COMMENTS”
+-The first subheading must be: “General”
+-You are encouraged to introduce additional subheadings where appropriate; however, for small observation reports, typically only a few subheadings are needed.
+-Each subheading should be numbered (e.g., 2). Bullet points under a subheading should be labeled sequentially (e.g., 2.1, 2.2, etc.). Use tab indentation to format the bullet points under each subheading for clear hierarchy and readability.
+-You may add brief text where appropriate. As the final editor, you have discretion to make minor adjustments to improve clarity and flow.
 
-#STRICT PRESERVATION RULE:
-- You must NOT delete or omit any content from the existing draft — including photo references, technical details, or observations.
-- You may **reorganize**, **rephrase slightly for clarity**, or **add transitions**, but do not lose or dilute any information.
-- **Every [IMAGE:X] placeholder must appear exactly once** in the final version.
 
 #STYLE:
-- Technical, formal engineering tone
-- Plain text only (no markdown, no formatting)
-- No headers like “Introduction” or “Conclusion” — use only official Pretium section headers as listed above
-
-Start by reviewing the full draft and restructuring as needed.
+- Engineering field report tone
+- Plain text only (no markdown, no styling)
+- Concise, objective, and formal
 `;
 
-const generalAndSummaryPrompt =  `
+
+const old_prompt =  `
 #ROLE:
 You are a senior engineering editor at Pretium. Your task is to write only two sections — the GENERAL section and the DEFICIENCY SUMMARY — for a site observation report.
 
@@ -274,12 +263,12 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
           content: [
             {
               type: 'text',
-              text: `Process Image Batch #${i + 1} of ${imageChunks.length}: Write observations for the following ${currentChunk.length} images using numbered subsections ${i + 1}.1, ${i + 1}.2, ${i + 1}.3, etc. Reference each image using [IMAGE:X] starting from ${i * 5 + 1}.`,
+              text: `Process Image Batch #${i + 1} of ${imageChunks.length}: Reference each image once using [IMAGE:X] starting from ${i * 5 + 1}. For each photo below, write bullet-point observations. Where appropriate, incorporate general site knowledge provided here: ${bulletPoints}.`,
             },
             ...currentChunk.flatMap((img: ReportImage, index: number) => [
               {
                 type: 'text' as const,
-                text: `Photo ${i * 5 + index + 1} Description (${img.tag?.toUpperCase() || 'OVERVIEW'}): ${img.description || 'No description provided'}`,
+                text: `Photo ${i * 5 + index + 1} Description: ${img.description || 'No description provided'}, Tag: (${img.tag?.toUpperCase() || 'OVERVIEW'}) `,
               },
               {
                 type: 'image_url' as const,
@@ -327,7 +316,7 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
     // Final review step
     const combinedDraft = batchResponses.join('\n\n');
 
-    const generalAndSummaryMessages: OpenAI.ChatCompletionMessageParam[] = [
+    const FinalReportMessage: OpenAI.ChatCompletionMessageParam[] = [
       {
         role: 'system',
         content: generalAndSummaryPrompt,
@@ -337,56 +326,27 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
         content: [
           {
             type: 'text',
-            text: `Here are the general bullet points that were used to generate the report:\n\n${bulletPoints}\n\n
-                    Here is the existing draft composed of ${batchResponses.length} sections to use as context:\n\n${combinedDraft} \n\n Please write a General opening statement`,
+            text: `IMPORTANT: All edits must be done by retyping the entire report. Do not delete, the original text from the final report.
+                  Here is the draft report composed of ${batchResponses.length} sections that need to be re-ordered and formatted according to the instructions:\n\n${combinedDraft}`,
           },
         ],
       },
     ];
 
-    const generalAndSummaryOutput = await openai.chat.completions.create({
+    const FinalReportOutput = await openai.chat.completions.create({
       model: 'gpt-4o',
-      messages: generalAndSummaryMessages,
+      messages: FinalReportMessage,
       temperature: 0.7,
     });
 
 
-    const finalSummaryOutputMessages: OpenAI.ChatCompletionMessageParam[] = [
-        {
-          role: 'system',
-          content: generalAndSummaryPrompt,
-        },
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: `Here are the general bullet points that were used to generate the report:\n\n${bulletPoints}\n\n
-                      Here is the existing draft composed of ${batchResponses.length} sections to use as context:\n\n${combinedDraft} \n\n Please write a General opening statement`,
-            },
-          ],
-        },
-      ];
-  
-      const finalSummaryOutput = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: finalSummaryOutputMessages,
-        temperature: 0.7,
-      });
+    const finalReport = FinalReportOutput.choices[0]?.message.content || '';
 
-    //const reviewedContent = finalReview.choices[0]?.message.content || '';
-    const generalText = generalAndSummaryOutput.choices[0]?.message.content || '';
-    const summaryText = finalSummaryOutput.choices[0]?.message.content || '';
-
-    const fullReport =
-    generalText + '\n\n' +
-    combinedDraft + '\n\n' +
-    summaryText; // optional if separated
     
     // Update the database with the final content
     const { error: finalUpdateError } = await supabase
       .from('reports')
-      .update({ generated_content: fullReport })
+      .update({ generated_content: finalReport })
       .eq('id', reportId);
       
     if (finalUpdateError) {

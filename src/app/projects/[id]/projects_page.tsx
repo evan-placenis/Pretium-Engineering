@@ -442,7 +442,12 @@ export default function ProjectPage({ id }: { id: string }) {
             reportViewMode === 'grid' ? (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "1.5rem" }}>
                 {reports.map((report, index) => (
-                  <div key={report.id} className="card" style={{ height: '100%' }}>
+                  <div
+                    key={report.id}
+                    className="card"
+                    style={{ height: '100%', cursor: 'pointer' }}
+                    onClick={() => router.push(`/reports/${report.id}/edit`)}
+                  >
                     <div className="card-image">
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -469,19 +474,19 @@ export default function ProjectPage({ id }: { id: string }) {
                         <Link
                           href={`/reports/${report.id}/edit`}
                           className="btn btn-secondary btn-sm"
-                          onClick={(e) => e.stopPropagation()}
+                          onClick={e => e.stopPropagation()}
                         >
                           Edit
                         </Link>
                         <Link
                           href={`/reports/${report.id}`}
                           className="btn btn-primary btn-sm"
-                          onClick={(e) => e.stopPropagation()}
+                          onClick={e => e.stopPropagation()}
                         >
-                          View
+                          Detail
                         </Link>
                         <button
-                          onClick={(e) => handleDeleteReport(report.id, e)}
+                          onClick={e => { e.stopPropagation(); handleDeleteReport(report.id, e); }}
                           disabled={deleteLoading === report.id}
                           className="btn btn-danger btn-sm"
                         >
@@ -495,7 +500,12 @@ export default function ProjectPage({ id }: { id: string }) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {reports.map((report, index) => (
-                  <div key={report.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', padding: '0.75rem 1rem' }}>
+                  <div
+                    key={report.id}
+                    className="card"
+                    style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', padding: '0.75rem 1rem', cursor: 'pointer' }}
+                    onClick={() => router.push(`/reports/${report.id}/edit`)}
+                  >
                     <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '1rem' }}>
                       <span style={{ fontWeight: "500", fontSize: "1rem" }}>
                         {report.title || `Report ${index + 1}`}
@@ -528,19 +538,19 @@ export default function ProjectPage({ id }: { id: string }) {
                       <Link
                         href={`/reports/${report.id}/edit`}
                         className="btn btn-secondary btn-sm"
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={e => e.stopPropagation()}
                       >
                         Edit
                       </Link>
                       <Link
                         href={`/reports/${report.id}`}
                         className="btn btn-primary btn-sm"
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={e => e.stopPropagation()}
                       >
-                        View
+                        Details
                       </Link>
                       <button
-                        onClick={(e) => handleDeleteReport(report.id, e)}
+                        onClick={e => { e.stopPropagation(); handleDeleteReport(report.id, e); }}
                         disabled={deleteLoading === report.id}
                         className="btn btn-danger btn-sm"
                       >

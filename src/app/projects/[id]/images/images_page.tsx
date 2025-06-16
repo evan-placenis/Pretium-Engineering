@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
-import { supabase, ProjectImage } from '@/lib/supabase';
+import { supabase, ProjectImage, Project } from '@/lib/supabase';
 import ImageListView, { ImageItem } from '@/components/ImageListView';
 import DescriptionInput from '@/components/DescriptionInput';
 import { TagValue, getAllTagOptions, getTagLabel, getTagBadgeClass } from '@/lib/tagConfig';
@@ -61,11 +61,32 @@ export default function ProjectImagesPage() {
   const [imagesInReports, setImagesInReports] = useState<Set<string>>(new Set());
   const [currentUser, setCurrentUser] = useState<any>(null);
 
+  // Add project state
+  const [project, setProject] = useState<Project | null>(null);
+
   // Use the shared image management hook
   const { updateImageFromAutoSave, handleImageUpdate, handleShowSuccessMessage } = useImageManagement({
     projectId,
     onSuccessMessage: (message) => setSuccessMessage(message)
   });
+
+  // New state for create group mode
+  const [createGroupMode, setCreateGroupMode] = useState(false);
+  const [groupName, setGroupName] = useState('');
+
+  // Fetch project info
+  useEffect(() => {
+    const fetchProject = async () => {
+      if (!projectId) return;
+      const { data, error } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('id', projectId)
+        .single();
+      if (!error) setProject(data);
+    };
+    fetchProject();
+  }, [projectId]);
 
   useEffect(() => {
     const fetchImages = async () => {
@@ -520,10 +541,92 @@ export default function ProjectImagesPage() {
     }
   };
 
+  // Helper to get all unique groups
+  const getAllGroups = (images: ExtendedProjectImage[]) => {
+    const groupSet = new Set<string>();
+    images.forEach(img => {
+      (img.group || []).forEach(g => groupSet.add(g));
+    });
+    return Array.from(groupSet);
+  };
+
+  const allGroups = getAllGroups(images);
+
+  // Delete group handler
+  const handleDeleteGroup = async (groupToDelete: string) => {
+    setUploadLoading(true);
+    setError(null);
+    try {
+      // Remove group from all images in Supabase
+      const imagesWithGroup = images.filter(img => (img.group || []).includes(groupToDelete));
+      const updates = imagesWithGroup.map(async img => {
+        const newGroups = (img.group || []).filter(g => g !== groupToDelete);
+        await supabase
+          .from('project_images')
+          .update({ group: newGroups })
+          .eq('id', img.id);
+        return { ...img, group: newGroups };
+      });
+      const updatedImages = await Promise.all(updates);
+      // Update local state
+      setImages(prev => prev.map(img => {
+        const updated = updatedImages.find(u => u.id === img.id);
+        return updated ? updated : img;
+      }));
+      setFilteredImages(prev => prev.map(img => {
+        const updated = updatedImages.find(u => u.id === img.id);
+        return updated ? updated : img;
+      }));
+      setSuccessMessage(`Deleted group "${groupToDelete}" from ${imagesWithGroup.length} photo(s)`);
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete group');
+    } finally {
+      setUploadLoading(false);
+    }
+  };
+
+  // Update handleSaveGroup to add group to array
+  const handleSaveGroup = async () => {
+    if (!groupName.trim() || selectedImages.size === 0) return;
+    setUploadLoading(true);
+    setError(null);
+    try {
+      const selectedImageIds = Array.from(selectedImages);
+      // For each selected image, add group if not present
+      const imagesToUpdate = images.filter(img => selectedImages.has(img.id));
+      const updates = imagesToUpdate.map(async img => {
+        const groups = Array.isArray(img.group) ? [...img.group] : (img.group ? [img.group] : []);
+        if (!groups.includes(groupName.trim())) groups.push(groupName.trim());
+        await supabase
+          .from('project_images')
+          .update({ group: groups })
+          .eq('id', img.id);
+        return { ...img, group: groups };
+      });
+      const updatedImages = await Promise.all(updates);
+      setImages(prev => prev.map(img => {
+        const updated = updatedImages.find(u => u.id === img.id);
+        return updated ? updated : img;
+      }));
+      setFilteredImages(prev => prev.map(img => {
+        const updated = updatedImages.find(u => u.id === img.id);
+        return updated ? updated : img;
+      }));
+      setSuccessMessage(`Grouped ${selectedImages.size} photo(s) as "${groupName.trim()}"`);
+      setCreateGroupMode(false);
+      setGroupName('');
+      setSelectedImages(new Set());
+    } catch (err: any) {
+      setError(err.message || 'Failed to create group');
+    } finally {
+      setUploadLoading(false);
+    }
+  };
+
   return (
     <div className="container page-content" style={{ background: 'var(--color-bg)', minHeight: '100vh' }}>
       <h1 style={{ marginBottom: '2rem', color: 'var(--color-primary)' }}>
-        {selectionMode ? 'Select Photos for Report' : 'All Project Images'}
+        {project?.project_name || 'Project'}: Images Database
       </h1>
       
       <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
@@ -619,7 +722,46 @@ export default function ProjectImagesPage() {
             </button>
           </>
         )}
+        <button
+          className="btn btn-primary"
+          onClick={() => setCreateGroupMode(true)}
+          style={{ fontWeight: 600 }}
+        >
+          Create Group
+        </button>
       </div>
+
+      {createGroupMode && (
+        <div style={{ marginBottom: '2rem', background: '#f8f9fa', padding: '1rem', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+          <h3 style={{ marginBottom: '1rem' }}>Create a New Group</h3>
+          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem' }}>
+            <input
+              type="text"
+              value={groupName}
+              onChange={e => setGroupName(e.target.value)}
+              placeholder="Enter group name"
+              style={{ padding: '0.5rem', fontSize: '1rem', border: '1px solid #ccc', borderRadius: '4px', minWidth: '200px' }}
+            />
+            <button
+              className="btn btn-success"
+              onClick={handleSaveGroup}
+              disabled={!groupName.trim() || selectedImages.size === 0 || uploadLoading}
+            >
+              {uploadLoading ? 'Saving...' : `Save Group (${selectedImages.size} selected)`}
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => { setCreateGroupMode(false); setGroupName(''); setSelectedImages(new Set()); }}
+              disabled={uploadLoading}
+            >
+              Cancel
+            </button>
+          </div>
+          <div style={{ color: '#888', fontSize: '0.95rem', marginBottom: '0.5rem' }}>
+            Select photos below to add to this group.
+          </div>
+        </div>
+      )}
 
       {/* Filter Controls */}
       <div className="card" style={{ marginBottom: '2rem' }}>
@@ -734,6 +876,25 @@ export default function ProjectImagesPage() {
         <div style={{ color: 'var(--color-text-light)' }}>No images found for this project.</div>
       ) : (
         <>
+          {/* List all groups above the grid */}
+          {allGroups.length > 0 && (
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+              {allGroups.map(group => (
+                <div key={group} style={{ display: 'flex', alignItems: 'center', background: '#e0e7ff', color: '#3730a3', padding: '0.25rem 0.75rem', borderRadius: '12px', fontSize: '0.95rem', fontWeight: 500 }}>
+                  {group}
+                  <button
+                    onClick={() => handleDeleteGroup(group)}
+                    style={{ marginLeft: '0.5rem', background: 'none', border: 'none', color: '#b91c1c', fontWeight: 700, cursor: 'pointer', fontSize: '1.1em' }}
+                    title={`Delete group '${group}' from all photos`}
+                    disabled={uploadLoading}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Grid View (existing) */}
           {viewMode === 'grid' && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '1.5rem' }}>
@@ -746,15 +907,15 @@ export default function ProjectImagesPage() {
                     position: 'relative',
                     background: 'var(--color-bg-card)',
                     color: 'var(--color-text)',
-                    border: selectionMode && selectedImages.has(img.id) 
+                    border: (createGroupMode || selectionMode) && selectedImages.has(img.id) 
                       ? '3px solid var(--color-primary)' 
                       : '1px solid var(--color-border-dark)',
                     boxShadow: 'var(--shadow-sm)',
                     cursor: 'pointer',
                   }}
-                  onClick={() => selectionMode ? toggleImageSelection(img.id) : handleImageClick(img)}
+                  onClick={() => (createGroupMode || selectionMode) ? toggleImageSelection(img.id) : handleImageClick(img)}
                 >
-                  {selectionMode && (
+                  {(createGroupMode || selectionMode) && (
                     <div
                       style={{
                         position: 'absolute',
@@ -776,6 +937,25 @@ export default function ProjectImagesPage() {
                       )}
                     </div>
                   )}
+                  {/* Show all group badges for each image */}
+                  {Array.isArray(img.group) && img.group.map(g => (
+                    <div key={g} style={{
+                      position: 'absolute',
+                      top: '0.5rem',
+                      right: '0.5rem',
+                      background: '#e0e7ff',
+                      color: '#3730a3',
+                      padding: '0.25rem 0.75rem',
+                      borderRadius: '12px',
+                      fontSize: '0.85rem',
+                      fontWeight: 500,
+                      zIndex: 2,
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.07)',
+                      marginBottom: '0.25rem',
+                    }}>
+                      {g}
+                    </div>
+                  ))}
                   <img
                     src={img.url}
                     alt={img.description || 'Project image'}
@@ -786,7 +966,7 @@ export default function ProjectImagesPage() {
                       borderRadius: '0.25rem',
                       marginBottom: '1rem',
                       background: 'var(--color-primary)',
-                      opacity: selectionMode && selectedImages.has(img.id) ? 0.8 : 1,
+                      opacity: (createGroupMode || selectionMode) && selectedImages.has(img.id) ? 0.8 : 1,
                       transform: `rotate(${img.rotation || 0}deg)`,
                     }}
                   />

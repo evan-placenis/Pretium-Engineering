@@ -156,83 +156,23 @@ export default function ImageListView({
           <div 
             key={image.id} 
             className="card" 
-            draggable={dragAndDrop && !selectionMode}
-            onDragStart={dragAndDrop ? (e) => onDragStart?.(e, idx) : undefined}
-            onDragOver={dragAndDrop ? (e) => onDragOver?.(e, idx) : undefined}
-            onDragLeave={dragAndDrop ? onDragLeave : undefined}
-            onDrop={dragAndDrop ? (e) => onDrop?.(e, idx) : undefined}
-            onDragEnd={dragAndDrop ? onDragEnd : undefined}
             style={{ 
               display: 'flex', 
               gap: '1.5rem', 
               padding: '1rem', 
               marginBottom: '2rem',
               position: 'relative',
-              cursor: dragAndDrop && !selectionMode ? 'grab' : 'default',
-              opacity: draggedIndex === idx ? 0.5 : 1,
-              transform: draggedIndex === idx ? 'rotate(5deg)' : 'none',
-              transition: draggedIndex === idx ? 'none' : 'all 0.2s ease',
-              border: dragOverIndex === idx && draggedIndex !== idx 
-                ? '2px dashed var(--color-primary)' 
-                : '1px solid var(--color-border-dark)',
-              backgroundColor: dragOverIndex === idx && draggedIndex !== idx 
-                ? 'rgba(43, 87, 154, 0.05)' 
-                : 'var(--color-bg-card)'
+              cursor: 'default',
+              border: '1px solid var(--color-border-dark)',
+              backgroundColor: 'var(--color-bg-card)'
             }}
           >
-            {/* Drag handle for reordering */}
-            {dragAndDrop && !selectionMode && (
-              <div
-                style={{
-                  position: 'absolute',
-                  left: '0.5rem',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  cursor: 'grab',
-                  color: 'var(--color-text-light)',
-                  fontSize: '1.2rem',
-                  padding: '0.5rem',
-                  zIndex: 1
-                }}
-                title="Drag to reorder"
-              >
-                ⋮⋮
-              </div>
-            )}
-
-            {/* Selection checkbox */}
-            {selectionMode && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '1rem',
-                  left: '1rem',
-                  width: '24px',
-                  height: '24px',
-                  borderRadius: '3px',
-                  border: '2px solid var(--color-primary)',
-                  backgroundColor: selectedImages?.has(image.id) ? 'var(--color-primary)' : 'white',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  zIndex: 2,
-                  cursor: 'pointer'
-                }}
-                onClick={() => onToggleSelection?.(image.id)}
-              >
-                {selectedImages?.has(image.id) && (
-                  <span style={{ color: 'white', fontSize: '14px', fontWeight: 'bold' }}>✓</span>
-                )}
-              </div>
-            )}
-            
             {/* Main content section */}
             <div style={{ 
               flex: '1', 
               display: 'flex', 
               flexDirection: 'column', 
-              gap: '1rem',
-              marginLeft: dragAndDrop && !selectionMode ? '2rem' : '0'
+              gap: '1rem'
             }}>
               {/* Description input with autocomplete */}
               <div style={{ marginBottom: '1rem' }}>
@@ -380,7 +320,6 @@ export default function ImageListView({
                   borderRadius: '0.25rem',
                   transform: `rotate(${image.rotation || 0}deg)`,
                   cursor: 'pointer',
-                  pointerEvents: draggedIndex === idx ? 'none' : 'auto',
                 }}
               />
             </div>

@@ -13,6 +13,7 @@ function chunk<T>(array: T[], size: number): T[][] {
 }
 
 //### PROMPT 1 ###
+
 const photoWritingPrompt  = `
 #ROLE:
 You are a senior engineering report writer for Pretium. Your task is to generate detailed and technically accurate observations based strictly on the batch of site photographs provided. These observation narratives will form an internal draft, to be used at a later time to generate a full report. Start the draft directly. Do not include preambles. 
@@ -35,6 +36,7 @@ Each image is provided with a short description and a tag  (OVERVIEW or DEFICIEN
 
 
 
+
 #FORMATTING:
 - Reference each photo using the placeholder format [IMAGEID:X] (e.g., [IMAGE:1], [IMAGE:2]). 
 - Each image must be referenced once.
@@ -50,7 +52,7 @@ Each image is provided with a short description and a tag  (OVERVIEW or DEFICIEN
 - Plain text only — no markdown, no asterisks, no styling. 
 `;
 
-
+//-You are encouraged to introduce additional subheadings where appropriate; however, for small observation reports, typically only a few subheadings are needed.
 const generalAndSummaryPrompt = `
 #ROLE:
 -You are the final editor of a Report for a Civil Engineering firm called Pretium. Your role is to format and finalize building observation reports based on a rough draft composed of a series of site observations. The core content has already been generated. Your primary responsibility is to apply consistent formatting, structure the report with appropriate headers, and ensure clarity and professionalism. You are not expected to rewrite or elaborate on the observations—focus on organizing and polishing the report layout.
@@ -63,7 +65,9 @@ const generalAndSummaryPrompt = `
 #INSTRUCTIONS:
 -If reordering is required, you may do so by retyping the report and placing the relevant text-image pairs in the appropriate order. Do not alter or remove any of the original text in the editing process
 -Do not make main heaings, only make subheadings that have a number in front of them.
--You are encouraged to introduce additional subheadings where appropriate; however, for small observation reports, typically only a few subheadings are needed.
+-You must group the photos into subheadings based on the group name which is provided as [GROUP:X] at the end of the description. The subheading must be the group name.
+- An image may be a part of multiple groups. In this case the image must appear once in each group.
+-If the image is not part of a group, create one subheading called "General Observations" and group all the images that are not part of a group.
 -Each subheading should be numbered (e.g., 1). Bullet points under a subheading should be labeled sequentially (e.g., 1.1, 1.2, etc.). Use tab indentation to format the bullet points under each subheading for clear hierarchy and readability.
 -You may add brief text where appropriate. As the final editor, you have discretion to make minor adjustments to improve clarity and flow.
 
@@ -286,12 +290,14 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
           content: [
             {
               type: 'text',
-              text: `Process Image Batch #${i + 1} of ${imageChunks.length}: Reference each image once using [IMAGE:X] starting from ${i * 5 + 1}. For each photo below, write bullet-point observations. Where appropriate, incorporate general site knowledge provided here: ${bulletPoints}.`,
+              text: `Process Image Batch #${i + 1} of ${imageChunks.length}: Reference each image once using [IMAGE:X] starting from ${i * 5 + 1}. For each photo below, write bullet-point observations. 
+              If the image is part of a group, reference the group as [GROUP:<GROUP NAME>] at the end of the descirption.
+              Where appropriate, incorporate general site knowledge provided here: ${bulletPoints}.`,
             },
             ...currentChunk.flatMap((img: ReportImage, index: number) => [
               {
                 type: 'text' as const,
-                text: `Photo ${i * 5 + index + 1} Description: ${img.description || 'No description provided'}, Tag: (${img.tag?.toUpperCase() || 'OVERVIEW'}) `,
+                text: `Photo ${i * 5 + index + 1} Description: ${img.description || 'No description provided'}, Tag: (${img.tag?.toUpperCase() || 'OVERVIEW'}), Group: (${img.group || 'NO GROUP'}) `,
               },
               {
                 type: 'image_url' as const,

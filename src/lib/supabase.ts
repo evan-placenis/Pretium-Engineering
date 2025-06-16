@@ -136,6 +136,7 @@ export type ReportImage = {
   description: string;
   tag: TagValue;
   user_id?: string;
+  group?: string[];
 };
 
 export type ProjectImage = {
@@ -146,6 +147,7 @@ export type ProjectImage = {
   created_at: string;
   project_id: string;
   user_id?: string;
+  group?: string[];
 };
 
 export type ChatMessage = {

@@ -1,9 +1,9 @@
 'use client';
 //page to view individal report
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { supabase, Project, Report, ChatMessage, ReportImage } from '@/lib/supabase';
+import { supabase, Project, Report, ReportImage } from '@/lib/supabase';
 import { createWordDocumentWithImages } from '@/lib/word-utils';
 
 interface ReportViewProps {
@@ -13,16 +13,12 @@ interface ReportViewProps {
 export default function ReportView({ id }: ReportViewProps) {
   const [report, setReport] = useState<Report | null>(null);
   const [project, setProject] = useState<Project | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [images, setImages] = useState<ReportImage[]>([]);
-  const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
-  const [sendingMessage, setSendingMessage] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const router = useRouter();
-  const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const fetchReportAndProject = async () => {
@@ -94,100 +90,11 @@ export default function ReportView({ id }: ReportViewProps) {
         setImages(imagesWithUrls);
       }
       
-      // Fetch chat messages
-      await fetchMessages();
       setLoading(false);
     };
 
     fetchReportAndProject();
   }, [id]);
-
-  const fetchMessages = async () => {
-    const { data: messagesData, error: messagesError } = await supabase
-      .from('chat_messages')
-      .select('*')
-      .eq('report_id', id)
-      .order('created_at', { ascending: true });
-    
-    if (messagesError) {
-      console.error('Error fetching messages:', messagesError);
-    } else {
-      setMessages(messagesData || []);
-    }
-  };
-
-  useEffect(() => {
-    // Scroll to bottom when messages change
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages]);
-
-  const handleSendMessage = async () => {
-    if (!newMessage.trim() || !report) return;
-    
-    setSendingMessage(true);
-    
-    // Add user message to database
-    const userMessage = {
-      report_id: id,
-      content: newMessage,
-      role: 'user' as const,
-    };
-    
-    try {
-      // Insert user message
-      const { error: userMessageError } = await supabase
-        .from('chat_messages')
-        .insert([userMessage]);
-      
-      if (userMessageError) throw userMessageError;
-      
-      // Clear input
-      setNewMessage('');
-      
-      // Call OpenAI API
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          reportId: id,
-          message: newMessage,
-          report: report,
-          projectName: project?.name,
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to get response from AI');
-      }
-      
-      const data = await response.json();
-      
-      // Insert AI response
-      const aiMessage = {
-        report_id: id,
-        content: data.reply,
-        role: 'assistant' as const,
-      };
-      
-      const { error: aiMessageError } = await supabase
-        .from('chat_messages')
-        .insert([aiMessage]);
-      
-      if (aiMessageError) throw aiMessageError;
-      
-      // Refresh messages
-      await fetchMessages();
-    } catch (error: any) {
-      console.error('Error in chat interaction:', error);
-      setError(error.message || 'An error occurred during the chat interaction');
-    } finally {
-      setSendingMessage(false);
-    }
-  };
 
   const handleExportWord = async () => {
     if (!report) return;
@@ -341,48 +248,6 @@ export default function ReportView({ id }: ReportViewProps) {
 
         <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gridGap: "1.5rem" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-            <div className="card">
-              <div className="card-body">
-                <h2 style={{ marginBottom: "1rem", fontSize: "1.25rem", fontWeight: "600" }}>Generated Report</h2>
-                <div className="prose" style={{ whiteSpace: "pre-wrap" }}>
-                  {report.generated_content.split('\n').map((line, index) => {
-                    if (line.startsWith('IMAGE:')) {
-                      const imageUrl = line.replace('IMAGE:', '').trim();
-                      const image = images.find(img => img.url === imageUrl);
-                      console.log('Found image:', { imageUrl, image }); // Debug log
-                      return (
-                        <div key={index} style={{ margin: '1rem 0' }}>
-                          <img 
-                            src={imageUrl}
-                            alt={image?.description || 'Report image'}
-                            style={{ 
-                              maxWidth: '100%', 
-                              height: 'auto',
-                              borderRadius: '0.5rem',
-                              marginBottom: image?.description ? '0.5rem' : 0
-                            }}
-                            onError={(e) => {
-                              console.error('Image failed to load:', imageUrl);
-                              e.currentTarget.style.display = 'none';
-                            }}
-                          />
-                          {image?.description && (
-                            <p style={{ 
-                              fontSize: "0.875rem",
-                              color: "var(--color-text-light)",
-                              margin: 0
-                            }}>
-                              {image.description}
-                            </p>
-                          )}
-                        </div>
-                      );
-                    }
-                    return <div key={index}>{line}</div>;
-                  })}
-                </div>
-              </div>
-            </div>
 
             <div className="card">
               <div className="card-body">

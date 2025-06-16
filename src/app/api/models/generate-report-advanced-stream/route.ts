@@ -32,13 +32,14 @@ Each image is provided with a short description and a tag  (OVERVIEW or DEFICIEN
 - If you have more than one point, split them into separate bullets with tab indentation.
 - Do NOT write an introduction or a conclusion section for your findings of the batch.
 - Do consider the reference bullet points about the overall site (provided to you) when making observations.
+- There can be multiple bullet points per image.
+- Do not use "-" to start a bullet point, just use the number on a new line. Note: Never use "-" in professional reports.
 
 
 #FORMATTING:
 - Reference each photo using the placeholder format [IMAGEID:X] (e.g., [IMAGE:1], [IMAGE:2]). 
 - Each image must be referenced once.
-- There can be multiple bullet points per image.
-- Do not use "-" to start a bullet point, just use the number on a new line.
+
  
 #STYLE:
 - Professional engineering tone.

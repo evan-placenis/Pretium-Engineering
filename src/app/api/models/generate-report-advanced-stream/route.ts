@@ -55,8 +55,8 @@ const generalAndSummaryPrompt = `
 
 #INSTRUCTIONS:
 -If reordering is required, you may do so by retyping the report and placing the relevant text-image pairs in the appropriate order. Do not alter or remove any of the original text in the editing process
--Always begin the report with the main header: “OBSERVATION/COMMENTS”
--The first subheading must be: “General”
+-Always begin the report with the main header: "OBSERVATIONS"
+
 -You are encouraged to introduce additional subheadings where appropriate; however, for small observation reports, typically only a few subheadings are needed.
 -Each subheading should be numbered (e.g., 2). Bullet points under a subheading should be labeled sequentially (e.g., 2.1, 2.2, etc.). Use tab indentation to format the bullet points under each subheading for clear hierarchy and readability.
 -You may add brief text where appropriate. As the final editor, you have discretion to make minor adjustments to improve clarity and flow.
@@ -143,9 +143,19 @@ async function resizeImageForAI(imageUrl: string, maxWidth: number = 1024, maxHe
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(request: Request) {
+  console.log('API Route: generate-report-advanced-stream called');
   try {
-    const { bulletPoints, contractName, location, reportId, images } = await req.json();
+    const body = await request.json();
+    console.log('Request body:', {
+      hasBulletPoints: !!body.bulletPoints,
+      hasContractName: !!body.contractName,
+      hasLocation: !!body.location,
+      hasReportId: !!body.reportId,
+      imagesCount: body.images?.length || 0
+    });
+
+    const { bulletPoints, contractName, location, reportId, images } = body;
 
     if (!bulletPoints || !reportId) {
       return NextResponse.json(
@@ -154,19 +164,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Start the actual generation process asynchronously
-    processReportAsync(bulletPoints, contractName, location, reportId, images);
+    // Start the async processing
+    processReportAsync(bulletPoints, contractName, location, reportId, images)
+      .catch(error => {
+        console.error('Error in processReportAsync:', error);
+      });
 
-    // Return success immediately
-    return NextResponse.json({ 
-      success: true, 
+    // Return immediately while processing continues
+    return NextResponse.json({
+      success: true,
       message: 'Report generation started',
-      reportId 
+      reportId: reportId
     });
   } catch (error: any) {
-    console.error('Error starting streaming generation:', error);
+    console.error('Error in POST handler:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to start report generation' },
+      { error: error.message || 'An error occurred while starting report generation' },
       { status: 500 }
     );
   }
@@ -175,7 +188,10 @@ export async function POST(req: NextRequest) {
 // Async function to handle the actual processing
 async function processReportAsync(bulletPoints: string, contractName: string, location: string, reportId: string, images: any[]) {
   try {
+    console.log('Starting report processing for ID:', reportId);
+    
     // First, verify the report exists in the database
+    console.log('Verifying report exists in database...');
     const { data: existingReport, error: checkError } = await supabase
       .from('reports')
       .select('id, generated_content')
@@ -184,19 +200,33 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       
     if (checkError) {
       console.error('Error checking if report exists:', checkError);
+      console.error('Error details:', {
+        code: checkError.code,
+        message: checkError.message,
+        details: checkError.details,
+        hint: checkError.hint
+      });
       throw new Error(`Report ${reportId} not found in database`);
     }
+    
+    console.log('Report found in database:', {
+      id: existingReport.id,
+      hasContent: !!existingReport.generated_content
+    });
 
     // Use images passed in the request body
     let imagesToUse: (ReportImage)[] = [];
     
     if (images && images.length > 0) {
+      console.log('Using provided images:', images.length);
       imagesToUse = images;
-    } else{
+    } else {
+      console.error('No images provided for report generation');
       return;
     }
 
     // Update status in database
+    console.log('Updating initial status in database...');
     const { error: updateError1 } = await supabase
       .from('reports')
       .update({ 
@@ -206,6 +236,14 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
     
     if (updateError1) {
       console.error('Error updating database with initial status:', updateError1);
+      console.error('Error details:', {
+        code: updateError1.code,
+        message: updateError1.message,
+        details: updateError1.details,
+        hint: updateError1.hint
+      });
+    } else {
+      console.log('Successfully updated initial status');
     }
 
     // Resize images for AI processing

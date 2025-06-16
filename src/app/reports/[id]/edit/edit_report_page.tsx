@@ -300,7 +300,27 @@ export default function ReportEditor() {
           return;
         }
 
+        // Test database connection first
+        console.log('Testing database connection...');
+        const { data: testData, error: testError } = await supabase
+          .from('reports')
+          .select('id')
+          .limit(1);
+          
+        if (testError) {
+          console.error('Database connection test failed:', testError);
+          console.error('Error details:', {
+            code: testError.code,
+            message: testError.message,
+            details: testError.details,
+            hint: testError.hint
+          });
+          return;
+        }
+        console.log('Database connection test successful');
+
         // Fetch the current report content
+        console.log('Fetching report content from database...');
         const { data: reportData, error } = await supabase
           .from('reports')
           .select('generated_content, updated_at')
@@ -309,8 +329,20 @@ export default function ReportEditor() {
 
         if (error) {
           console.error('Error polling for updates:', error);
+          console.error('Error details:', {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+            hint: error.hint
+          });
           return;
         }
+
+        console.log('Database response:', {
+          hasData: !!reportData,
+          contentLength: reportData?.generated_content?.length || 0,
+          updatedAt: reportData?.updated_at
+        });
 
         if (reportData?.generated_content) {
           const currentContent = reportData.generated_content;

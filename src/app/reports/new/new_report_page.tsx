@@ -202,6 +202,7 @@ export default function NewReport() {
       });
 
       // Save the initial report data to the database first
+      console.log('Attempting to create report record in database...');
       const { error: saveError, data: reportData } = await supabase
         .from('reports')
         .insert([
@@ -216,17 +217,27 @@ export default function NewReport() {
         .select()
         .single();
 
-      if (saveError) throw saveError;
-      console.log('Created report record:', reportData);
+      if (saveError) {
+        console.error('Error creating report record:', saveError);
+        throw saveError;
+      }
+      console.log('Successfully created report record:', reportData);
 
       // Insert all images into report_images with report_id first
-      await supabase.from('report_images').insert(allImages.map(img => ({
+      console.log('Attempting to insert report images...');
+      const { error: imagesError } = await supabase.from('report_images').insert(allImages.map(img => ({
         report_id: reportData.id,
         url: img.url,
         tag: img.tag,
         description: img.description,
         user_id: user.id // Add user tracking
       })));
+      
+      if (imagesError) {
+        console.error('Error inserting report images:', imagesError);
+        throw imagesError;
+      }
+      console.log('Successfully inserted report images');
 
       const selectedModelConfig = AVAILABLE_MODELS.find(model => model.id === selectedModel) || AVAILABLE_MODELS[0];
       console.log('Starting report generation with reportId:', reportData.id, 'using model:', selectedModelConfig.name);

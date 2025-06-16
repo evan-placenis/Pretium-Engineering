@@ -217,11 +217,6 @@ export default function NewReport() {
         .select()
         .single();
 
-      if (saveError) {
-        console.error('Error creating report record:', saveError);
-        throw saveError;
-      }
-      console.log('Successfully created report record:', reportData);
 
       // Insert all images into report_images with report_id first
       console.log('Attempting to insert report images...');
@@ -233,11 +228,6 @@ export default function NewReport() {
         user_id: user.id // Add user tracking
       })));
       
-      if (imagesError) {
-        console.error('Error inserting report images:', imagesError);
-        throw imagesError;
-      }
-      console.log('Successfully inserted report images');
 
       const selectedModelConfig = AVAILABLE_MODELS.find(model => model.id === selectedModel) || AVAILABLE_MODELS[0];
       console.log('Starting report generation with reportId:', reportData.id, 'using model:', selectedModelConfig.name);

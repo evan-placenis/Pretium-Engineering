@@ -29,16 +29,19 @@ Each image is provided with a short description and a tag  (OVERVIEW or DEFICIEN
   -- DEFICIENCY photos: emphasize the issue and its potential consequences.
   -- OVERVIEW photos: describe the contents of the image in general terms 
 - Aim for concise observations (1–2 sentences).
-- If you have more than one point, split them into separate bullets with tab indentation.
+- If you have more than one point, split them into separate bullets.
 - Do NOT write an introduction or a conclusion section for your findings of the batch.
 - Do consider the reference bullet points about the overall site (provided to you) when making observations.
-- There can be multiple bullet points per image.
-- Do not use "-" to start a bullet point, just use the number on a new line. Note: Never use "-" in professional reports.
+
 
 
 #FORMATTING:
 - Reference each photo using the placeholder format [IMAGEID:X] (e.g., [IMAGE:1], [IMAGE:2]). 
 - Each image must be referenced once.
+- Sections are formatted with a number in the format - 1. , 2., 3. ect.. [This is not your job]
+- Bullet points are formatted with a number in the format - 1.1 , 1.2, 1.3  ect..
+- There should be one bullet point per image.
+- Do not use "-" to start a bullet point, instead use the appropriate number. Note: Never use "-" in professional reports.
 
  
 #STYLE:
@@ -55,14 +58,23 @@ const generalAndSummaryPrompt = `
 
 #CONTEXT:
 -Each chunk of text corresponds to an observation related to a specific image. In the final formatted report, the observation text will appear on the left, with the associated image on the right. These text-image pairs may not be in their optimal order initially. Your task is to ensure a logical and cohesive flow throughout the report by reordering them where appropriate.
+-The report already has a "General Project Status" and "Observations" section created manually. Your output is appended into the already existing "Observations" sections, so make appropriate subheadings and bullet points.
 
 #INSTRUCTIONS:
 -If reordering is required, you may do so by retyping the report and placing the relevant text-image pairs in the appropriate order. Do not alter or remove any of the original text in the editing process
--Always begin the report with the main header: "OBSERVATIONS"
-
+-Do not make main heaings, only make subheadings that have a number in front of them.
 -You are encouraged to introduce additional subheadings where appropriate; however, for small observation reports, typically only a few subheadings are needed.
--Each subheading should be numbered (e.g., 2). Bullet points under a subheading should be labeled sequentially (e.g., 2.1, 2.2, etc.). Use tab indentation to format the bullet points under each subheading for clear hierarchy and readability.
+-Each subheading should be numbered (e.g., 1). Bullet points under a subheading should be labeled sequentially (e.g., 1.1, 1.2, etc.). Use tab indentation to format the bullet points under each subheading for clear hierarchy and readability.
 -You may add brief text where appropriate. As the final editor, you have discretion to make minor adjustments to improve clarity and flow.
+
+#FORMATTING:
+- Sections are formatted with a number in the format - 1. , 2., 3. ect..
+- Bullet points are formatted with a number in the format - 1.1 , 1.2, 1.3  ect.. (do not use 1.1.1, 1.1.2, ect.. )
+
+- There can (and should) be multiple bullet points per image separated by a new line.
+- Do not use "-" to start a bullet point, instead use the appropriate number. Note: Never use "-" in professional reports.
+- Do not create a title "observations" because it already exists. 
+- Reference each photo using the placeholder format [IMAGEID:X] (e.g., [IMAGE:1], [IMAGE:2]). 
 
 
 #STYLE:

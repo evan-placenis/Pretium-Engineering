@@ -630,7 +630,7 @@ const createStagingAreaSection = async ():  Promise<(Paragraph | Table)[]> => {
     const sectionHeader = new Paragraph({
       children: [
         new TextRun({
-          text: "Site / Staging Area -  Construction Set Up",
+          text: "Site / Staging Area - Construction Set Up",
           bold: true,
           font: "Segoe UI",
           size: 20,
@@ -711,18 +711,7 @@ const createStagingAreaSection = async ():  Promise<(Paragraph | Table)[]> => {
   }
 };
 
-const createSection = async (upperText: string): Promise<(Paragraph | Table)[]> => {
-  if (upperText === "LOCATION PLAN") {
-    return await createLocationPlanSection();
-  } else if (upperText === "GENERAL PROJECT STATUS") {
-    return await createGeneralProjectStatusSection();
-  } else if (upperText === "OBSERVATIONS") {
-    return await createObservationSection();
-  } else if (upperText === "STAGING AREA") {
-    return await createStagingAreaSection();
-  }
-  return []; // Return empty array for unknown sections
-};
+
 
 const createNumberedParagraph = (text: string, level: number) => {
   if (level === 0) {
@@ -800,24 +789,7 @@ const createFormattedParagraph = async (text: string): Promise<(Paragraph | Tabl
   const upperText = text.trim().toUpperCase();
   const paragraphs: (Paragraph | Table)[] = [];
 
-  // If it's a section header, add the section formatting 
-  if (sectionHeaders.includes(upperText)) {
-    // const sectionParagraphs = await createSection(upperText);
-    // paragraphs.push(...sectionParagraphs);
 
-    // HARD CODED RIGHT NOW TESTING
-    const sectionParagraphs = await createSection("LOCATION PLAN");
-    paragraphs.push(...sectionParagraphs);
-
-    const sectionParagraphss = await createSection("GENERAL PROJECT STATUS");
-    paragraphs.push(...sectionParagraphss);
-
-    const sectionParagraphsss = await createSection("OBSERVATIONS");
-    paragraphs.push(...sectionParagraphsss);
-
-    const sectionParagraphssss = await createSection("STAGING AREA");
-    paragraphs.push(...sectionParagraphssss);
-  }
 
   // Process the actual content regardless of whether it's a section header
   const numberedMatch = text.match(/^(\d+(?:\.\d+)*)(?:[\.|\)]?)\s+(.*)$/);
@@ -907,14 +879,19 @@ const createTextCell = async (text: string): Promise<TableCell> => {
   });
 };
 
-/**
- * Create Word document with proper image handling and professional header
- */
+interface SectionSelection {
+  locationPlan: boolean;
+  generalProjectStatus: boolean;
+  observations: boolean;
+  stagingArea: boolean;
+}
+
 export const createWordDocumentWithImages = async (
   content: string, 
   images: ReportImage[], 
   filename: string, 
-  project: Project | null
+  project: Project | null,
+  sectionSelection?: SectionSelection
 ) => {
   try {
     // Load Pretium logo
@@ -1055,6 +1032,29 @@ export const createWordDocumentWithImages = async (
         },
       ],
     };
+
+    // Create sections based on selection
+    if (sectionSelection) {
+      if (sectionSelection.locationPlan) {
+        const locationPlanSection = await createLocationPlanSection();;
+        bodyChildren.push(...locationPlanSection);
+      }
+      
+      if (sectionSelection.generalProjectStatus) {
+        const generalProjectStatusSection = await createGeneralProjectStatusSection();
+        bodyChildren.push(...generalProjectStatusSection);
+      }
+      
+      if (sectionSelection.observations) {
+        const observationsSection = await createObservationSection();
+        bodyChildren.push(...observationsSection);
+      }
+
+      if (sectionSelection.stagingArea) {
+        const stagingAreaSection = await createStagingAreaSection();
+        bodyChildren.push(...stagingAreaSection);
+      }
+    }
 
     // Split content by lines and process each line
     const lines = content.split('\n');

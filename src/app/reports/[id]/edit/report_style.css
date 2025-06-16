@@ -1,0 +1,96 @@
+/* Main report header */
+.report-header {
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin-bottom: 0em;
+  color: #0E2841;
+}
+
+/* Subheading (e.g., 1.1, 2.2) */
+.report-subheading {
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 400;
+  margin-bottom: 0em;
+  color: #0E2841;
+}
+
+
+.report-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 2rem;
+  margin-bottom: 0rem;
+}
+
+.report-text {
+  flex: 1 1 60%;
+  text-align: justify;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.report-image-block {
+  flex: 0 0 40%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.report-indent {
+  margin-left: 2em;
+}
+
+.report-image {
+  max-width: 100%;
+  height: auto;
+  border: px solid #ddd;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+}
+
+.report-image-caption {
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 1rem;
+  color: #666;
+  margin: 0;
+  font-style: italic;
+  text-align: left;
+}
+
+.report-boxed-section {
+  border: 3px solid #bbb;
+  border-radius: 4px;
+  padding: 1rem 1.5rem 1rem 1.5rem;
+  margin: 1.5rem 0;
+  background: #fff;
+}
+
+.report-boxed-header {
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 1.1rem;
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.02em;
+}
+
+.report-boxed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.report-boxed-item {
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 1rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.report-boxed-num {
+  font-weight: bold;
+  margin-right: 0.5rem;
+}

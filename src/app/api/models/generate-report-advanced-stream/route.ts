@@ -167,10 +167,22 @@ export async function POST(request: Request) {
 
     // Start the async processing
     console.log('Starting async processing for report:', reportId);
-    processReportAsync(bulletPoints, contractName, location, reportId, images)
-      .catch(error => {
-        console.error('Error in processReportAsync:', error);
-      });
+    
+    // Wrap the async processing in a try-catch to ensure we catch any errors
+    try {
+      await processReportAsync(bulletPoints, contractName, location, reportId, images);
+      console.log('Async processing completed successfully');
+    } catch (error: any) {
+      console.error('Error in processReportAsync:', error);
+      // Update the report with the error
+      await supabase
+        .from('reports')
+        .update({ 
+          generated_content: `Error generating report: ${error.message}\n\nPlease try again or use a different model.`
+        })
+        .eq('id', reportId);
+      throw error; // Re-throw to be caught by outer try-catch
+    }
 
     // Return immediately while processing continues
     console.log('Returning initial response for report:', reportId);
@@ -202,12 +214,6 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       
     if (checkError) {
       console.error('Error checking if report exists:', checkError);
-      console.error('Error details:', {
-        code: checkError.code,
-        message: checkError.message,
-        details: checkError.details,
-        hint: checkError.hint
-      });
       throw new Error(`Report ${reportId} not found in database`);
     }
     
@@ -238,15 +244,9 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
     
     if (updateError1) {
       console.error('Error updating database with initial status:', updateError1);
-      console.error('Error details:', {
-        code: updateError1.code,
-        message: updateError1.message,
-        details: updateError1.details,
-        hint: updateError1.hint
-      });
-    } else {
-      console.log('Successfully updated initial status');
+      throw updateError1;
     }
+    console.log('Successfully updated initial status');
 
     // Resize images for AI processing
     console.log('Starting image resizing...');
@@ -270,9 +270,9 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       
     if (updateError2) {
       console.error('Error updating database after image resizing:', updateError2);
-    } else {
-      console.log('Successfully updated status after image resizing');
+      throw updateError2;
     }
+    console.log('Successfully updated status after image resizing');
 
     // Split the images into chunks for better performance
     const imageChunks = chunk(resizedImages, 5);

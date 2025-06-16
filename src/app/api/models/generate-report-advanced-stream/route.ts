@@ -37,6 +37,8 @@ Each image is provided with a short description and a tag  (OVERVIEW or DEFICIEN
 #FORMATTING:
 - Reference each photo using the placeholder format [IMAGEID:X] (e.g., [IMAGE:1], [IMAGE:2]). 
 - Each image must be referenced once.
+- There can be multiple bullet points per image.
+- Do not use "-" to start a bullet point, just use the number on a new line.
  
 #STYLE:
 - Professional engineering tone.
@@ -144,21 +146,11 @@ async function resizeImageForAI(imageUrl: string, maxWidth: number = 1024, maxHe
 }
 
 export async function POST(request: Request) {
-  console.log('API Route: generate-report-advanced-stream called');
   try {
     const body = await request.json();
-    console.log('Request body:', {
-      hasBulletPoints: !!body.bulletPoints,
-      hasContractName: !!body.contractName,
-      hasLocation: !!body.location,
-      hasReportId: !!body.reportId,
-      imagesCount: body.images?.length || 0
-    });
-
     const { bulletPoints, contractName, location, reportId, images } = body;
 
     if (!bulletPoints || !reportId) {
-      console.error('Missing required fields:', { bulletPoints: !!bulletPoints, reportId: !!reportId });
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
@@ -166,14 +158,9 @@ export async function POST(request: Request) {
     }
 
     // Start the async processing
-    console.log('Starting async processing for report:', reportId);
-    
-    // Wrap the async processing in a try-catch to ensure we catch any errors
     try {
       await processReportAsync(bulletPoints, contractName, location, reportId, images);
-      console.log('Async processing completed successfully');
     } catch (error: any) {
-      console.error('Error in processReportAsync:', error);
       // Update the report with the error
       await supabase
         .from('reports')
@@ -181,18 +168,15 @@ export async function POST(request: Request) {
           generated_content: `Error generating report: ${error.message}\n\nPlease try again or use a different model.`
         })
         .eq('id', reportId);
-      throw error; // Re-throw to be caught by outer try-catch
+      throw error;
     }
 
-    // Return immediately while processing continues
-    console.log('Returning initial response for report:', reportId);
     return NextResponse.json({
       success: true,
       message: 'Report generation started',
       reportId: reportId
     });
   } catch (error: any) {
-    console.error('Error in POST handler:', error);
     return NextResponse.json(
       { error: error.message || 'An error occurred while starting report generation' },
       { status: 500 }
@@ -200,12 +184,9 @@ export async function POST(request: Request) {
   }
 }
 
-// Async function to handle the actual processing
 async function processReportAsync(bulletPoints: string, contractName: string, location: string, reportId: string, images: any[]) {
-  console.log('processReportAsync started for report:', reportId);
   try {
     // First, verify the report exists in the database
-    console.log('Verifying report exists in database...');
     const { data: existingReport, error: checkError } = await supabase
       .from('reports')
       .select('id, generated_content')
@@ -213,28 +194,19 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       .single();
       
     if (checkError) {
-      console.error('Error checking if report exists:', checkError);
       throw new Error(`Report ${reportId} not found in database`);
     }
-    
-    console.log('Report found in database:', {
-      id: existingReport.id,
-      hasContent: !!existingReport.generated_content
-    });
 
     // Use images passed in the request body
     let imagesToUse: (ReportImage)[] = [];
     
     if (images && images.length > 0) {
-      console.log('Using provided images:', images.length);
       imagesToUse = images;
     } else {
-      console.error('No images provided for report generation');
       return;
     }
 
     // Update status in database
-    console.log('Updating initial status in database...');
     const { error: updateError1 } = await supabase
       .from('reports')
       .update({ 
@@ -243,24 +215,18 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       .eq('id', reportId);
     
     if (updateError1) {
-      console.error('Error updating database with initial status:', updateError1);
       throw updateError1;
     }
-    console.log('Successfully updated initial status');
 
     // Resize images for AI processing
-    console.log('Starting image resizing...');
     const resizedImages = await Promise.all(
-      imagesToUse.map(async (img, index) => {
-        console.log(`Resizing image ${index + 1}/${imagesToUse.length}`);
+      imagesToUse.map(async (img) => {
         const resizedUrl = await resizeImageForAI(img.url, 1600, 1600, 0.85);
         return { ...img, url: resizedUrl };
       })
     );
-    console.log('Image resizing complete');
 
     // Update status
-    console.log('Updating status after image resizing...');
     const { error: updateError2 } = await supabase
       .from('reports')
       .update({ 
@@ -269,10 +235,8 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       .eq('id', reportId);
       
     if (updateError2) {
-      console.error('Error updating database after image resizing:', updateError2);
       throw updateError2;
     }
-    console.log('Successfully updated status after image resizing');
 
     // Split the images into chunks for better performance
     const imageChunks = chunk(resizedImages, 5);

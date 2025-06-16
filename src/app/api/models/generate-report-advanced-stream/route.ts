@@ -158,19 +158,22 @@ export async function POST(request: Request) {
     const { bulletPoints, contractName, location, reportId, images } = body;
 
     if (!bulletPoints || !reportId) {
+      console.error('Missing required fields:', { bulletPoints: !!bulletPoints, reportId: !!reportId });
       return NextResponse.json(
-        { error: 'Bullet points and report ID are required' },
+        { error: 'Missing required fields' },
         { status: 400 }
       );
     }
 
     // Start the async processing
+    console.log('Starting async processing for report:', reportId);
     processReportAsync(bulletPoints, contractName, location, reportId, images)
       .catch(error => {
         console.error('Error in processReportAsync:', error);
       });
 
     // Return immediately while processing continues
+    console.log('Returning initial response for report:', reportId);
     return NextResponse.json({
       success: true,
       message: 'Report generation started',
@@ -187,9 +190,8 @@ export async function POST(request: Request) {
 
 // Async function to handle the actual processing
 async function processReportAsync(bulletPoints: string, contractName: string, location: string, reportId: string, images: any[]) {
+  console.log('processReportAsync started for report:', reportId);
   try {
-    console.log('Starting report processing for ID:', reportId);
-    
     // First, verify the report exists in the database
     console.log('Verifying report exists in database...');
     const { data: existingReport, error: checkError } = await supabase
@@ -247,23 +249,29 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
     }
 
     // Resize images for AI processing
+    console.log('Starting image resizing...');
     const resizedImages = await Promise.all(
       imagesToUse.map(async (img, index) => {
+        console.log(`Resizing image ${index + 1}/${imagesToUse.length}`);
         const resizedUrl = await resizeImageForAI(img.url, 1600, 1600, 0.85);
         return { ...img, url: resizedUrl };
       })
     );
+    console.log('Image resizing complete');
 
     // Update status
+    console.log('Updating status after image resizing...');
     const { error: updateError2 } = await supabase
       .from('reports')
       .update({ 
-        generated_content: `Images resized (${resizedImages.length}). Starting batch processing...`
+        generated_content: `Images resized (${resizedImages.length}). Starting batch processing...\n\n[PROCESSING IN PROGRESS...]`
       })
       .eq('id', reportId);
       
     if (updateError2) {
       console.error('Error updating database after image resizing:', updateError2);
+    } else {
+      console.log('Successfully updated status after image resizing');
     }
 
     // Split the images into chunks for better performance

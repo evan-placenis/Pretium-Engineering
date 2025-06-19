@@ -351,7 +351,102 @@ export const generate_report_header = async (project: Project | null, pretiumLog
 
   return headerChildren;
 };
-//--------------------------------------------------------------------------------------
+
+export const createProjectDetailsTable = async (project: Project | null) => {
+  // Add remaining project details form to body (only Project Name onwards)
+  const projectDetailsTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: {
+      top: { style: 'none', size: 0 },
+      bottom: { style: 'single', size: 4, color: '000000' },
+      left: { style: 'none', size: 0 },
+      right: { style: 'none', size: 0 },
+      insideHorizontal: { style: 'single', size: 4, color: '000000' },
+      insideVertical: { style: 'none', size: 0 },
+    },
+    rows: [
+      // Project Name (spans full width)
+      new TableRow({
+        children: [
+          new TableCell({
+            columnSpan: 4,
+            margins: { top: 100, bottom: 100, left: 100, right: 100 },
+            children: [new Paragraph({ 
+              children: [
+                new TextRun({
+                  text: `Project Name: ${project?.project_name  || ''}`,
+                  size: 18,
+                  font: "Segoe UI",
+                }),
+              ],
+              alignment: AlignmentType.JUSTIFIED,
+            })],
+          }),
+        ],
+      }),
+      // Client/Owner (spans full width)
+      new TableRow({
+        children: [
+          new TableCell({
+            columnSpan: 4,
+            margins: { top: 100, bottom: 100, left: 100, right: 100 },
+            children: [new Paragraph({ 
+              children: [
+                new TextRun({
+                  text: `Client / Owner: ${project?.["Client Company Name"] || ''}`,
+                  size: 18,
+                  font: "Segoe UI",
+                }),
+              ],
+              alignment: AlignmentType.JUSTIFIED,
+            })],
+          }),
+        ],
+      }),
+      // Contractor (spans full width)
+      new TableRow({
+        children: [
+          new TableCell({
+            columnSpan: 4,
+            margins: { top: 100, bottom: 100, left: 100, right: 100 },
+            children: [new Paragraph({ 
+              children: [
+                new TextRun({
+                  text: `Contractor: ${project?.[ "Contractor Name 1"] || ''}`,
+                  size: 18,
+                  font: "Segoe UI",
+                }),
+              ],
+              alignment: AlignmentType.LEFT,
+            })],
+          }),
+        ],
+      }),
+      // Project Materials (spans full width)
+      new TableRow({
+        children: [
+          new TableCell({
+            columnSpan: 4,
+            margins: { top: 100, bottom: 100, left: 100, right: 100 },
+            children: [new Paragraph({ 
+              children: [
+                new TextRun({
+                  text: "Project Materials observed onsite:",
+                  size: 18,
+                  font: "Segoe UI",
+                }),
+              ],
+              alignment: AlignmentType.LEFT,
+            })],
+          }),
+        ],
+      }),
+    ],
+  });
+  return projectDetailsTable;
+};
+
+//------------------------------------------Hard coded sections--------------------------------------------
 /**
  * Creates a properly formatted paragraph based on whether it's a numbered section
  */
@@ -428,7 +523,7 @@ const createLocationPlanSection = async (): Promise<Paragraph[]> => {
 const createGeneralProjectStatusSection = async (): Promise<Paragraph[]> => {
   const bullets = [
     "Project Completion Date: Currently on Schedule (MODIFY SUBHEADINGS AS NECESSARY)",
-    "Original Estimated ProjectCompletion Date: August 16, 2024 (weather permitting)",
+    "Original Estimated Project Completion Date: August 16, 2024 (weather permitting)",
     "Project Completion Date: Currently on Schedule",
   ];
   try {
@@ -623,7 +718,7 @@ export const createPlaceholderImageRow = async (
 
 const createStagingAreaSection = async ():  Promise<(Paragraph | Table)[]> => {
   const bullets = [
-    "Items without photo are a row in the table and can be inserted in the table where required to ensure proper ordering of items",
+    "Items without photos are a row on the table and can be inserted in the table where required to ensure proper ordering of items",
   ];
   try {
     // Section heading
@@ -711,7 +806,7 @@ const createStagingAreaSection = async ():  Promise<(Paragraph | Table)[]> => {
   }
 };
 
-
+//-------------------------------- WORD UTILS FORMATTING --------------------------------
 
 const createNumberedParagraph = (text: string, level: number) => {
   if (level === 0) {
@@ -886,6 +981,111 @@ interface SectionSelection {
   stagingArea: boolean;
 }
 
+/**
+ * Parses the AI report content into a structure grouped by section and image.
+ * Each bullet point is associated with its section, image(s), and bullet number.
+ * Now more robust: only treat a line as a section header if it matches the section regex and does NOT match the bullet regex.
+ */
+function parseReportSectionsAndImages(content: string) {
+  // Do not filter out empty lines here
+  const lines = content.split('\n');
+  let currentSection = 'General Observations';
+  const sectionRegex = /^\d+\.\s*(.+)$/;
+  const bulletRegex = /^(\d+\.\d+)\s+(.*)$/;
+  const imageRegex = /\[IMAGE:(\d+):([^\]]+)\]/gi;
+
+  const grouped: Record<string, Record<string, { number: string, text: string, groupName: string }[]>> = {};
+
+  for (let rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue; // skip empty lines
+    const sectionMatch = line.match(sectionRegex);
+    if (sectionMatch && !line.match(bulletRegex)) {
+      currentSection = sectionMatch[1].trim();
+      continue;
+    }
+    const bulletMatch = line.match(bulletRegex);
+    const bulletNumber = bulletMatch ? bulletMatch[1] : '';
+    const bulletText = bulletMatch ? bulletMatch[2] : line;
+    const imageMatches = [...line.matchAll(imageRegex)];
+    if (imageMatches.length === 0) continue;
+    if (!grouped[currentSection]) grouped[currentSection] = {};
+    for (const match of imageMatches) {
+      const imageId = match[1];
+      const groupName = match[2];
+      if (!grouped[currentSection][imageId]) grouped[currentSection][imageId] = [];
+      let cleanText = bulletText.replace(imageRegex, '').trim();
+      // Remove extra spaces before punctuation and collapse multiple spaces
+      cleanText = cleanText.replace(/\s+([.,;:])/g, '$1').replace(/\s{2,}/g, ' ');
+      grouped[currentSection][imageId].push({ number: bulletNumber, text: cleanText, groupName });
+    }
+  }
+  return grouped;
+}
+
+// Helper: Render section heading
+function renderSectionHeading(section: string) {
+  return createNumberedParagraph(section, 0);
+}
+
+// Helper: Render bullets for an image
+async function renderBulletsForImage(bullets: { number: string, text: string, groupName: string }[]) {
+  return (await Promise.all(
+    bullets.map(async ({ number, text }) => {
+      if (number) {
+        // Only use the bullet text, not the AI's number
+        return createNumberedParagraph(text, 1);
+      } else {
+        // fallback to createTextCell for non-numbered
+        const cell = await createTextCell(text);
+        // Extract Paragraph(s) from TableCell using _children (private)
+        return Array.isArray((cell as any)._children) ? (cell as any)._children : [(cell as any)._children];
+      }
+    })
+  )).flat();
+}
+
+// Helper: Render image + bullets table
+async function renderImageTable(bulletParagraphs: any[], image: ReportImage | undefined, imageId: string, imageIndex: number) {
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: {
+      top: { style: 'none', size: 0 },
+      bottom: { style: 'none', size: 0 },
+      left: { style: 'none', size: 0 },
+      right: { style: 'none', size: 0 },
+      insideHorizontal: { style: 'none', size: 0 },
+      insideVertical: { style: 'none', size: 0 },
+    },
+    rows: [
+      new TableRow({
+        children: [
+          new TableCell({
+            width: { size: 60, type: WidthType.PERCENTAGE },
+            margins: { top: 0, bottom: 100, left: 0, right: 100 },
+            children: bulletParagraphs,
+          }),
+          image
+            ? await createImageCell(image, imageIndex)
+            : new TableCell({
+                children: [
+                  new Paragraph({
+                    children: [
+                      new TextRun({
+                        text: `[Image ${imageId}: not available]`,
+                        font: "Segoe UI",
+                        size: 20,
+                      }),
+                    ],
+                  }),
+                ],
+              }),
+        ],
+      }),
+    ],
+  });
+}
+
 export const createWordDocumentWithImages = async (
   content: string, 
   images: ReportImage[], 
@@ -907,99 +1107,15 @@ export const createWordDocumentWithImages = async (
     const headerChildren = await generate_report_header(project, pretiumLogoBuffer);
     const bodyChildren = [];
 
-    // Add remaining project details form to body (only Project Name onwards)
-    const projectDetailsTable = new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
-      borders: {
-        top: { style: 'none', size: 0 },
-        bottom: { style: 'single', size: 4, color: '000000' },
-        left: { style: 'none', size: 0 },
-        right: { style: 'none', size: 0 },
-        insideHorizontal: { style: 'single', size: 4, color: '000000' },
-        insideVertical: { style: 'none', size: 0 },
-      },
-      rows: [
-        // Project Name (spans full width)
-        new TableRow({
-          children: [
-            new TableCell({
-              columnSpan: 4,
-              margins: { top: 100, bottom: 100, left: 100, right: 100 },
-              children: [new Paragraph({ 
-                children: [
-                  new TextRun({
-                    text: `Project Name: ${project?.project_name  || ''}`,
-                    size: 18,
-                    font: "Segoe UI",
-                  }),
-                ],
-                alignment: AlignmentType.JUSTIFIED,
-              })],
-            }),
-          ],
-        }),
-        // Client/Owner (spans full width)
-        new TableRow({
-          children: [
-            new TableCell({
-              columnSpan: 4,
-              margins: { top: 100, bottom: 100, left: 100, right: 100 },
-              children: [new Paragraph({ 
-                children: [
-                  new TextRun({
-                    text: `Client / Owner: ${project?.["Client Company Name"] || ''}`,
-                    size: 18,
-                    font: "Segoe UI",
-                  }),
-                ],
-                alignment: AlignmentType.JUSTIFIED,
-              })],
-            }),
-          ],
-        }),
-        // Contractor (spans full width)
-        new TableRow({
-          children: [
-            new TableCell({
-              columnSpan: 4,
-              margins: { top: 100, bottom: 100, left: 100, right: 100 },
-              children: [new Paragraph({ 
-                children: [
-                  new TextRun({
-                    text: `Contractor: ${project?.[ "Contractor Name 1"] || ''}`,
-                    size: 18,
-                    font: "Segoe UI",
-                  }),
-                ],
-                alignment: AlignmentType.LEFT,
-              })],
-            }),
-          ],
-        }),
-        // Project Materials (spans full width)
-        new TableRow({
-          children: [
-            new TableCell({
-              columnSpan: 4,
-              margins: { top: 100, bottom: 100, left: 100, right: 100 },
-              children: [new Paragraph({ 
-                children: [
-                  new TextRun({
-                    text: "Project Materials observed onsite:",
-                    size: 18,
-                    font: "Segoe UI",
-                  }),
-                ],
-                alignment: AlignmentType.LEFT,
-              })],
-            }),
-          ],
-        }),
-      ],
-    });
-    
+
+    const projectDetailsTable = await createProjectDetailsTable(project);
+    // Add project details table
     bodyChildren.push(projectDetailsTable);
     bodyChildren.push(new Paragraph({ text: "" })); // Empty space
+    
+    
+    
+    
 
     // Define numbering config for numbered paragraphs
     const numbering = {
@@ -1056,89 +1172,33 @@ export const createWordDocumentWithImages = async (
       }
     }
 
-    // Split content by lines and process each line
-    const lines = content.split('\n');
-    let currentParagraphText = '';
-    const numberedLineRegex = /^(\d+(?:\.\d+)*)(?:[\.|\)]?)\s+(.*)$/;
-    
-    for (const line of lines) {
-      // Check if line contains an image placeholder
-      const imageMatch = line.match(/\[IMAGE:(\d+)\]/);
-      
-      if (imageMatch) {
-        const imageIndex = parseInt(imageMatch[1]) - 1;
-        const textBeforeImage = line.replace(/\[IMAGE:\d+\]/, '').trim();
+    // --- NEW GROUPING LOGIC ---
+    const grouped = parseReportSectionsAndImages(content);
+    // For each section
+    for (const [section, imagesMap] of Object.entries(grouped)) {
+      // Add section heading using helper
+      bodyChildren.push(renderSectionHeading(section));
+      // For each image in this section
+      for (const [imageId, bullets] of Object.entries(imagesMap)) {
+        const imageNum = parseInt(imageId);
+        const groupName = bullets[0]?.groupName || '';
         
-        // Add any accumulated text as a paragraph
-        if (currentParagraphText.trim()) {
-          const paragraphs = await createFormattedParagraph(currentParagraphText);
-          bodyChildren.push(...paragraphs);
-          currentParagraphText = '';
-        }
+        // Find the image by group and number
+        const img = images.find(img => {
+          const hasGroup = img.group && img.group.length > 0;
+          const groupMatches = hasGroup && img.group!.some(g => g === groupName);
+          const numberMatches = img.number === imageNum;
+          return groupMatches && numberMatches;
+        });
         
-        // Create two-column table for text and image (without borders)
-        if (images[imageIndex]) {
-          const table = new Table({
-            width: {
-              size: 100,
-              type: WidthType.PERCENTAGE,
-            },
-            borders: {
-              top: { style: 'none', size: 0 },
-              bottom: { style: 'none', size: 0 },
-              left: { style: 'none', size: 0 },
-              right: { style: 'none', size: 0 },
-              insideHorizontal: { style: 'none', size: 0 },
-              insideVertical: { style: 'none', size: 0 },
-            },
-            rows: [
-              new TableRow({
-                children: [
-                  await createTextCell(textBeforeImage),
-                  await createImageCell(images[imageIndex], imageIndex),
-                ],
-              }),
-            ],
-          });
-          
-          bodyChildren.push(table);
-        } else {
-          // Image not found, just add the text
-          const paragraphs = await createFormattedParagraph(textBeforeImage);
-          bodyChildren.push(...paragraphs);
-        }
-      } else {
-        // Check for numbered line
-        const numberedMatch = line.match(numberedLineRegex);
-        if (numberedMatch) {
-          // Add any accumulated text as a paragraph before starting a numbered list
-          if (currentParagraphText.trim()) {
-            const paragraphs = await createFormattedParagraph(currentParagraphText);
-            bodyChildren.push(...paragraphs);
-            currentParagraphText = '';
-          }
-
-          const numberParts = numberedMatch[1].split('.');
-          const level = numberParts.length - 1;
-          const text = numberedMatch[2];
-          bodyChildren.push(createNumberedParagraph(text, level));
-        } else if (line.trim()) {
-          currentParagraphText += (currentParagraphText ? '\n' : '') + line;
-        } else if (currentParagraphText.trim()) {
-          // Empty line, add accumulated text as paragraph
-          const paragraphs = await createFormattedParagraph(currentParagraphText);
-          bodyChildren.push(...paragraphs);
-          currentParagraphText = '';
-          bodyChildren.push(new Paragraph({ text: "" })); // Empty paragraph for spacing
-        }
+        // Compose bullet list as Paragraphs using helper
+        const bulletParagraphs = await renderBulletsForImage(bullets);
+        // Create table row: bullets left, image right using helper
+        const table = await renderImageTable(bulletParagraphs, img, imageId, imageNum - 1);
+        bodyChildren.push(table);
       }
     }
-    
-    // Add any remaining text
-    if (currentParagraphText.trim()) {
-      const paragraphs = await createFormattedParagraph(currentParagraphText);
-      bodyChildren.push(...paragraphs);
-    }
+    // --- END NEW LOGIC ---
 
     // Create document with proper header
     const doc = new Document({

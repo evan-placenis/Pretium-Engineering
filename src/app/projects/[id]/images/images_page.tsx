@@ -8,6 +8,7 @@ import { TagValue, getAllTagOptions, getTagLabel, getTagBadgeClass } from '@/lib
 import { useViewPreference } from '@/hooks/useViewPreference';
 import { useImageManagement } from '@/hooks/useImageManagement';
 import Toast from '@/components/Toast';
+import UploadPhotoModal from '@/components/UploadPhotoModal';
 
 // Extended interface to track rotation and changes
 interface ExtendedProjectImage extends ProjectImage {
@@ -15,7 +16,63 @@ interface ExtendedProjectImage extends ProjectImage {
   hasChanges?: boolean;
   originalDescription?: string;
   originalTag?: TagValue;
+  number?: number | null;
 }
+
+/**
+ * FUNCTION INDEX - Project Images Page
+ * 
+ * DATA FETCHING & INITIALIZATION:
+ * - fetchProject() - Fetches project details from database
+ * - fetchImages() - Fetches all project images and report usage data
+ * 
+ * IMAGE MANAGEMENT:
+ * - handlePhotoUpload() - Handles bulk photo upload with progress tracking
+ * - handleDelete() - Deletes individual images with confirmation
+ * - handleUpdate() - Updates image description and tag in modal
+ * - updateImageInList() - Updates image fields in list view with change tracking
+ * 
+ * FILTERING & SORTING:
+ * - handleSortChange() - Cycles through sort orders (desc/asc/manual)
+ * - getAllGroups() - Extracts unique group names from images
+ * 
+ * SELECTION & GROUPING:
+ * - toggleImageSelection() - Toggles individual image selection
+ * - handleSelectAll() - Selects all filtered images
+ * - handleDeselectAll() - Clears all image selections
+ * - handleConfirmSelection() - Confirms selection and navigates to reports
+ * - handleSaveGroup() - Creates new group with selected images
+ * - handleDeleteGroup() - Removes group from all associated images
+ * 
+ * GROUP EDITING:
+ * - startEditGroup() - Enters edit mode for a specific group
+ * - cancelEditGroup() - Cancels group editing mode
+ * - saveEditGroup() - Saves group name changes and membership updates
+ * 
+ * GROUP VIEW MANAGEMENT:
+ * - toggleGroupViewMode() - Switches between grid/list view for specific group
+ * - getGroupViewMode() - Gets current view mode for a group (defaults to grid)
+ * - toggleGroupCollapse() - Toggles collapse state for group display
+ * - isGroupCollapsed() - Checks if a group is currently collapsed
+ * 
+ * PHOTO NUMBERING SYSTEM:
+ * - updatePhotoNumber() - Updates individual photo number in database
+ * - startNumberingMode() - Enters numbering mode for group/ungrouped photos
+ * - handleNumberingSelection() - Toggles photo selection during numbering
+ * - completeNumbering() - Assigns sequential numbers to selected photos
+ * - cancelNumbering() - Exits numbering mode without saving
+ * 
+ * UI INTERACTIONS:
+ * - handleImageClick() - Opens image detail modal
+ * - closeModal() - Closes image detail modal and resets edit state
+ * - renderGridWithGroups() - Renders main grid layout with group separators
+ * - renderImageCard() - Renders individual image card with all interactive elements
+ * 
+ * UTILITY FUNCTIONS:
+ * - handleShowSuccessMessage() - Displays success toast messages
+ * - handleImageUpdate() - Centralized image update handler from hook
+ * - updateImageFromAutoSave() - Handles auto-save updates from list view
+ */
 
 export default function ProjectImagesPage() {
   const router = useRouter();
@@ -41,10 +98,6 @@ export default function ProjectImagesPage() {
   
   // Use the view preference hook for persistent view state
   const { viewMode, setViewMode, toggleViewMode } = useViewPreference('project-images');
-  
-  // Drag and drop state
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   
   // Sort state
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc' | 'manual'>('desc'); // desc = newest first, asc = oldest first, manual = user reordered
@@ -73,6 +126,25 @@ export default function ProjectImagesPage() {
   // New state for create group mode
   const [createGroupMode, setCreateGroupMode] = useState(false);
   const [groupName, setGroupName] = useState('');
+
+  // Upload modal state
+  const [showUploadModal, setShowUploadModal] = useState(false);
+
+  // State for editing a group
+  const [editingGroup, setEditingGroup] = useState<string | null>(null);
+  const [editGroupName, setEditGroupName] = useState<string>('');
+  const [editGroupSelected, setEditGroupSelected] = useState<Set<string>>(new Set());
+  const [editGroupLoading, setEditGroupLoading] = useState(false);
+
+  // State for individual group view modes
+  const [groupViewModes, setGroupViewModes] = useState<{ [key: string]: 'grid' | 'list' }>({});
+
+  // State for collapsed groups
+  const [collapsedGroups, setCollapsedGroups] = useState<{ [key: string]: boolean }>({});
+
+  // State for numbering mode and selected photos for ordering
+  const [numberingMode, setNumberingMode] = useState<string | null>(null);
+  const [numberingSelection, setNumberingSelection] = useState<string[]>([]);
 
   // Fetch project info
   useEffect(() => {
@@ -113,7 +185,8 @@ export default function ProjectImagesPage() {
           rotation: 0,
           hasChanges: false,
           originalDescription: img.description,
-          originalTag: img.tag
+          originalTag: img.tag,
+          number: img.number
         }));
         
         setImages(extendedData);
@@ -190,7 +263,70 @@ export default function ProjectImagesPage() {
     }
     // If sortOrder is 'manual', preserve the current order (no sorting)
     
-    setFilteredImages(filtered);
+    // Organize grouped photos together at the front
+    const groupedImages: ExtendedProjectImage[] = [];
+    const ungroupedImages: ExtendedProjectImage[] = [];
+    
+    // Separate grouped and ungrouped images
+    filtered.forEach(img => {
+      if (img.group && img.group.length > 0) {
+        groupedImages.push(img);
+      } else {
+        ungroupedImages.push(img);
+      }
+    });
+    
+    // Sort grouped images by group name, then by number, then by date within each group
+    groupedImages.sort((a, b) => {
+      const aGroup = (a.group || [])[0] || '';
+      const bGroup = (b.group || [])[0] || '';
+      
+      // First sort by group name
+      if (aGroup !== bGroup) {
+        return aGroup.localeCompare(bGroup);
+      }
+      
+      // Then sort by number within the same group (numbered images first, then by number)
+      if (a.number && b.number) {
+        return a.number - b.number; // Sort by number
+      } else if (a.number && !b.number) {
+        return -1; // Numbered images first
+      } else if (!a.number && b.number) {
+        return 1; // Numbered images first
+      }
+      
+      // If neither has a number, sort by date
+      if (sortOrder === 'desc') {
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      } else if (sortOrder === 'asc') {
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      }
+      return 0;
+    });
+    
+    // Sort ungrouped images by number first, then by date
+    ungroupedImages.sort((a, b) => {
+      if (a.number && b.number) {
+        return a.number - b.number; // Sort by number
+      } else if (a.number && !b.number) {
+        return -1; // Numbered images first
+      } else if (!a.number && b.number) {
+        return 1; // Numbered images first
+      }
+      
+      // If neither has a number, sort by date
+      if (sortOrder === 'desc') {
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      } else if (sortOrder === 'asc') {
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      }
+      return 0;
+    });
+    
+    // Combine grouped images first, then ungrouped images
+    const organizedImages = [...groupedImages, ...ungroupedImages];
+    
+    setFilteredImages(organizedImages);
   }, [images, dateFilter, tagFilter, descriptionFilter, userFilter, reportUsageFilter, imagesInReports, currentUser, sortOrder]);
 
   // Handle sort order change
@@ -206,25 +342,16 @@ export default function ProjectImagesPage() {
 
   // New functions for list view functionality
 
-  const updateImageInList = (imageId: string, field: 'description' | 'tag' | 'rotation', value: string | 'overview' | 'deficiency' | null | number) => {
+  const updateImageInList = (imageId: string, field: 'description' | 'tag' | 'rotation' | 'number', value: string | 'overview' | 'deficiency' | null | number) => {
+    const update = handleImageUpdate(imageId, field, value);
     setImages(prev => prev.map(img => {
-      if (img.id === imageId) {
-        const updated = { ...img, [field]: value };
+      if (img.id === update.imageId) {
+        const updated = { ...img, [update.field]: update.value };
         
-        // If this is an auto-save update, reset hasChanges to false
-        if (field === 'description') {
-          // Check if this is an auto-save (value matches current description)
-          if (value === img.description) {
-            updated.hasChanges = false;
-            updated.originalDescription = value as string;
-          } else {
-            // This is a new change
-            updated.hasChanges = true;
-          }
-        } else if (field === 'tag') {
-          // For tag updates, check if it differs from original
-          updated.hasChanges = updated.tag !== img.originalTag;
-        }
+        // Check if this creates a change from original
+        const hasDescriptionChange = updated.description !== img.originalDescription;
+        const hasTagChange = updated.tag !== img.originalTag;
+        updated.hasChanges = hasDescriptionChange || hasTagChange;
         
         return updated;
       }
@@ -233,73 +360,11 @@ export default function ProjectImagesPage() {
   };
 
   // Drag and drop handlers
-  const handleDragStart = (e: React.DragEvent, index: number) => {
-    setDraggedIndex(index);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/html', ''); // Required for some browsers
-  };
-
-  const handleDragOver = (e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    setDragOverIndex(index);
-  };
-
-  const handleDragLeave = (e?: React.DragEvent) => {
-    if (!e) return;
-    // Only clear drag over if we're actually leaving the container
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX;
-    const y = e.clientY;
-    
-    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
-      setDragOverIndex(null);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent, dropIndex: number) => {
-    e.preventDefault();
-    
-    if (draggedIndex === null || draggedIndex === dropIndex) {
-      setDraggedIndex(null);
-      setDragOverIndex(null);
-      return;
-    }
-
-    // Switch to manual sort mode when user manually reorders
-    setSortOrder('manual');
-
-    // Reorder the filtered images array
-    const newFilteredImages = [...filteredImages];
-    const [draggedItem] = newFilteredImages.splice(draggedIndex, 1);
-    newFilteredImages.splice(dropIndex, 0, draggedItem);
-    
-    setFilteredImages(newFilteredImages);
-    
-    // Also update the main images array to maintain consistency
-    // This is a simple approach - in a more complex app you might want to save order to DB
-    const reorderedImages = [...images];
-    const draggedImage = filteredImages[draggedIndex];
-    const dropImage = filteredImages[dropIndex];
-    
-    // Find and swap positions in main array
-    const draggedMainIndex = reorderedImages.findIndex(img => img.id === draggedImage.id);
-    const dropMainIndex = reorderedImages.findIndex(img => img.id === dropImage.id);
-    
-    if (draggedMainIndex !== -1 && dropMainIndex !== -1) {
-      const [draggedMainItem] = reorderedImages.splice(draggedMainIndex, 1);
-      reorderedImages.splice(dropMainIndex, 0, draggedMainItem);
-      setImages(reorderedImages);
-    }
-    
-    setDraggedIndex(null);
-    setDragOverIndex(null);
-  };
-
-  const handleDragEnd = () => {
-    setDraggedIndex(null);
-    setDragOverIndex(null);
-  };
+  // const handleDragStart = (e: React.DragEvent, index: number) => { ... }
+  // const handleDragOver = (e: React.DragEvent, index: number) => { ... }
+  // const handleDragLeave = (e?: React.DragEvent) => { ... }
+  // const handleDrop = (e: React.DragEvent, dropIndex: number) => { ... }
+  // const handleDragEnd = () => { ... }
 
   const handleImageClick = (image: ExtendedProjectImage) => {
     setSelectedImage(image);
@@ -369,8 +434,7 @@ export default function ProjectImagesPage() {
     }
   };
 
-  const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
+  const handlePhotoUpload = async (files: File[], dateTaken: string = '', useFilenameAsDescription: boolean = false) => {
     if (!files || files.length === 0) return;
 
     if (!currentUser) {
@@ -442,13 +506,23 @@ export default function ProjectImagesPage() {
 
         // Batch database inserts for successful uploads
         if (successfulUploads.length > 0) {
-          const insertData = successfulUploads.map(result => ({
-            project_id: projectId,
-            url: result!.publicUrl,
-            description: '',
-            tag: null,
-            user_id: currentUser.id
-          }));
+          const insertData = successfulUploads.map(result => {
+            // Generate description from filename if enabled
+            let description = '';
+            if (useFilenameAsDescription) {
+              const filename = result!.file.name;
+              description = filename.replace(/\.[^/.]+$/, ''); // Remove file extension
+            }
+
+            return {
+              project_id: projectId,
+              url: result!.publicUrl,
+              description: description,
+              tag: null,
+              created_at: dateTaken ? new Date(dateTaken).toISOString() : new Date().toISOString(), // Use selected date or current date
+              user_id: currentUser.id
+            };
+          });
 
           const { data: imageDataArray, error: dbError } = await supabase
             .from('project_images')
@@ -466,7 +540,8 @@ export default function ProjectImagesPage() {
                 rotation: 0,
                 hasChanges: false,
                 originalDescription: imageData.description,
-                originalTag: imageData.tag
+                originalTag: imageData.tag,
+                number: imageData.number
               });
             });
           }
@@ -498,8 +573,7 @@ export default function ProjectImagesPage() {
     } finally {
       setUploadLoading(false);
       setUploadProgress('');
-      // Clear the input
-      event.target.value = '';
+      setShowUploadModal(false); // Close modal after upload
     }
   };
 
@@ -623,6 +697,860 @@ export default function ProjectImagesPage() {
     }
   };
 
+  // Start editing a group
+  const startEditGroup = (groupName: string) => {
+    setEditingGroup(groupName);
+    setEditGroupName(groupName);
+    // Initialize selected images with all images in this group
+    const groupImages = filteredImages.filter(img => img.group && img.group.includes(groupName));
+    setEditGroupSelected(new Set(groupImages.map(img => img.id)));
+    // Auto-switch to grid view for better editing experience
+    setGroupViewModes(prev => ({
+      ...prev,
+      [groupName]: 'grid'
+    }));
+  };
+
+  // Cancel editing
+  const cancelEditGroup = () => {
+    setEditingGroup(null);
+    setEditGroupName('');
+    setEditGroupSelected(new Set());
+  };
+
+  // Save group edits
+  const saveEditGroup = async () => {
+    if (!editGroupName.trim() || !editingGroup) return;
+    
+    setEditGroupLoading(true);
+    try {
+      // Update the group name for all selected images
+      const { error } = await supabase
+        .from('project_images')
+        .update({ group: [editGroupName] })
+        .in('id', Array.from(editGroupSelected));
+        
+      if (error) throw error;
+      
+      // Update local state
+      setImages(prev => prev.map(img => {
+        if (editGroupSelected.has(img.id)) {
+          return { ...img, group: [editGroupName] };
+        }
+        return img;
+      }));
+      
+      setEditingGroup(null);
+      setEditGroupName('');
+      setEditGroupSelected(new Set());
+      
+    } catch (error: any) {
+      setError('Failed to update group: ' + error.message);
+    } finally {
+      setEditGroupLoading(false);
+    }
+  };
+
+  // Function to toggle view mode for a specific group
+  const toggleGroupViewMode = (groupName: string) => {
+    setGroupViewModes(prev => ({
+      ...prev,
+      [groupName]: prev[groupName] === 'list' ? 'grid' : 'list'
+    }));
+  };
+
+  // Function to get view mode for a group (defaults to 'grid')
+  const getGroupViewMode = (groupName: string): 'grid' | 'list' => {
+    return groupViewModes[groupName] || 'grid';
+  };
+
+  // Function to toggle group collapse state
+  const toggleGroupCollapse = (groupName: string) => {
+    setCollapsedGroups(prev => ({
+      ...prev,
+      [groupName]: !prev[groupName]
+    }));
+  };
+
+  // Function to check if a group is collapsed
+  const isGroupCollapsed = (groupName: string): boolean => {
+    return collapsedGroups[groupName] || false;
+  };
+
+  // Function to update photo number
+  const updatePhotoNumber = async (imageId: string, number: number | null) => {
+    try {
+      const { error } = await supabase
+        .from('project_images')
+        .update({ number })
+        .eq('id', imageId);
+        
+      if (error) throw error;
+      
+      // Update local state
+      setImages(prev => prev.map(img => 
+        img.id === imageId ? { ...img, number } : img
+      ));
+      
+      setSuccessMessage('Photo number updated');
+    } catch (error: any) {
+      setError('Failed to update photo number: ' + error.message);
+    }
+  };
+
+  // Start numbering mode for a group
+  const startNumberingMode = (groupName: string) => {
+    setNumberingMode(groupName);
+    // Pre-populate selection with currently-numbered images in order
+    const groupImages = filteredImages.filter(img =>
+      (groupName === 'ungrouped')
+        ? (!img.group || img.group.length === 0)
+        : (img.group && img.group.includes(groupName))
+    );
+    // Sort by current number, then by created_at for unnumbered
+    const sorted = [...groupImages].sort((a, b) => {
+      if (a.number && b.number) return a.number - b.number;
+      if (a.number && !b.number) return -1;
+      if (!a.number && b.number) return 1;
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+    setNumberingSelection(sorted.filter(img => typeof img.number === 'number').map(img => img.id));
+    setGroupViewModes(prev => ({ ...prev, [groupName]: 'grid' }));
+  };
+
+  // Toggle selection for numbering
+  const handleNumberingSelection = (imageId: string) => {
+    setNumberingSelection(prev =>
+      prev.includes(imageId)
+        ? prev.filter(id => id !== imageId)
+        : [...prev, imageId]
+    );
+  };
+
+  // Complete numbering: assign numbers 1,2,3... to selected, clear all others in group
+  const completeNumbering = async () => {
+    if (!numberingMode) return;
+    // Get all images in this group
+    const groupImages = filteredImages.filter(img =>
+      (numberingMode === 'ungrouped')
+        ? (!img.group || img.group.length === 0)
+        : (img.group && img.group.includes(numberingMode))
+    );
+    // Assign numbers to selected in order, clear all others
+    const updates = groupImages.map(img => {
+      const idx = numberingSelection.indexOf(img.id);
+      return {
+        id: img.id,
+        number: idx !== -1 ? idx + 1 : null
+      };
+    });
+    // Update DB and local state
+    for (const update of updates) {
+      await updatePhotoNumber(update.id, update.number);
+    }
+    setImages(prev => prev.map(img => {
+      const found = updates.find(u => u.id === img.id);
+      return found ? { ...img, number: found.number } : img;
+    }));
+    setNumberingMode(null);
+    setNumberingSelection([]);
+    setSuccessMessage('Photo numbers updated and reordered!');
+  };
+
+  // Cancel numbering mode
+  const cancelNumbering = () => {
+    setNumberingMode(null);
+    setNumberingSelection([]);
+  };
+
+  // Function to render grid with group separators
+  const renderGridWithGroups = (): JSX.Element => {
+    const groups: { [key: string]: ExtendedProjectImage[] } = {};
+    const ungroupedImages: ExtendedProjectImage[] = [];
+    
+    filteredImages.forEach(img => {
+      if (img.group && img.group.length > 0) {
+        const groupName = img.group[0];
+        if (!groups[groupName]) {
+          groups[groupName] = [];
+        }
+        groups[groupName].push(img);
+      } else {
+        ungroupedImages.push(img);
+      }
+    });
+    
+    // If editing a group, show checkboxes for all photos, but keep grid layout the same
+    const isEditing = !!editingGroup;
+
+    return (
+      <div>
+        {Object.entries(groups).map(([groupName, groupImages]) => {
+          const groupViewMode = getGroupViewMode(groupName);
+          const isCollapsed = isGroupCollapsed(groupName);
+          
+          return (
+            <div key={groupName} style={{ marginBottom: '2rem' }}>
+              {/* Group header */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                marginBottom: '1rem',
+                padding: '0.75rem 1rem',
+                backgroundColor: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '0.5rem',
+                borderLeft: '4px solid #3b82f6'
+              }}>
+                {editingGroup === groupName ? (
+                  <>
+                    <input
+                      type="text"
+                      value={editGroupName}
+                      onChange={e => setEditGroupName(e.target.value)}
+                      style={{
+                        fontSize: '1.1rem',
+                        fontWeight: 600,
+                        color: '#1e40af',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '0.25rem',
+                        padding: '0.25rem 0.5rem',
+                        marginRight: '1rem',
+                        minWidth: '200px'
+                      }}
+                      disabled={editGroupLoading}
+                    />
+                    <button
+                      className="btn btn-success btn-sm"
+                      style={{ marginLeft: '0.5rem' }}
+                      onClick={saveEditGroup}
+                      disabled={editGroupLoading || !editGroupName.trim()}
+                    >
+                      {editGroupLoading ? 'Saving...' : 'Save'}
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      style={{ marginLeft: '0.5rem' }}
+                      onClick={cancelEditGroup}
+                      disabled={editGroupLoading}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {/* Collapse/Expand button */}
+                    <button
+                      className="btn btn-sm btn-outline"
+                      onClick={() => toggleGroupCollapse(groupName)}
+                      style={{ 
+                        marginRight: '0.75rem',
+                        padding: '0.25rem 0.5rem',
+                        fontSize: '0.875rem',
+                        minWidth: 'auto'
+                      }}
+                      title={isCollapsed ? 'Expand group' : 'Collapse group'}
+                    >
+                      {isCollapsed ? '▶️' : '▼️'}
+                    </button>
+                    
+                    <h3 style={{ 
+                      margin: 0, 
+                      color: '#1e40af', 
+                      fontSize: '1.1rem',
+                      fontWeight: '600'
+                    }}>
+                      📁 {groupName}
+                    </h3>
+                    <span style={{ 
+                      marginLeft: '1.5rem', 
+                      color: '#64748b', 
+                      fontSize: '0.875rem' 
+                    }}>
+                      {groupImages.length} photo{groupImages.length !== 1 ? 's' : ''}
+                    </span>
+                    
+                    {/* Grid/List toggle buttons - only show when not collapsed */}
+                    {!isCollapsed && (
+                      <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem' }}>
+                        <button
+                          className={`btn btn-sm ${groupViewMode === 'grid' ? 'btn-primary' : 'btn-secondary'}`}
+                          onClick={() => toggleGroupViewMode(groupName)}
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                        >
+                          📊 Grid
+                        </button>
+                        <button
+                          className={`btn btn-sm ${groupViewMode === 'list' ? 'btn-primary' : 'btn-secondary'}`}
+                          onClick={() => toggleGroupViewMode(groupName)}
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                        >
+                          📋 List
+                        </button>
+                        {numberingMode === groupName ? (
+                          <>
+                            <button
+                              className="btn btn-sm btn-success"
+                              onClick={completeNumbering}
+                              disabled={numberingSelection.length === 0}
+                              style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                            >
+                              ✅ Done ({numberingSelection.length})
+                            </button>
+                            <button
+                              className="btn btn-sm btn-secondary"
+                              onClick={cancelNumbering}
+                              style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                            >
+                              ❌ Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              className="btn btn-sm btn-secondary"
+                              onClick={() => startNumberingMode(groupName)}
+                              style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                            >
+                              🔢 Number
+                            </button>
+                            <button
+                              className="btn btn-sm btn-outline"
+                              onClick={() => {
+                                const numberedImages = groupImages.filter(img => img.number);
+                                if (numberedImages.length === 0) {
+                                  setSuccessMessage(`No photos in "${groupName}" are numbered!`);
+                                  return;
+                                }
+                                
+                                if (confirm(`Clear numbers from ${numberedImages.length} photos in "${groupName}"?`)) {
+                                  numberedImages.forEach(img => {
+                                    updatePhotoNumber(img.id, null);
+                                  });
+                                  setSuccessMessage(`Cleared numbers from ${numberedImages.length} photos in "${groupName}"`);
+                                }
+                              }}
+                              style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                            >
+                              🗑️ Clear Numbers
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      style={{ marginLeft: isCollapsed ? 'auto' : '1rem' }}
+                      onClick={() => startEditGroup(groupName)}
+                    >
+                      ✏️ Edit
+                    </button>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      style={{ marginLeft: '0.5rem' }}
+                      onClick={() => handleDeleteGroup(groupName)}
+                      disabled={uploadLoading}
+                    >
+                      🗑️ Delete
+                    </button>
+                  </>
+                )}
+              </div>
+              
+              {/* Group images - render based on view mode and collapse state */}
+              {!isCollapsed && (
+                groupViewMode === 'grid' ? (
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                    gap: '2rem',
+                    marginBottom: '1rem'
+                  }}>
+                    {groupImages.map(img => renderImageCard(img, false, isEditing))}
+                  </div>
+                ) : (
+                  <ImageListView
+                    images={groupImages.map(img => ({
+                      id: img.id,
+                      url: img.url,
+                      description: img.description || '',
+                      tag: img.tag,
+                      created_at: img.created_at,
+                      user_id: img.user_id || undefined,
+                      hasChanges: img.hasChanges,
+                      rotation: img.rotation,
+                      number: img.number
+                    }))}
+                    onUpdateImage={(imageId, field, value) => {
+                      const update = handleImageUpdate(imageId, field, value);
+                      setImages(prev => prev.map(img => {
+                        if (img.id === update.imageId) {
+                          const updated = { ...img, [update.field]: update.value };
+                          
+                          // Check if this creates a change from original
+                          const hasDescriptionChange = updated.description !== img.originalDescription;
+                          const hasTagChange = updated.tag !== img.originalTag;
+                          updated.hasChanges = hasDescriptionChange || hasTagChange;
+                          
+                          return updated;
+                        }
+                        return img;
+                      }));
+                    }}
+                    onAutoSaveUpdate={updateImageFromAutoSave}
+                    onShowSuccessMessage={handleShowSuccessMessage}
+                    onRemoveImage={handleDelete}
+                    showUserInfo={true}
+                    showRotateButton={true}
+                    currentUserId={currentUser?.id}
+                    projectId={projectId}
+                    imagesInReports={imagesInReports}
+                    selectionMode={selectionMode}
+                    selectedImages={selectedImages}
+                    onToggleSelection={toggleImageSelection}
+                  />
+                )
+              )}
+            </div>
+          );
+        })}
+        
+        {/* Render ungrouped images */}
+        {ungroupedImages.length > 0 && (
+          <div style={{ marginTop: '2rem' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              marginBottom: '1rem',
+              padding: '0.75rem 1rem',
+              backgroundColor: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderRadius: '0.5rem',
+              borderLeft: '4px solid #94a3b8'
+            }}>
+              {/* Collapse/Expand button for ungrouped */}
+              <button
+                className="btn btn-sm btn-outline"
+                onClick={() => toggleGroupCollapse('ungrouped')}
+                style={{ 
+                  marginRight: '0.75rem',
+                  padding: '0.25rem 0.5rem',
+                  fontSize: '0.875rem',
+                  minWidth: 'auto'
+                }}
+                title={isGroupCollapsed('ungrouped') ? 'Expand ungrouped photos' : 'Collapse ungrouped photos'}
+              >
+                {isGroupCollapsed('ungrouped') ? '▶️' : '▼️'}
+              </button>
+              
+              <h3 style={{ 
+                margin: 0, 
+                color: '#475569', 
+                fontSize: '1.1rem',
+                fontWeight: '600'
+              }}>
+                📷 Ungrouped Photos
+              </h3>
+              <span style={{ 
+                marginLeft: '1.5rem', 
+                color: '#64748b', 
+                fontSize: '0.875rem' 
+              }}>
+                {ungroupedImages.length} photo{ungroupedImages.length !== 1 ? 's' : ''}
+              </span>
+              
+              {/* Grid/List toggle buttons for ungrouped - only show when not collapsed */}
+              {!isGroupCollapsed('ungrouped') && (
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    className={`btn btn-sm ${getGroupViewMode('ungrouped') === 'grid' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => toggleGroupViewMode('ungrouped')}
+                    style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                  >
+                    📊 Grid
+                  </button>
+                  <button
+                    className={`btn btn-sm ${getGroupViewMode('ungrouped') === 'list' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => toggleGroupViewMode('ungrouped')}
+                    style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                  >
+                    📋 List
+                  </button>
+                  <button
+                    className="btn btn-sm btn-secondary"
+                    onClick={() => {
+                      // Number all ungrouped photos starting from 1
+                      ungroupedImages.forEach((img, index) => {
+                        updatePhotoNumber(img.id, index + 1);
+                      });
+                      setSuccessMessage(`Numbered ${ungroupedImages.length} ungrouped photos starting from 1`);
+                    }}
+                    style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                  >
+                    🔢 Number
+                  </button>
+                  <button
+                    className="btn btn-sm btn-outline"
+                    onClick={() => {
+                      const numberedImages = ungroupedImages.filter(img => img.number);
+                      if (numberedImages.length === 0) {
+                        setSuccessMessage('No ungrouped photos are numbered!');
+                        return;
+                      }
+                      
+                      if (confirm(`Clear numbers from ${numberedImages.length} ungrouped photos?`)) {
+                        numberedImages.forEach(img => {
+                          updatePhotoNumber(img.id, null);
+                        });
+                        setSuccessMessage(`Cleared numbers from ${numberedImages.length} ungrouped photos`);
+                      }
+                    }}
+                    style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                  >
+                    🗑️ Clear Numbers
+                  </button>
+                </div>
+              )}
+              
+              {createGroupMode && (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  style={{ marginLeft: isGroupCollapsed('ungrouped') ? 'auto' : '1rem' }}
+                  onClick={() => {
+                    const allIds = ungroupedImages.map(img => img.id);
+                    const allSelected = allIds.every(id => selectedImages.has(id));
+                    setSelectedImages(prev => {
+                      const newSet = new Set(prev);
+                      if (allSelected) {
+                        // Deselect all
+                        allIds.forEach(id => newSet.delete(id));
+                      } else {
+                        // Select all
+                        allIds.forEach(id => newSet.add(id));
+                      }
+                      return newSet;
+                    });
+                  }}
+                >
+                  {ungroupedImages.every(img => selectedImages.has(img.id)) ? 'Deselect All' : 'Select All'}
+                </button>
+              )}
+            </div>
+            
+            {/* Ungrouped images - render based on view mode and collapse state */}
+            {!isGroupCollapsed('ungrouped') && (
+              getGroupViewMode('ungrouped') === 'grid' ? (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                  gap: '2rem'
+                }}>
+                  {ungroupedImages.map(img => renderImageCard(img, true, isEditing))}
+                </div>
+              ) : (
+                <ImageListView
+                  images={ungroupedImages.map(img => ({
+                    id: img.id,
+                    url: img.url,
+                    description: img.description || '',
+                    tag: img.tag,
+                    created_at: img.created_at,
+                    user_id: img.user_id || undefined,
+                    hasChanges: img.hasChanges,
+                    rotation: img.rotation,
+                    number: img.number
+                  }))}
+                  onUpdateImage={(imageId, field, value) => {
+                    const update = handleImageUpdate(imageId, field, value);
+                    setImages(prev => prev.map(img => {
+                      if (img.id === update.imageId) {
+                        const updated = { ...img, [update.field]: update.value };
+                        
+                        // Check if this creates a change from original
+                        const hasDescriptionChange = updated.description !== img.originalDescription;
+                        const hasTagChange = updated.tag !== img.originalTag;
+                        updated.hasChanges = hasDescriptionChange || hasTagChange;
+                        
+                        return updated;
+                      }
+                      return img;
+                    }));
+                  }}
+                  onAutoSaveUpdate={updateImageFromAutoSave}
+                  onShowSuccessMessage={handleShowSuccessMessage}
+                  onRemoveImage={handleDelete}
+                  showUserInfo={true}
+                  showRotateButton={true}
+                  currentUserId={currentUser?.id}
+                  projectId={projectId}
+                  imagesInReports={imagesInReports}
+                  selectionMode={selectionMode}
+                  selectedImages={selectedImages}
+                  onToggleSelection={toggleImageSelection}
+                />
+              )
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Function to render individual image card
+  const renderImageCard = (img: ExtendedProjectImage, showGroupBadges: boolean = false, editGroupMode: boolean = false) => {
+    // If in edit group mode, use editGroupSelected for selection
+    const isSelected = editGroupMode ? editGroupSelected.has(img.id) : selectedImages.has(img.id);
+    // Numbering mode logic
+    const isNumbering = numberingMode !== null && (
+      (img.group && img.group.includes(numberingMode)) || (numberingMode === 'ungrouped' && (!img.group || img.group.length === 0))
+    );
+    const numberingIndex = numberingSelection.indexOf(img.id);
+    const isNumberingSelected = numberingIndex !== -1;
+    const isNumbered = typeof img.number === 'number';
+    const handleSelect = () => {
+      if (editGroupMode) {
+        setEditGroupSelected(prev => {
+          const newSet = new Set(prev);
+          if (newSet.has(img.id)) {
+            newSet.delete(img.id);
+          } else {
+            newSet.add(img.id);
+          }
+          return newSet;
+        });
+      } else if (isNumbering) {
+        handleNumberingSelection(img.id);
+      } else {
+        toggleImageSelection(img.id);
+      }
+    };
+    return (
+      <div
+        key={img.id}
+        style={{
+          border: isNumberingSelected ? '2px solid #2563eb' : '1px solid var(--color-border)',
+          borderRadius: '0.75rem',
+          overflow: 'hidden',
+          backgroundColor: isNumberingSelected ? 'rgba(37,99,235,0.08)' : 'var(--color-bg-card)',
+          position: 'relative',
+          cursor: 'pointer',
+          transition: 'all 0.2s ease',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column'
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'translateY(-4px)';
+          e.currentTarget.style.boxShadow = '0 8px 25px rgba(0, 0, 0, 0.15)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.1)';
+        }}
+        onClick={() => {
+          if (isNumbering) {
+            handleNumberingSelection(img.id);
+          } else {
+            handleImageClick(img);
+          }
+        }}
+      >
+        {/* Selection checkbox */}
+        {(selectionMode || createGroupMode || editGroupMode) && (
+          <div style={{
+            position: 'absolute',
+            top: '0.75rem',
+            left: '0.75rem',
+            zIndex: 10
+          }}>
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={handleSelect}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: '1.5rem',
+                height: '1.5rem',
+                cursor: 'pointer',
+                accentColor: 'var(--color-primary)'
+              }}
+            />
+          </div>
+        )}
+        {/* Number badge: show selection order if in numbering mode and selected, otherwise permanent number */}
+        {isNumbering && isNumberingSelected ? (
+          <div style={{
+            position: 'absolute',
+            top: '0.75rem',
+            right: '0.75rem',
+            zIndex: 10
+          }}>
+            <div style={{
+              width: '2rem',
+              height: '2rem',
+              borderRadius: '50%',
+              backgroundColor: '#2563eb',
+              color: 'white',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '0.875rem',
+              fontWeight: '600',
+              border: '2px solid #fff',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)'
+            }}>
+              {numberingIndex + 1}
+            </div>
+          </div>
+        ) : (
+          img.number && (
+            <div style={{
+              position: 'absolute',
+              top: '0.75rem',
+              right: '0.75rem',
+              zIndex: 10
+            }}>
+              <div style={{
+                width: '2rem',
+                height: '2rem',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(59, 130, 246, 0.9)',
+                color: 'white',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.875rem',
+                fontWeight: '600',
+                backdropFilter: 'blur(4px)',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)'
+              }}>
+                {img.number}
+              </div>
+            </div>
+          )
+        )}
+        {/* Group badges */}
+        {showGroupBadges && Array.isArray(img.group) && img.group.map(g => (
+          <div key={g} style={{
+            position: 'absolute',
+            top: '0.75rem',
+            right: '0.75rem',
+            background: 'rgba(59, 130, 246, 0.9)',
+            color: 'white',
+            padding: '0.25rem 0.75rem',
+            borderRadius: '12px',
+            fontSize: '0.75rem',
+            fontWeight: 500,
+            zIndex: 10,
+            backdropFilter: 'blur(4px)',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)'
+          }}>
+            {g}
+          </div>
+        ))}
+
+        {/* Image - much larger now */}
+        <div style={{ 
+          position: 'relative', 
+          aspectRatio: '4/3', 
+          overflow: 'hidden',
+          backgroundColor: '#f8fafc'
+        }}>
+          <img
+            src={img.url}
+            alt={img.description || 'Project image'}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              transform: img.rotation ? `rotate(${img.rotation}deg)` : 'none',
+              transition: 'transform 0.3s ease'
+            }}
+          />
+        </div>
+
+        {/* Image info - more compact and elegant */}
+        <div style={{ 
+          padding: '1rem', 
+          flex: 1, 
+          display: 'flex', 
+          flexDirection: 'column',
+          gap: '0.5rem'
+        }}>
+          {/* Description */}
+          {img.description && (
+            <p style={{
+              margin: 0,
+              fontSize: '0.875rem',
+              color: 'var(--color-text)',
+              lineHeight: '1.4',
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              fontWeight: 500
+            }}>
+              {img.description}
+            </p>
+          )}
+          
+          {/* Tags and metadata row */}
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            marginTop: 'auto'
+          }}>
+            <div style={{ 
+              fontSize: '0.75rem', 
+              color: 'var(--color-text-light)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}>
+              <span>{new Date(img.created_at).toLocaleDateString()}</span>
+              {img.user_id && (
+                <span style={{ 
+                  color: img.user_id === currentUser?.id ? 'var(--color-primary)' : 'var(--color-text-lighter)',
+                  fontWeight: img.user_id === currentUser?.id ? '500' : 'normal'
+                }}>
+                  {img.user_id === currentUser?.id ? 'You' : 'Other'}
+                </span>
+              )}
+            </div>
+            
+            {/* Tag badge */}
+            {img.tag && (
+              <span className={`badge ${getTagBadgeClass(img.tag)}`} style={{ 
+                fontSize: '0.7rem',
+                padding: '0.25rem 0.5rem',
+                borderRadius: '6px'
+              }}>
+                {getTagLabel(img.tag)}
+              </span>
+            )}
+          </div>
+          
+          {/* Report usage indicator */}
+          <div style={{ 
+            fontSize: '0.7rem', 
+            color: imagesInReports.has(img.url) ? 'var(--color-warning)' : 'var(--color-success)',
+            backgroundColor: imagesInReports.has(img.url) ? 'rgba(255, 193, 7, 0.1)' : 'rgba(40, 167, 69, 0.1)',
+            padding: '0.25rem 0.5rem',
+            borderRadius: '4px',
+            display: 'inline-block',
+            alignSelf: 'flex-start',
+            fontWeight: 500
+          }}>
+            {imagesInReports.has(img.url) ? '✓ Used in Report' : '○ Not Used'}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="container page-content" style={{ background: 'var(--color-bg)', minHeight: '100vh' }}>
       <h1 style={{ marginBottom: '2rem', color: 'var(--color-primary)' }}>
@@ -638,73 +1566,12 @@ export default function ProjectImagesPage() {
           ← Back to Project
         </button>
         
-        {!selectionMode && (
-          <>
-            {/* View Toggle */}
-            <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
-              <button
-                className={`btn ${viewMode === 'grid' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setViewMode('grid')}
-              >
-                📄 Grid View
-              </button>
-              <button
-                className={`btn ${viewMode === 'list' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setViewMode('list')}
-              >
-                📋 List View
-              </button>
-            </div>
-            
-            {/* Sort Button */}
-            <button
-              className="btn btn-secondary"
-              onClick={handleSortChange}
-              title={
-                sortOrder === 'desc' ? 'Currently: Newest First (click for Oldest First)' :
-                sortOrder === 'asc' ? 'Currently: Oldest First (click for Manual Order)' :
-                'Currently: Manual Order (click for Newest First)'
-              }
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem'
-              }}
-            >
-              {sortOrder === 'desc' && '📅↓ Newest First'}
-              {sortOrder === 'asc' && '📅↑ Oldest First'} 
-              {sortOrder === 'manual' && '📅✋ Manual Order'}
-            </button>
-            
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handlePhotoUpload}
-              style={{ display: 'none' }}
-              id="photo-upload-input"
-              disabled={uploadLoading}
-            />
-            <label 
-              htmlFor="photo-upload-input"
-              className="btn btn-primary"
-              style={{ 
-                cursor: uploadLoading ? 'not-allowed' : 'pointer',
-                opacity: uploadLoading ? 0.6 : 1
-              }}
-            >
-              {uploadLoading ? uploadProgress : '📷 Upload Photos'}
-            </label>
-          </>
-        )}
-        
         {selectionMode && (
           <>
             <button
               className="btn btn-primary"
               onClick={handleConfirmSelection}
               disabled={selectedImages.size === 0}
-              style={{ marginLeft: 'auto' }}
             >
               Import {selectedImages.size} Selected Photo{selectedImages.size !== 1 ? 's' : ''}
             </button>
@@ -722,46 +1589,32 @@ export default function ProjectImagesPage() {
             </button>
           </>
         )}
-        <button
-          className="btn btn-primary"
-          onClick={() => setCreateGroupMode(true)}
-          style={{ fontWeight: 600 }}
-        >
-          Create Group
-        </button>
+        
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '1rem' }}>
+          {!selectionMode && (
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowUploadModal(true)}
+              disabled={uploadLoading}
+              style={{ 
+                cursor: uploadLoading ? 'not-allowed' : 'pointer',
+                opacity: uploadLoading ? 0.6 : 1
+              }}
+            >
+              {uploadLoading ? uploadProgress : '📷 Upload Photos'}
+            </button>
+          )}
+          <button
+            className="btn btn-primary"
+            onClick={() => setCreateGroupMode(true)}
+            style={{ fontWeight: 600 }}
+          >
+            Create Group
+          </button>
+        </div>
       </div>
 
-      {createGroupMode && (
-        <div style={{ marginBottom: '2rem', background: '#f8f9fa', padding: '1rem', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
-          <h3 style={{ marginBottom: '1rem' }}>Create a New Group</h3>
-          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem' }}>
-            <input
-              type="text"
-              value={groupName}
-              onChange={e => setGroupName(e.target.value)}
-              placeholder="Enter group name"
-              style={{ padding: '0.5rem', fontSize: '1rem', border: '1px solid #ccc', borderRadius: '4px', minWidth: '200px' }}
-            />
-            <button
-              className="btn btn-success"
-              onClick={handleSaveGroup}
-              disabled={!groupName.trim() || selectedImages.size === 0 || uploadLoading}
-            >
-              {uploadLoading ? 'Saving...' : `Save Group (${selectedImages.size} selected)`}
-            </button>
-            <button
-              className="btn btn-secondary"
-              onClick={() => { setCreateGroupMode(false); setGroupName(''); setSelectedImages(new Set()); }}
-              disabled={uploadLoading}
-            >
-              Cancel
-            </button>
-          </div>
-          <div style={{ color: '#888', fontSize: '0.95rem', marginBottom: '0.5rem' }}>
-            Select photos below to add to this group.
-          </div>
-        </div>
-      )}
+      
 
       {/* Filter Controls */}
       <div className="card" style={{ marginBottom: '2rem' }}>
@@ -850,16 +1703,6 @@ export default function ProjectImagesPage() {
           </div>
           <div style={{ marginTop: '1rem', fontSize: '0.875rem', color: 'var(--color-text-light)' }}>
             Showing {filteredImages.length} of {images.length} photos
-            {sortOrder !== 'manual' && (
-              <span style={{ marginLeft: '0.5rem' }}>
-                • Sorted by {sortOrder === 'desc' ? 'newest first' : 'oldest first'}
-              </span>
-            )}
-            {sortOrder === 'manual' && (
-              <span style={{ marginLeft: '0.5rem' }}>
-                • Custom order (drag to reorder in list view)
-              </span>
-            )}
           </div>
         </div>
       </div>
@@ -876,225 +1719,41 @@ export default function ProjectImagesPage() {
         <div style={{ color: 'var(--color-text-light)' }}>No images found for this project.</div>
       ) : (
         <>
-          {/* List all groups above the grid */}
-          {allGroups.length > 0 && (
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-              {allGroups.map(group => (
-                <div key={group} style={{ display: 'flex', alignItems: 'center', background: '#e0e7ff', color: '#3730a3', padding: '0.25rem 0.75rem', borderRadius: '12px', fontSize: '0.95rem', fontWeight: 500 }}>
-                  {group}
-                  <button
-                    onClick={() => handleDeleteGroup(group)}
-                    style={{ marginLeft: '0.5rem', background: 'none', border: 'none', color: '#b91c1c', fontWeight: 700, cursor: 'pointer', fontSize: '1.1em' }}
-                    title={`Delete group '${group}' from all photos`}
-                    disabled={uploadLoading}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Grid View (existing) */}
-          {viewMode === 'grid' && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '1.5rem' }}>
-              {filteredImages.map(img => (
-                <div
-                  key={img.id}
-                  className="card"
-                  style={{
-                    padding: '1rem',
-                    position: 'relative',
-                    background: 'var(--color-bg-card)',
-                    color: 'var(--color-text)',
-                    border: (createGroupMode || selectionMode) && selectedImages.has(img.id) 
-                      ? '3px solid var(--color-primary)' 
-                      : '1px solid var(--color-border-dark)',
-                    boxShadow: 'var(--shadow-sm)',
-                    cursor: 'pointer',
-                  }}
-                  onClick={() => (createGroupMode || selectionMode) ? toggleImageSelection(img.id) : handleImageClick(img)}
+         
+          {createGroupMode && (
+            <div style={{ marginBottom: '2rem', background: '#f8f9fa', padding: '1rem', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+              <h3 style={{ marginBottom: '1rem' }}>Create a New Group</h3>
+              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem' }}>
+                <input
+                  type="text"
+                  value={groupName}
+                  onChange={e => setGroupName(e.target.value)}
+                  placeholder="Enter group name"
+                  style={{ padding: '0.5rem', fontSize: '1rem', border: '1px solid #ccc', borderRadius: '4px', minWidth: '200px' }}
+                />
+                <button
+                  className="btn btn-success"
+                  onClick={handleSaveGroup}
+                  disabled={!groupName.trim() || selectedImages.size === 0 || uploadLoading}
                 >
-                  {(createGroupMode || selectionMode) && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: '0.5rem',
-                        left: '0.5rem',
-                        width: '20px',
-                        height: '20px',
-                        borderRadius: '3px',
-                        border: '2px solid var(--color-primary)',
-                        backgroundColor: selectedImages.has(img.id) ? 'var(--color-primary)' : 'white',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        zIndex: 2
-                      }}
-                    >
-                      {selectedImages.has(img.id) && (
-                        <span style={{ color: 'white', fontSize: '12px', fontWeight: 'bold' }}>✓</span>
-                      )}
-                    </div>
-                  )}
-                  {/* Show all group badges for each image */}
-                  {Array.isArray(img.group) && img.group.map(g => (
-                    <div key={g} style={{
-                      position: 'absolute',
-                      top: '0.5rem',
-                      right: '0.5rem',
-                      background: '#e0e7ff',
-                      color: '#3730a3',
-                      padding: '0.25rem 0.75rem',
-                      borderRadius: '12px',
-                      fontSize: '0.85rem',
-                      fontWeight: 500,
-                      zIndex: 2,
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.07)',
-                      marginBottom: '0.25rem',
-                    }}>
-                      {g}
-                    </div>
-                  ))}
-                  <img
-                    src={img.url}
-                    alt={img.description || 'Project image'}
-                    style={{
-                      width: '100%',
-                      height: '200px',
-                      objectFit: 'cover',
-                      borderRadius: '0.25rem',
-                      marginBottom: '1rem',
-                      background: 'var(--color-primary)',
-                      opacity: (createGroupMode || selectionMode) && selectedImages.has(img.id) ? 0.8 : 1,
-                      transform: `rotate(${img.rotation || 0}deg)`,
-                    }}
-                  />
-                  <div style={{ marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--color-text-light)' }}>
-                    {img.description}
-                  </div>
-                  {img.tag && (
-                    <span 
-                      className={`badge ${img.tag === 'deficiency' ? 'badge-danger' : 'badge-info'}`}
-                      style={{ fontSize: '0.75rem', marginBottom: '0.5rem' }}
-                    >
-                      {img.tag}
-                    </span>
-                  )}
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-light)', marginBottom: '0.5rem' }}>
-                    {new Date(img.created_at).toLocaleDateString()}
-                    {img.user_id && (
-                      <span style={{ marginLeft: '0.5rem' }}>
-                        • {img.user_id === currentUser?.id ? (
-                          <span style={{ color: 'var(--color-primary)' }}>You</span>
-                        ) : (
-                          <span style={{ color: 'var(--color-text-lighter)' }}>Other User</span>
-                        )}
-                      </span>
-                    )}
-                  </div>
-                  {/* Report usage indicator */}
-                  {imagesInReports.has(img.url) ? (
-                    <div style={{ 
-                      fontSize: '0.7rem', 
-                      color: 'var(--color-warning)', 
-                      backgroundColor: 'rgba(255, 193, 7, 0.1)',
-                      padding: '0.25rem 0.5rem',
-                      borderRadius: '0.25rem',
-                      marginBottom: '0.5rem',
-                      display: 'inline-block'
-                    }}>
-                      ✓ Used in Report
-                    </div>
-                  ) : (
-                    <div style={{ 
-                      fontSize: '0.7rem', 
-                      color: 'var(--color-success)', 
-                      backgroundColor: 'rgba(40, 167, 69, 0.1)',
-                      padding: '0.25rem 0.5rem',
-                      borderRadius: '0.25rem',
-                      marginBottom: '0.5rem',
-                      display: 'inline-block'
-                    }}>
-                      ○ Not Used in Reports
-                    </div>
-                  )}
-                  {!selectionMode && (
-                    <button
-                      className="btn btn-danger btn-sm"
-                      style={{ 
-                        position: 'absolute', 
-                        top: '1rem', 
-                        right: '1rem', 
-                        background: 'var(--color-danger)', 
-                        color: 'white', 
-                        border: 'none',
-                        zIndex: 1
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(img.id);
-                      }}
-                      disabled={deleteLoading === img.id}
-                    >
-                      {deleteLoading === img.id ? 'Deleting...' : '×'}
-                    </button>
-                  )}
-                </div>
-              ))}
+                  {uploadLoading ? 'Saving...' : `Save Group (${selectedImages.size} selected)`}
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => { setCreateGroupMode(false); setGroupName(''); setSelectedImages(new Set()); }}
+                  disabled={uploadLoading}
+                >
+                  Cancel
+                </button>
+              </div>
+              <div style={{ color: '#888', fontSize: '0.95rem', marginBottom: '0.5rem' }}>
+                Select photos below to add to this group.
+              </div>
             </div>
           )}
-
-          {/* List View (using shared component) */}
-          {viewMode === 'list' && (
-            <ImageListView
-              images={filteredImages.map(img => ({
-                id: img.id,
-                url: img.url,
-                description: img.description || '',
-                tag: img.tag,
-                created_at: img.created_at,
-                user_id: img.user_id || undefined,
-                hasChanges: img.hasChanges,
-                rotation: img.rotation
-              }))}
-              onUpdateImage={(imageId, field, value) => {
-                const update = handleImageUpdate(imageId, field, value);
-                setImages(prev => prev.map(img => {
-                  if (img.id === update.imageId) {
-                    const updated = { ...img, [update.field]: update.value };
-                    
-                    // Check if this creates a change from original
-                    const hasDescriptionChange = updated.description !== img.originalDescription;
-                    const hasTagChange = updated.tag !== img.originalTag;
-                    updated.hasChanges = hasDescriptionChange || hasTagChange;
-                    
-                    return updated;
-                  }
-                  return img;
-                }));
-              }}
-              onAutoSaveUpdate={updateImageFromAutoSave}
-              onShowSuccessMessage={handleShowSuccessMessage}
-              onRemoveImage={handleDelete}
-              showUserInfo={true}
-              showRotateButton={true}
-              currentUserId={currentUser?.id}
-              projectId={projectId}
-              imagesInReports={imagesInReports}
-              selectionMode={selectionMode}
-              selectedImages={selectedImages}
-              onToggleSelection={toggleImageSelection}
-              dragAndDrop={true}
-              onDragStart={handleDragStart}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onDragEnd={handleDragEnd}
-              draggedIndex={draggedIndex}
-              dragOverIndex={dragOverIndex}
-            />
-          )}
+          
+          {/* Always render in grid view with groups */}
+          {renderGridWithGroups()}
         </>
       )}
 
@@ -1149,8 +1808,8 @@ export default function ProjectImagesPage() {
 
             <div style={{ marginBottom: '1.5rem' }}>
               <img
-                src={selectedImage.url}
-                alt={selectedImage.description || 'Project image'}
+                src={selectedImage?.url}
+                alt={selectedImage?.description || 'Project image'}
                 style={{
                   width: '100%',
                   maxHeight: '60vh',
@@ -1207,10 +1866,10 @@ export default function ProjectImagesPage() {
                 <div style={{ marginBottom: '1rem' }}>
                   <strong style={{ color: 'var(--color-text)' }}>Description:</strong>
                   <p style={{ margin: '0.5rem 0', color: 'var(--color-text-light)' }}>
-                    {selectedImage.description || 'No description'}
+                    {selectedImage?.description || 'No description'}
                   </p>
                 </div>
-                {selectedImage.tag && (
+                {selectedImage?.tag && (
                   <div style={{ marginBottom: '1rem' }}>
                     <strong style={{ color: 'var(--color-text)' }}>Tag:</strong>
                     <span 
@@ -1224,7 +1883,7 @@ export default function ProjectImagesPage() {
                 <div style={{ marginBottom: '1rem' }}>
                   <strong style={{ color: 'var(--color-text)' }}>Created:</strong>
                   <span style={{ marginLeft: '0.5rem', color: 'var(--color-text-light)' }}>
-                    {new Date(selectedImage.created_at).toLocaleString()}
+                    {selectedImage?.created_at ? new Date(selectedImage.created_at).toLocaleString() : 'Unknown'}
                   </span>
                 </div>
               </div>
@@ -1240,16 +1899,25 @@ export default function ProjectImagesPage() {
                 </button>
               )}
               <button
-                onClick={() => handleDelete(selectedImage.id)}
-                disabled={deleteLoading === selectedImage.id}
+                onClick={() => selectedImage && handleDelete(selectedImage.id)}
+                disabled={deleteLoading === selectedImage?.id}
                 className="btn btn-danger"
               >
-                {deleteLoading === selectedImage.id ? 'Deleting...' : 'Delete'}
+                {deleteLoading === selectedImage?.id ? 'Deleting...' : 'Delete'}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Upload Photo Modal */}
+      <UploadPhotoModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        onUpload={handlePhotoUpload}
+        loading={uploadLoading}
+        progress={uploadProgress}
+      />
     </div>
   );
 } 

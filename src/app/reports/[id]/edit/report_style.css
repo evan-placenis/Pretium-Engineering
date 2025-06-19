@@ -21,22 +21,26 @@
   display: flex;
   flex-direction: row;
   align-items: flex-start;
+  justify-content: center;
   gap: 2rem;
-  margin-bottom: 0rem;
+  margin-bottom: 2rem;
 }
 
 .report-text {
-  flex: 1 1 60%;
-  text-align: justify;
-  line-height: 1.5;
-  margin: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: flex-end;
+  text-align: right;
 }
 
 .report-image-block {
-  flex: 0 0 40%;
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  justify-content: flex-start;
 }
 
 .report-indent {
@@ -44,19 +48,17 @@
 }
 
 .report-image {
-  max-width: 100%;
+  max-width: 400px;
+  width: 100%;
   height: auto;
-  border: px solid #ddd;
-  border-radius: 4px;
-  margin-bottom: 0.5rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
 
 .report-image-caption {
-  font-family: 'Segoe UI', sans-serif;
-  font-size: 1rem;
-  color: #666;
-  margin: 0;
-  font-style: italic;
+  margin-top: 0.5rem;
+  font-size: 0.95rem;
+  color: #444;
   text-align: left;
 }
 
@@ -93,4 +95,10 @@
 .report-boxed-num {
   font-weight: bold;
   margin-right: 0.5rem;
+}
+
+.report-bullet {
+  font-size: 1.15rem;
+  margin-bottom: 1.2em;
+  line-height: 1.7;
 }

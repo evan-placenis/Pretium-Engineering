@@ -57,82 +57,175 @@ function renderSpecialSection(paragraph: string): string | null {
   }
   return null;
 }
+
 /**
- * Process content to create mixed layout: full-width for text without images, 2-column for sections with images
- * Each image is placed directly beside the paragraph that references it
- * I BELIEVE IT IS NEEDED IN THIS FILE AND NOT MOVED TO THE REPORT EDITOR COMPONENT
+ * Group bullet points by image reference in the content.
+ * Returns an object: { [imageId]: [bullet1, bullet2, ...] }
  */
+function groupBulletsByImageAndText(rawContent: string) {
+  const lines = rawContent.split(/\n/).map(l => l.trim()).filter(Boolean);
+  const imageRegex = /\[IMAGE:(\d+):([^\]]+)\]/g;
+  const groups: Record<string, string[]> = {};
+  const noImageParagraphs: string[] = [];
+
+  for (const line of lines) {
+    const imageMatches = [...line.matchAll(imageRegex)];
+    if (imageMatches.length > 0) {
+      imageMatches.forEach(match => {
+        const imageId = match[1];
+        const groupName = match[2];
+        if (!groups[imageId]) groups[imageId] = [];
+        // Remove the image tag and clean up spaces
+        let cleanText = line.replace(imageRegex, '').replace(/\s+([.,;:])/g, '$1').replace(/\s{2,}/g, ' ').trim();
+        groups[imageId].push(cleanText);
+      });
+    } else {
+      noImageParagraphs.push(line);
+    }
+  }
+  return { groups, noImageParagraphs };
+}
+
 const processContentWithImages = (rawContent: string, images: ReportImage[]): string => {
-  // Always prepend the Pretium header image
   let html = '<div style="width:100%;text-align:center;margin-bottom:1.5rem;"><img src="/pretium_header.png" alt="Pretium Header" style="max-width:100%;height:auto;" /></div>';
 
   if (images.length === 0) {
     return html + `<div class="report-text">${rawContent}</div>`;
   }
 
-  const paragraphs = rawContent.split(/\n\s*\n/);
-
-  // Render Location Plan and General Project Status above OBSERVATIONS
+  // Render special sections
   if (rawContent.includes('[SECTION:LOCATION_PLAN]')) {
     html += renderSpecialSection('[SECTION:LOCATION_PLAN]');
   }
   if (rawContent.includes('[SECTION:GENERAL_PROJECT_STATUS]')) {
     html += renderSpecialSection('[SECTION:GENERAL_PROJECT_STATUS]');
   }
-
-  // OBSERVATIONS header always comes after Location Plan and General Project Status
   html += '<div class="report-header">OBSERVATIONS</div>';
-
-  // Site Staging Area comes after OBSERVATIONS
   if (rawContent.includes('[SECTION:SITE_STAGING_AREA]')) {
     html += renderSpecialSection('[SECTION:SITE_STAGING_AREA]');
   }
 
-  paragraphs.forEach(paragraph => {
-    if (
-      paragraph.includes('[SECTION:LOCATION_PLAN]') ||
-      paragraph.includes('[SECTION:GENERAL_PROJECT_STATUS]') ||
-      paragraph.includes('[SECTION:SITE_STAGING_AREA]')
-    ) {
-      return; // skip, already rendered above
+  // --- Single-pass, in-order rendering ---
+  const lines = rawContent.split(/\n/).map(l => l.trim());
+  const imageRegex = /\[IMAGE:(\d+):([^\]]+)\]/g;
+  const imageBullets: Record<string, string[]> = {};
+  const renderedImages = new Set<string>();
+
+  // First pass: collect all bullets for each image (by key)
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const imageMatches = [...line.matchAll(imageRegex)];
+    if (imageMatches.length > 0) {
+      let imageId = imageMatches[0][1];
+      let groupName = imageMatches[0][2];
+      let bullet = '';
+      if (line.replace(imageRegex, '').trim() === '') {
+        // Look back for previous non-empty line
+        let prevIdx = i - 1;
+        let foundText = '';
+        while (prevIdx >= 0) {
+          const prevLine = lines[prevIdx].trim();
+          if (prevLine && !prevLine.match(imageRegex)) {
+            foundText = prevLine;
+            break;
+          }
+          prevIdx--;
+        }
+        bullet = foundText;
+      } else {
+        bullet = line.replace(imageRegex, '').replace(/\s+([.,;:])/g, '$1').replace(/\s{2,}/g, ' ').trim();
+      }
+      const key = `${imageId}|||${groupName}`;
+      if (!imageBullets[key]) {
+        imageBullets[key] = [];
+      }
+      if (bullet) {
+        imageBullets[key].push(bullet);
+      }
     }
-    const imageMatch = paragraph.match(/\[IMAGE:(\d+)\]/);
-    const isHeader = /^\d+\.\s/.test(paragraph.trim()); // e.g., 1. Title
-    const isSubheading = /^\d+\.\d+\s/.test(paragraph.trim()); // e.g., 1.1 Title
-    const isSubBullet = paragraph.trim().startsWith('-');
-    const numberedMatch = paragraph.match(/^(\d+(?:\.\d+)+)\s+/); // e.g. 2.1.1
+  }
+
+  // Second pass: render in original order, only rendering each image once
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (
+      line.includes('[SECTION:LOCATION_PLAN]') ||
+      line.includes('[SECTION:GENERAL_PROJECT_STATUS]') ||
+      line.includes('[SECTION:SITE_STAGING_AREA]')
+    ) {
+      continue;
+    }
+    const imageMatches = [...line.matchAll(imageRegex)];
+    if (imageMatches.length > 0) {
+      let imageId = imageMatches[0][1];
+      let groupName = imageMatches[0][2];
+      const key = `${imageId}|||${groupName}`;
+      if (!renderedImages.has(key)) {
+        renderedImages.add(key);
+        const bullets = imageBullets[key] || [];
+        const imageNum = parseInt(imageId);
+        let img = images.find(img => {
+          const hasGroup = img.group && img.group.length > 0;
+          const groupMatches = hasGroup && img.group!.some(g => g === groupName);
+          const numberMatches = img.number === imageNum;
+          return groupMatches && numberMatches;
+        });
+        // If not found with exact match, try fuzzy matching
+        if (!img) {
+          const fuzzyImg = images.find(img => {
+            const hasGroup = img.group && img.group.length > 0;
+            if (!hasGroup || img.number !== imageNum) return false;
+            const exactMatch = img.group!.some(g => g === groupName);
+            const normalizedMatch = img.group!.some(g =>
+              g.toLowerCase().replace(/[^a-z0-9]/g, '') === groupName.toLowerCase().replace(/[^a-z0-9]/g, '')
+            );
+            const containsMatch = img.group!.some(g =>
+              g.toLowerCase().includes(groupName.toLowerCase()) || groupName.toLowerCase().includes(g.toLowerCase())
+            );
+            return exactMatch || normalizedMatch || containsMatch;
+          });
+          if (fuzzyImg) {
+            img = fuzzyImg;
+          }
+        }
+        html += `
+          <div class="report-row">
+            <div class="report-text">
+              ${bullets.map(bullet => `<div class="report-bullet">${bullet}</div>`).join('')}
+            </div>
+            <div class="report-image-block">
+              ${img ? `
+                <img src="${img.url}" alt="${img.description || 'Report image'}" class="report-image" />
+                <p class="report-image-caption">
+                  <strong>Photo ${imageNum} (${groupName}):</strong> ${img.description || 'No description available'}
+                </p>
+              ` : `
+                <p class="report-image-caption" style="color: red;">
+                  <strong>Image not found:</strong> Photo ${imageNum} from group "${groupName}"
+                </p>
+              `}
+            </div>
+          </div>
+        `;
+      }
+      continue;
+    }
+    // Otherwise, render as header, subheading, or normal text
+    const isHeader = /^\d+\.\s/.test(line.trim());
+    const isSubheading = /^\d+\.\d+\s/.test(line.trim());
+    const isSubBullet = line.trim().startsWith('-');
+    const numberedMatch = line.match(/^(\d+(?:\.\d+)+)\s+/);
     const isSubNumbered = numberedMatch && numberedMatch[1].split('.').length > 2;
     const indentClass = (isSubBullet || isSubNumbered) ? ' report-indent' : '';
-    let text = paragraph.replace(/\s*\[IMAGE:\d+\]/g, '');
-
-    // Header or subheading styling
-    if (!imageMatch && (isHeader || isSubheading)) {
-      const className = isHeader ? 'report-header' : 'report-subheading';
-      html += `<div class="${className}">${text}</div>`;
-      return;
+    let text = line;
+    if (isHeader) {
+      html += `<div class="report-header">${text}</div>`;
+    } else if (isSubheading) {
+      html += `<div class="report-subheading">${text}</div>`;
+    } else if (text) {
+      html += `<div class="report-row"><div class="report-text${indentClass}">${text}</div></div>`;
     }
-
-    if (imageMatch) {
-      const imageNum = parseInt(imageMatch[1]);
-      const img = images[imageNum - 1];
-      html += `
-        <div class="report-row">
-          <div class="report-text${indentClass}">${paragraph.replace(/\s*\[IMAGE:\d+\]/g, '')}</div>
-          <div class="report-image-block">
-            ${img ? `
-              <img src="${img.url}" alt="${img.description || 'Report image'}" class="report-image" />
-              <p class="report-image-caption">
-                <strong>Photo ${imageNum}:</strong> ${img.description || 'No description available'}
-              </p>
-            ` : ''}
-          </div>
-        </div>
-      `;
-      return;
-    }
-    // No image, just text
-    html += `<div class="report-row"><div class="report-text${indentClass}">${paragraph}</div></div>`;
-  });
+  }
 
   return html;
 };
@@ -211,8 +304,8 @@ export default function EditReportPage() {
         setReport(reportData);
         setContent(reportData.generated_content);
         
-        // Ensure title is set with a default if empty
-        const title = reportData.title || `${project?.project_name || 'Report'} - ${new Date().toLocaleDateString()}`;
+        // Preserve the original title from the database, only set default if truly empty
+        const title = reportData.title || '';
         setReportTitle(title);
         
         setDeliveredAt(reportData.delivered_at || '');
@@ -231,11 +324,23 @@ export default function EditReportPage() {
         const { data: imagesData, error: imagesError } = await supabase
           .from('report_images')
           .select('*')
-          .eq('report_id', reportId);
+          .eq('report_id', reportId)
+          .order('number', { ascending: true, nullsFirst: false });
 
         if (imagesError) {
           console.error('Error fetching report images:', imagesError);
         } else {
+          console.log('Fetched report images with ordering:', imagesData?.map(img => ({ id: img.id, number: img.number, description: img.description })));
+          
+          // Debug: Show all unique groups
+          const allGroups = new Set<string>();
+          imagesData?.forEach(img => {
+            if (img.group && img.group.length > 0) {
+              img.group.forEach((g: string) => allGroups.add(g));
+            }
+          });
+          console.log('Available groups in database:', Array.from(allGroups));
+          
           setReportImages(imagesData || []);
         }
 
@@ -259,7 +364,37 @@ export default function EditReportPage() {
   // Process content when report images or content changes
   useEffect(() => {
     if (content && reportImages.length > 0) {
-      const processed = processContentWithImages(content, reportImages);
+      // Create a sequential mapping of images that respects groups
+      const sortedImages = [...reportImages].sort((a, b) => {
+        // First sort by group name (alphabetically)
+        const aGroup = (a.group && a.group.length > 0) ? a.group[0] : '';
+        const bGroup = (b.group && b.group.length > 0) ? b.group[0] : '';
+        
+        if (aGroup !== bGroup) {
+          return aGroup.localeCompare(bGroup);
+        }
+        
+        // Within the same group, sort by number
+        if (a.number && b.number) {
+          return a.number - b.number;
+        } else if (a.number && !b.number) {
+          return -1; // Numbered images first
+        } else if (!a.number && b.number) {
+          return 1; // Numbered images first
+        }
+        
+        // If neither has a number, sort by creation date
+        return 0; // No created_at field in ReportImage, so just maintain order
+      });
+      
+      console.log('Sorted images for processing:', sortedImages.map((img, index) => ({
+        index: index + 1,
+        group: img.group?.[0] || 'ungrouped',
+        number: img.number,
+        description: img.description
+      })));
+      
+      const processed = processContentWithImages(content, sortedImages);
       setProcessedContent(processed);
     } else {
       setProcessedContent(content);

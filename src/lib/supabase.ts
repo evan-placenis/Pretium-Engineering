@@ -115,6 +115,9 @@ export type Project = {
   "Reviewed By {Initials}"?: string;
   "Revision No."?: string;
   [key: string]: any;
+  "Client"?: string;
+  "Owner"?: string;
+  "Awarded Contract Amount"?: string;
 };
 
 export type Report = {
@@ -137,6 +140,7 @@ export type ReportImage = {
   tag: TagValue;
   user_id?: string;
   group?: string[];
+  number?: number;
 };
 
 export type ProjectImage = {
@@ -148,6 +152,7 @@ export type ProjectImage = {
   project_id: string;
   user_id?: string;
   group?: string[];
+  number?: number | null;
 };
 
 export type ChatMessage = {

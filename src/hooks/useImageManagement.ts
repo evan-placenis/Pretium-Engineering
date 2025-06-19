@@ -10,13 +10,13 @@ interface UseImageManagementProps {
 
 interface ImageUpdate {
   imageId: string;
-  field: 'description' | 'tag' | 'rotation';
-  value: string | TagValue | number;
+  field: 'description' | 'tag' | 'rotation' | 'number';
+  value: string | TagValue | number | null;
 }
 
 interface UseImageManagementReturn {
   updateImageFromAutoSave: (imageId: string, description: string) => void;
-  handleImageUpdate: (imageId: string, field: 'description' | 'tag' | 'rotation', value: string | TagValue | number) => ImageUpdate;
+  handleImageUpdate: (imageId: string, field: 'description' | 'tag' | 'rotation' | 'number', value: string | TagValue | number | null) => ImageUpdate;
   handleShowSuccessMessage: (message: string) => void;
 }
 
@@ -44,7 +44,7 @@ export function useImageManagement({ projectId, onSuccessMessage }: UseImageMana
   };
 
   // Generic image update handler
-  const handleImageUpdate = (imageId: string, field: 'description' | 'tag' | 'rotation', value: string | TagValue | number): ImageUpdate => {
+  const handleImageUpdate = (imageId: string, field: 'description' | 'tag' | 'rotation' | 'number', value: string | TagValue | number | null): ImageUpdate => {
     console.log('Image update:', { imageId, field, value });
     return { imageId, field, value };
   };

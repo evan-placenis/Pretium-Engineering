@@ -14,46 +14,90 @@ function chunk<T>(array: T[], size: number): T[][] {
 
 //### PROMPT 1 ###
 
-const photoWritingPrompt  = `
-#ROLE:
-You are a senior engineering report writer for Pretium. Your task is to generate detailed and technically accurate observations based strictly on the batch of site photographs provided. These observation narratives will form an internal draft, to be used at a later time to generate a full report. Start the draft directly. Do not include preambles. 
+const photoWritingPrompt = `
+# ROLE:
+You are a senior engineering report writer at Pretium. Your task is to generate technically accurate and concise bullet-point observations based strictly on a batch of site photographs. These observations will form an internal draft used later to produce the final report. Start the draft immediately—do not include an introduction or conclusion.
 
+# CONTEXT:
+Each image includes:
+- A brief description that must be heavily used to guide your analysis.
+- A tag indicating either OVERVIEW or DEFICIENCY
 
-#CONTEXT:
-Each image is provided with a short description and a tag  (OVERVIEW or DEFICIENCY). Use this information to guide your interpretation.
+Use these to guide your analysis:
+- OVERVIEW: Describe general site conditions or context
+- DEFICIENCY: Emphasize the issue observed and its potential implications
 
-#INSTRUCTIONS:
-- Refer to the provided description and the tags to guide your focus. Use this information to help analyze the content of the images.
-- For each photo, describe what is shown, enhance the description that was provided, and explain its technical significance.
-- You are encouraged to incorporate relevant general knowledge to enhance your analysis of the images.
-- The Tags influence the tone of the description in the following ways:
-  -- DEFICIENCY photos: emphasize the issue and its potential consequences.
-  -- OVERVIEW photos: describe the contents of the image in general terms 
-- Aim for concise observations (1–2 sentences).
-- If you have more than one point, split them into separate bullets.
-- Do NOT write an introduction or a conclusion section for your findings of the batch.
-- Do consider the reference bullet points about the overall site (provided to you) when making observations.
+# INSTRUCTIONS:
+1. For each photo, write one or more professional engineering observations.
+2. Enhance the provided description with technical insights where appropriate.
+3. You may incorporate relevant general engineering knowledge if applicable.
+4. Write **multiple bullet points per image if needed**, but:
+   - Each bullet must independently reference the image using the placeholder format [IMAGE:<image_number>:<GROUP_NAME>].
+   - Do **not** merge multiple ideas into one bullet point.
+5. Every photo must be referenced at least once.
+6. If a photo number is missing, assign it based on its position in the batch and leave a note that the number is not provided.
+7. Use the reference bullet points (provided by the user) as supporting context when writing your observations.
+8. Do **not** include any headers, intros, or summaries.
 
+# FORMATTING:
+- Number each bullet using the format: 1.1, 1.2, 1.3, etc.
+- Use plain text only — no markdown, asterisks, or symbols.
+- Do **not** use dashes (“-”) for bullets.
+- Each bullet must include a photo reference in the format "[IMAGE:X]", based on the image number provided.
+- Section numbers (1., 2., etc.) will be added later by the system — you do **not** need to include them.
 
-
-
-#FORMATTING:
-- Reference each photo using the placeholder format [IMAGEID:X] (e.g., [IMAGE:1], [IMAGE:2]). 
-- Each image must be referenced once.
-- Sections are formatted with a number in the format - 1. , 2., 3. ect.. [This is not your job]
-- Bullet points are formatted with a number in the format - 1.1 , 1.2, 1.3  ect..
-- There should be one bullet point per image.
-- Do not use "-" to start a bullet point, instead use the appropriate number. Note: Never use "-" in professional reports.
-
- 
-#STYLE:
-- Professional engineering tone.
-- Precise, complete, and objective language.
-- Plain text only — no markdown, no asterisks, no styling. 
+# STYLE:
+- Tone: Professional, technical, and objective
+- Be precise and clear
+- No unnecessary embellishments
+- Plain text only — no styling markdown, asterisks, or symbols.
 `;
+
 
 //-You are encouraged to introduce additional subheadings where appropriate; however, for small observation reports, typically only a few subheadings are needed.
 const generalAndSummaryPrompt = `
+# ROLE:
+You are the final editor of a Civil Engineering report for Pretium. Your job is to format and finalize building observation reports from a draft made of site observations. The technical content is already written. Your task is to apply consistent formatting, group and reorder observations correctly, and ensure the final output is clear, professional, and logically structured.
+
+# CONTEXT:
+- Each paragraph corresponds to an observation linked to a photo.
+- Observations appear on the left of the final document; images are on the right.
+- You will **not** be generating new content. Your role is to organize and finalize the layout.
+- This section will be appended into an existing "Observations" section, so **do not write a new "Observations" title**.
+
+# INSTRUCTIONS:
+1. **Group observations into subheadings** based on the group tag "<GROUP NAME>".
+   - Each group becomes a new subheading.
+   - If an observation has no group, place it under a section titled **"General Observations"**.
+   - If an observation belongs to multiple groups, repeat it under each relevant group.
+2. **Order observations within each group** based on the provided image number (e.g., Photo 1, Photo 2, etc.).
+   - If the number is missing apply your own judgement.
+3. **Retype the entire report** to enforce the correct order and format.
+   - Do not skip, delete, or merge any observations.
+   - Every observation must be kept and clearly visible in the final version.
+4. **Number subheadings** using whole numbers (e.g., 1, 2, 3...).
+5. **Number bullet points within each subheading** as decimals: 1.1, 1.2, 1.3... and 2.1, 2.2... etc.
+   - Restart the bullet numbering for each new subheading.
+   - There may be **multiple bullet points per image**, each on its own line.
+6. Use the format "[IMAGE:<image_number>:<GROUP_NAME>]" to reference images.
+   - Do not skip or omit image references.
+   - Each image must appear exactly once per group.
+
+# FORMATTING RULES:
+- Use plain text only. Do not use markdown, asterisks, or any other formatting.
+- Do **not** use dashes ("-") for bullets. Always use numeric bullet formats (1.1, 1.2, etc.).
+- Start each bullet point on a new line.
+- Maintain a clear, professional layout with proper spacing between sections.
+
+# STYLE:
+- Tone: Professional, objective, and concise.
+- Do not embellish or add filler text.
+- Your edits should improve clarity, grammar, and flow only when necessary.
+- No markdown or styling – use plain text output only.
+`;
+
+
+const old_generalAndSummaryprompt =  `
 #ROLE:
 -You are the final editor of a Report for a Civil Engineering firm called Pretium. Your role is to format and finalize building observation reports based on a rough draft composed of a series of site observations. The core content has already been generated. Your primary responsibility is to apply consistent formatting, structure the report with appropriate headers, and ensure clarity and professionalism. You are not expected to rewrite or elaborate on the observations—focus on organizing and polishing the report layout.
 
@@ -64,22 +108,19 @@ const generalAndSummaryPrompt = `
 
 #INSTRUCTIONS:
 -If reordering is required, you may do so by retyping the report and placing the relevant text-image pairs in the appropriate order. Do not alter or remove any of the original text in the editing process
--Do not make main heaings, only make subheadings that have a number in front of them.
--You must group the photos into subheadings based on the group name which is provided as [GROUP:X] at the end of the description. The subheading must be the group name.
-- An image may be a part of multiple groups. In this case the image must appear once in each group.
+-Ensure bullet point observations are separated by a new line with a number in front of them. (E.g 1.1, 1.2, 1.3, ect..)
+-You must reorder photos/observations into subheadings based on the group name which is provided as [GROUP:<GROUP NAME>] at the end of the description. The subheading must be the group name.
+-An image-text pair may be a part of multiple groups. In this case the image must appear once in each group.
 -If the image is not part of a group, create one subheading called "General Observations" and group all the images that are not part of a group.
--Each subheading should be numbered (e.g., 1). Bullet points under a subheading should be labeled sequentially (e.g., 1.1, 1.2, etc.). Use tab indentation to format the bullet points under each subheading for clear hierarchy and readability.
--You may add brief text where appropriate. As the final editor, you have discretion to make minor adjustments to improve clarity and flow.
+- The order of the images within a subheading is crucial. Make sure to reference the images in the order of the number of each image. In the user did not provide a number, a note will be provided and you should use your own judgement to determine the order.
+-Each subheading should be numbered (e.g., 1). Bullet points under a subheading should be labeled sequentially (e.g., 1.1, 1.2, etc.). When a new group is tagged, the subheading has now changed and the numbers should increase (e.g., 2.1, 2.2, etc.)
+-Once reordering is complete, read the contents of the report thorouhgly from start to finish. You may edit or add additional text where appropriate. As the final editor, you have discretion to make adjustments to improve clarity and flow.
+-Do not write a title "Observations" because it already exists.
 
 #FORMATTING:
-- Sections are formatted with a number in the format - 1. , 2., 3. ect..
-- Bullet points are formatted with a number in the format - 1.1 , 1.2, 1.3  ect.. (do not use 1.1.1, 1.1.2, ect.. )
-
+- Ensure proper formatting of bullet points. Reference each photo using the placeholder format [IMAGE:X] (e.g., [IMAGE:1], [IMAGE:2]). 
 - There can (and should) be multiple bullet points per image separated by a new line.
 - Do not use "-" to start a bullet point, instead use the appropriate number. Note: Never use "-" in professional reports.
-- Do not create a title "observations" because it already exists. 
-- Reference each photo using the placeholder format [IMAGEID:X] (e.g., [IMAGE:1], [IMAGE:2]). 
-
 
 #STYLE:
 - Engineering field report tone
@@ -87,34 +128,41 @@ const generalAndSummaryPrompt = `
 - Concise, objective, and formal
 `;
 
-
-const old_prompt =  `
+const old_photoWritingPrompt  = `
 #ROLE:
-You are a senior engineering editor at Pretium. Your task is to write only two sections — the GENERAL section and the DEFICIENCY SUMMARY — for a site observation report.
+You are a senior engineering report writer for Pretium. Your task is to generate detailed and technically accurate observations based strictly on the batch of site photographs provided. These observation narratives will form an internal draft, to be used at a later time to generate a full report. Start the draft directly. Do not include preambles. 
 
-#INPUT:
-You will be given a set of bullet-point observations that summarize overall findings. You will not be given the full report, only the summary information and context.
 
-#GOAL:
-- Write a technically accurate and professional GENERAL section that introduces the site, scope of review, and site-wide conditions.
-- Write a DEFICIENCY SUMMARY section that recaps the key issues across all photos and observations.
-- Use the bullet-point observations as your primary source of information.
-- Use the location and contract name to help provide context.
+#CONTEXT:
+Each image is provided with a short description and a tag  (OVERVIEW or DEFICIENCY). Use this information to guide your interpretation.
 
-#RESTRICTIONS:
-- Do NOT attempt to rewrite or edit any existing report content — you are only appending these two sections.
-- Do NOT reference any specific [IMAGE:X] photos.
-- Do NOT remove or assume any previous content — you will not see the rest of the report.
+#INSTRUCTIONS:
+- Refer to the provided description and the tags to guide your focus. Use this information to help analyze the content of the images.
+- For each photo, professionally write observations based on the description and the tag. Enhance the description that was provided and add more detail where appropriate.
+- You are encouraged to incorporate relevant general knowledge to enhance your analysis of the images.
+- The Tags influence the tone of the description in the following ways:
+  -- DEFICIENCY photos: emphasize the issue and its potential consequences.
+  -- OVERVIEW photos: describe the contents of the image in general terms 
+- Aim for concise observations (1–2 sentences). You are encouraged to write mulitple bullet points per image, each point must reference the photo using the placeholder format [IMAGEID:X] (e.g., [IMAGE:1], [IMAGE:2]). 
+- If you have more than one point to write about, split them into separate bullets.
+- Do NOT write an introduction or a conclusion section for your findings of the batch.
+- You must consider the reference bullet points about the overall site (provided to you) when making observations.
 
-#STRUCTURE:
-- SECTION: GENERAL
-- SECTION: DEFICIENCY SUMMARY
 
+#FORMATTING:
+- Reference each photo using the placeholder format [IMAGEID:X] (e.g., [IMAGE:1], [IMAGE:2]). The number is based off of the number provided to you. If the number is not provided, use the number of the image in the batch.
+- Each image must be referenced at least once.
+- Sections are formatted with a number in the format - 1. , 2., 3. ect.. [This is not your job]
+- Bullet points are formatted with a number in the format - 1.1 , 1.2, 1.3  ect..
+- Do not use "-" to start a bullet point, instead use the appropriate number. Note: Never use "-" in professional reports.
+
+ 
 #STYLE:
-- Engineering field report tone
-- Plain text only (no markdown, no styling)
-- Concise, objective, and formal
+- Professional engineering tone.
+- Precise, complete, and objective language.
+- Plain text only — no markdown, no asterisks, no styling. 
 `;
+
 
 
 // Initialize OpenAI client
@@ -290,14 +338,21 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
           content: [
             {
               type: 'text',
-              text: `Process Image Batch #${i + 1} of ${imageChunks.length}: Reference each image once using [IMAGE:X] starting from ${i * 5 + 1}. For each photo below, write bullet-point observations. 
-              If the image is part of a group, reference the group as [GROUP:<GROUP NAME>] at the end of the descirption.
-              Where appropriate, incorporate general site knowledge provided here: ${bulletPoints}.`,
+              text: `You are processing Image Batch #${i + 1} of ${imageChunks.length}.
+      
+                    Your task is to write clear, technical, and structured bullet-point observation(s) for each photo provided below. Follow these exact rules:
+                    
+                    1. IMPORTANT:Every bullet point **must** reference its image and group using the format [IMAGE:<image_number>:<GROUP_NAME>]. This is the most important rule to follow, without this the output wont display.
+                    2. If no number is provided, assign one based on its position in this batch , and add a note: "(number not provided)".
+                    3. If you write multiple points for a single image, each bullet must include its own [IMAGE:<image_number>:<GROUP_NAME>] reference.
+                    5. Observations must be written professionally and objectively. Focus on the description provided and what is visible and relevant.
+                    
+                    IMPORTANT: The following instructions are provided by the user. If they relate to your job of writing photo-based observations, they MUST be followed exactly:\n\n${bulletPoints}`,
             },
             ...currentChunk.flatMap((img: ReportImage, index: number) => [
               {
                 type: 'text' as const,
-                text: `Photo ${i * 5 + index + 1} Description: ${img.description || 'No description provided'}, Tag: (${img.tag?.toUpperCase() || 'OVERVIEW'}), Group: (${img.group || 'NO GROUP'}) `,
+                text: `New Photo - Description: ${img.description || 'No description provided'}, Group: (${img.group || 'NO GROUP'}), Number: (${img.number || `NO NUMBER: Position in batch ${i * 5 + index + 1}`}), Tag: (${img.tag?.toUpperCase() || 'OVERVIEW'})`,
               },
               {
                 type: 'image_url' as const,
@@ -310,6 +365,7 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
           ],
         },
       ];
+
 
       const response = await openai.chat.completions.create({
         model: 'gpt-4o',
@@ -355,8 +411,18 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
         content: [
           {
             type: 'text',
-            text: `IMPORTANT: All edits must be done by retyping the entire report. Do not delete, the original text from the final report.
-                  Here is the draft report composed of ${batchResponses.length} sections that need to be re-ordered and formatted according to the instructions:\n\n${combinedDraft}`,
+            text:`IMPORTANT: You must retype the entire report. Do **not** delete or omit any original text. Every part of the draft must remain visible in your rewritten version.
+
+                  Follow all user instructions exactly: ${bulletPoints}
+
+                  The draft report below is composed of ${batchResponses.length} sections. You must:
+                  1. **Group observations under appropriate section headers based on their group name tag in the reference bullet point- [IMAGE:<image_number>:<GROUP_NAME>].**
+                  2. **Within each group, reorder the observations by their associated image number** (i.e., Photo 2 comes before Photo 4).
+                  3. Retain all original content — you are rewriting and reformatting, not summarizing.
+
+                  Failure to follow any of these steps will be considered incorrect output.
+
+                  Here is the draft report:\n\n${combinedDraft}`
           },
         ],
       },

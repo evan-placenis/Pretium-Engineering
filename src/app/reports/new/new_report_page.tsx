@@ -6,6 +6,7 @@ import { supabase, Project } from '@/lib/supabase';
 import Link from 'next/link';
 import { Document, Packer, Paragraph, ImageRun, HeadingLevel, AlignmentType } from 'docx';
 import ImageListView, { ImageItem } from '@/components/ImageListView';
+import GroupedImageListView from '@/components/GroupedImageListView';
 import { TagValue } from '@/lib/tagConfig';
 import { useImageManagement } from '@/hooks/useImageManagement';
 import Toast from '@/components/Toast';
@@ -14,6 +15,8 @@ import Toast from '@/components/Toast';
 interface ExtendedImageItem extends ImageItem {
   originalDescription?: string;
   originalTag?: TagValue;
+  group?: string[]; // Add group information
+  number?: number | null; // Add number information for ordering
 }
 
 // Define available models and their corresponding API routes
@@ -45,6 +48,57 @@ export default function NewReport() {
   const selectedImageIds = searchParams.get('selected_images');
   
 
+
+  // Load form data from localStorage on component mount
+  useEffect(() => {
+    if (projectId) {
+      const savedData = localStorage.getItem(`report-form-${projectId}`);
+      if (savedData) {
+        try {
+          const parsed = JSON.parse(savedData);
+          let restored = false;
+          if (parsed.reportTitle) {
+            setReportTitle(parsed.reportTitle);
+            restored = true;
+          }
+          if (parsed.bulletPoints) {
+            setBulletPoints(parsed.bulletPoints);
+            restored = true;
+          }
+          if (parsed.selectedModel) {
+            setSelectedModel(parsed.selectedModel);
+            restored = true;
+          }
+          if (restored) {
+            setSuccessMessage('Your previous form data has been restored');
+            setTimeout(() => setSuccessMessage(null), 3000);
+          }
+        } catch (error) {
+          console.warn('Failed to parse saved form data:', error);
+        }
+      }
+    }
+  }, [projectId]);
+
+  // Save form data to localStorage whenever it changes
+  useEffect(() => {
+    if (projectId) {
+      const formData = {
+        reportTitle,
+        bulletPoints,
+        selectedModel,
+        timestamp: Date.now()
+      };
+      localStorage.setItem(`report-form-${projectId}`, JSON.stringify(formData));
+    }
+  }, [reportTitle, bulletPoints, selectedModel, projectId]);
+
+  // Clear saved form data when report is successfully generated
+  const clearSavedFormData = () => {
+    if (projectId) {
+      localStorage.removeItem(`report-form-${projectId}`);
+    }
+  };
 
   // Use the shared image management hook
   const { updateImageFromAutoSave, handleImageUpdate, handleShowSuccessMessage } = useImageManagement({
@@ -116,7 +170,9 @@ export default function NewReport() {
         const { data, error } = await supabase
           .from('project_images')
           .select('*')
-          .in('id', imageIds);
+          .in('id', imageIds)
+          .order('number', { ascending: true, nullsFirst: false }) // Order by number first, then by created_at
+          .order('created_at', { ascending: false });
           
         if (error) throw error;
         
@@ -128,7 +184,9 @@ export default function NewReport() {
               ...img,
               originalDescription: img.description,
               originalTag: img.tag,
-              hasChanges: false
+              hasChanges: false,
+              group: img.group || [], // Preserve group information
+              number: img.number // Preserve number information
             }));
           return [...prev, ...newImages];
         });
@@ -159,6 +217,7 @@ export default function NewReport() {
         .from('project_images')
         .select('*')
         .eq('project_id', projectId)
+        .order('number', { ascending: true, nullsFirst: false }) // Order by number first, then by created_at
         .order('created_at', { ascending: false });
       if (error) throw error;
       // Avoid duplicates by id and initialize original values
@@ -170,7 +229,9 @@ export default function NewReport() {
             ...img,
             originalDescription: img.description,
             originalTag: img.tag,
-            hasChanges: false
+            hasChanges: false,
+            group: img.group || [], // Preserve group information
+            number: img.number // Preserve number information
           })))
       ]));
     } catch (error: any) {
@@ -195,10 +256,39 @@ export default function NewReport() {
     setError(null);
 
     try {
+      // Sort images by group and number before sending to AI
+      const sortedImages = [...allImages].sort((a, b) => {
+        // First sort by group name (alphabetically)
+        const aGroup = (a.group && a.group.length > 0) ? a.group[0] : '';
+        const bGroup = (b.group && b.group.length > 0) ? b.group[0] : '';
+        
+        if (aGroup !== bGroup) {
+          return aGroup.localeCompare(bGroup);
+        }
+        
+        // Within the same group, sort by number
+        if (a.number && b.number) {
+          return a.number - b.number;
+        } else if (a.number && !b.number) {
+          return -1; // Numbered images first
+        } else if (!a.number && b.number) {
+          return 1; // Numbered images first
+        }
+        
+        // If neither has a number, maintain original order
+        return 0;
+      });
+
       console.log('Starting report generation with:', {
         bulletPoints,
         projectName: project?.project_name,
-        uploadedImagesCount: allImages.length,
+        uploadedImagesCount: sortedImages.length,
+        sortedImages: sortedImages.map((img, index) => ({
+          index: index + 1,
+          group: img.group?.[0] || 'ungrouped',
+          number: img.number,
+          description: img.description
+        }))
       });
 
       // Save the initial report data to the database first
@@ -220,11 +310,13 @@ export default function NewReport() {
 
       // Insert all images into report_images with report_id first
       console.log('Attempting to insert report images...');
-      const { error: imagesError } = await supabase.from('report_images').insert(allImages.map(img => ({
+      const { error: imagesError } = await supabase.from('report_images').insert(sortedImages.map(img => ({
         report_id: reportData.id,
         url: img.url,
         tag: img.tag,
         description: img.description,
+        number: img.number, // Preserve the number field for proper ordering
+        group: img.group, // Add group information
         user_id: user.id // Add user tracking
       })));
       
@@ -249,7 +341,7 @@ export default function NewReport() {
             contractName: project?.["Client Name"], // Also send as contractName for backend compatibility
             location: project?.location,
             reportId: reportData.id,
-            images: allImages,
+            images: sortedImages,
             modelType: selectedModel
           }),
         }).then(response => {
@@ -261,6 +353,8 @@ export default function NewReport() {
           console.error('Streaming generation failed:', error);
         });
         
+        // Clear saved form data after successful generation
+        clearSavedFormData();
         return; // Exit early for streaming models
       }
 
@@ -275,7 +369,7 @@ export default function NewReport() {
           projectName: project?.name,
           location: project?.location,
           reportId: reportData.id,
-          images: allImages,
+          images: sortedImages,
           modelType: selectedModel
         }),
       });
@@ -305,6 +399,9 @@ export default function NewReport() {
         .eq('id', reportData.id);
 
       if (updateError) throw updateError;
+
+      // Clear saved form data after successful generation
+      clearSavedFormData();
 
       // Redirect to the report editor
       router.push(`/reports/${reportData.id}/edit`);
@@ -512,7 +609,7 @@ export default function NewReport() {
           {allImages.length > 0 && (
             <div style={{ marginBottom: "2rem" }}>
               <h4 style={{ marginBottom: "1rem" }}>Project Images</h4>
-              <ImageListView
+              <GroupedImageListView
                 images={allImages}
                 onUpdateImage={(imageId, field, value) => {
                   const update = handleImageUpdate(imageId, field, value);
@@ -537,6 +634,8 @@ export default function NewReport() {
                 showRotateButton={true}
                 currentUserId={user?.id}
                 projectId={searchParams.get('project_id') ?? undefined}
+                collapsible={true}
+                defaultCollapsed={false}
               />
             </div>
           )}

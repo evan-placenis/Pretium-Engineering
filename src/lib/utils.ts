@@ -23,7 +23,7 @@ export const handleExcelUpload = (file: File): Promise<ExcelUploadResult> => {
         for (const [i, row] of (jsonData as any[][]).entries()) {
           // Skip empty rows, rows with empty first/second cell, or rows that are just titles
           if (!row[1] || !row[2]) continue;
-          projectFields[row[1]] = row[2];
+          projectFields[row[1].trim()] = row[2];
         }
         
         resolve({ success: true, data: projectFields });

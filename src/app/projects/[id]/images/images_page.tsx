@@ -2,13 +2,12 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { supabase, ProjectImage, Project } from '@/lib/supabase';
-import ImageListView, { ImageItem } from '@/components/ImageListView';
-import DescriptionInput from '@/components/DescriptionInput';
+import { ImageListView, DescriptionInput } from '@/components/image_components';
 import { TagValue, getAllTagOptions, getTagLabel, getTagBadgeClass } from '@/lib/tagConfig';
 import { useViewPreference } from '@/hooks/useViewPreference';
 import { useImageManagement } from '@/hooks/useImageManagement';
-import Toast from '@/components/Toast';
-import UploadPhotoModal from '@/components/UploadPhotoModal';
+import { Toast } from '@/components/feedback';
+import { UploadPhotoModal } from './components';
 
 // Extended interface to track rotation and changes
 interface ExtendedProjectImage extends ProjectImage {

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { supabase, Project } from '@/lib/supabase';
 import { useViewPreference } from '@/hooks/useViewPreference';
 
+
 export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [allProjects, setAllProjects] = useState<Project[]>([]);
@@ -175,21 +176,23 @@ export default function Dashboard() {
             <h1>Active Projects</h1>
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
               <button
+                className={projectFilter === 'all' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
                 onClick={() => handleFilterChange('all')}
-                className={`btn btn-sm ${projectFilter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
               >
                 All Projects ({allProjects.length})
               </button>
               <button
+                className={projectFilter === 'mine' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
                 onClick={() => handleFilterChange('mine')}
-                className={`btn btn-sm ${projectFilter === 'mine' ? 'btn-primary' : 'btn-secondary'}`}
               >
                 My Projects ({allProjects.filter(p => p.user_id === user?.id).length})
               </button>
             </div>
           </div>
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-            <Link href="/projects/new" className="btn btn-primary">New Project</Link>
+            <Link href="/projects/new">
+              <button className="btn btn-primary">New Project</button>
+            </Link>
           </div>
         </header>
 
@@ -197,30 +200,24 @@ export default function Dashboard() {
         <div className="card" style={{ marginBottom: '2rem' }}>
           <div className="card-body">
             <h3 style={{ marginBottom: '1rem' }}>Search Projects</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '1rem', alignItems: 'start' }}>
               <div>
-                <label className="form-label" style={{ color: 'var(--color-text)' }}>Search Projects</label>
+                <label className="form-label">Search Projects</label>
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search by project name, company, or title..."
                   className="form-input"
-                  style={{ width: '100%' }}
                 />
               </div>
-              <div style={{ display: 'flex', alignItems: 'end', gap: '0.5rem' }}>
-                <button
-                  onClick={() => {
-                    setSearchQuery('');
-                  }}
-                  className="btn btn-secondary btn-sm"
-                  style={{ width: '20%' }}
-                >
-                  Clear Search
-                </button>
-                
-              </div>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setSearchQuery('')}
+                style={{ marginTop: '2.35rem'}}
+              >
+                Clear Search
+              </button>
             </div>
             <div style={{ marginTop: '1rem', fontSize: '0.875rem', color: 'var(--color-text-light)' }}>
               Showing {filteredProjects.length} of {projects.length} projects
@@ -229,12 +226,12 @@ export default function Dashboard() {
         </div>
         
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
-        <button
-          className="btn btn-secondary btn-sm"
-          onClick={toggleViewMode}
-        >
-          {viewMode === 'grid' ? 'List View' : 'Grid View'}
-        </button>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={toggleViewMode}
+          >
+            {viewMode === 'grid' ? 'List View' : 'Grid View'}
+          </button>
         </div>
 
         {filteredProjects.length === 0 ? (
@@ -252,8 +249,8 @@ export default function Dashboard() {
                 {searchQuery ? 'Try adjusting your search terms.' : 'Get started by creating a new project for your reports.'}
               </p>
               {!searchQuery && (
-                <Link href="/projects/new" className="btn btn-primary">
-                  Create New Project
+                <Link href="/projects/new">
+                  <button className="btn btn-primary">Create New Project</button>
                 </Link>
               )}
             </div>

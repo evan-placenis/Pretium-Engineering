@@ -5,11 +5,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase, Project } from '@/lib/supabase';
 import Link from 'next/link';
 import { Document, Packer, Paragraph, ImageRun, HeadingLevel, AlignmentType } from 'docx';
-import ImageListView, { ImageItem } from '@/components/ImageListView';
-import GroupedImageListView from '@/components/GroupedImageListView';
+import { ImageListView, GroupedImageListView, type ImageItem } from '@/components/image_components';
 import { TagValue } from '@/lib/tagConfig';
 import { useImageManagement } from '@/hooks/useImageManagement';
-import Toast from '@/components/Toast';
+import { Toast } from '@/components/feedback';
+
 
 // Extended interface to track original values
 interface ExtendedImageItem extends ImageItem {

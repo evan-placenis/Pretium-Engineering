@@ -7,6 +7,8 @@ import { Project, Report } from '@/lib/supabase';
 import { handleExcelUpload } from '@/lib/utils';
 import * as XLSX from 'xlsx';
 import { useViewPreference } from '@/hooks/useViewPreference';
+import KnowledgeUpload from './components/KnowledgeUpload';
+import KnowledgeViewer from './components/KnowledgeViewer';
 
 export default function ProjectPage({ id }: { id: string }) {
   const [project, setProject] = useState<Project | null>(null);
@@ -15,12 +17,29 @@ export default function ProjectPage({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showKnowledgeModal, setShowKnowledgeModal] = useState(false);
   const [fileData, setFileData] = useState<any>(null);
   const [uploadLoading, setUploadLoading] = useState(false);
+  const [knowledgeUploadError, setKnowledgeUploadError] = useState<string | null>(null);
+  const [knowledgeUploadSuccess, setKnowledgeUploadSuccess] = useState<string | null>(null);
   const router = useRouter();
   
   // Use the view preference hook for persistent view state
   const { viewMode: reportViewMode, toggleViewMode: toggleReportViewMode } = useViewPreference('project-reports');
+
+  // Initialize knowledge upload functionality
+  const knowledgeUpload = KnowledgeUpload({
+    projectId: id,
+    onUploadComplete: () => {
+      setKnowledgeUploadSuccess('File uploaded successfully!');
+      setKnowledgeUploadError(null);
+      setTimeout(() => setKnowledgeUploadSuccess(null), 3000);
+    },
+    onError: (error: string) => {
+      setKnowledgeUploadError(error);
+      setKnowledgeUploadSuccess(null);
+    }
+  });
 
   useEffect(() => {
     const fetchProjectAndReports = async () => {
@@ -203,6 +222,12 @@ export default function ProjectPage({ id }: { id: string }) {
                 Update Project Info
               </button>
               <button
+                onClick={() => setShowKnowledgeModal(true)}
+                className="btn btn-secondary"
+              >
+                Upload Knowledge to AI
+              </button>
+              <button
                 onClick={() => router.push(`/reports/new?project_id=${project.id}`)}
                 className="btn btn-primary"
               >
@@ -270,6 +295,97 @@ export default function ProjectPage({ id }: { id: string }) {
                   className="btn btn-primary"
                 >
                   {uploadLoading ? 'Updating...' : 'Update Project'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showKnowledgeModal && (
+          <div className="modal" style={{ display: 'block' }}>
+            <div className="modal-content" style={{ maxWidth: '500px', margin: '2rem auto' }}>
+              <div className="modal-header">
+                <h2>Upload Knowledge to AI</h2>
+                <button
+                  onClick={() => {
+                    setShowKnowledgeModal(false);
+                    setKnowledgeUploadError(null);
+                    setKnowledgeUploadSuccess(null);
+                  }}
+                  className="btn btn-close"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="modal-body">
+                <div className="card">
+                  <div className="card-body">
+                    <h3 style={{ marginBottom: "1rem" }}>Upload Project Knowledge</h3>
+                    <p style={{ marginBottom: "1rem" }} className="text-secondary">
+                      Upload project specifications and building codes to enhance AI knowledge for this project.
+                    </p>
+                    
+                    {knowledgeUploadError && (
+                      <div className="alert alert-error" style={{ marginBottom: "1rem" }}>
+                        {knowledgeUploadError}
+                      </div>
+                    )}
+                    
+                    {knowledgeUploadSuccess && (
+                      <div className="alert alert-success" style={{ marginBottom: "1rem" }}>
+                        {knowledgeUploadSuccess}
+                      </div>
+                    )}
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                      <div>
+                        <input
+                          type="file"
+                          accept=".pdf,.docx"
+                          style={{ display: 'none' }}
+                          id="spec-upload"
+                          onChange={knowledgeUpload.handleSpecUpload}
+                          disabled={knowledgeUpload.uploading}
+                        />
+                        <label 
+                          htmlFor="spec-upload" 
+                          className={`btn btn-secondary ${knowledgeUpload.uploading ? 'disabled' : ''}`} 
+                          style={{ width: '100%' }}
+                        >
+                          {knowledgeUpload.uploading ? 'Uploading...' : 'Upload Spec'}
+                        </label>
+                      </div>
+                      <div>
+                        <input
+                          type="file"
+                          accept=".pdf,.docx"
+                          style={{ display: 'none' }}
+                          id="building-codes-upload"
+                          onChange={knowledgeUpload.handleBuildingCodeUpload}
+                          disabled={knowledgeUpload.uploading}
+                        />
+                        <label 
+                          htmlFor="building-codes-upload" 
+                          className={`btn btn-secondary ${knowledgeUpload.uploading ? 'disabled' : ''}`} 
+                          style={{ width: '100%' }}
+                        >
+                          {knowledgeUpload.uploading ? 'Uploading...' : 'Upload Building Codes'}
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button
+                  onClick={() => {
+                    setShowKnowledgeModal(false);
+                    setKnowledgeUploadError(null);
+                    setKnowledgeUploadSuccess(null);
+                  }}
+                  className="btn btn-secondary"
+                >
+                  Close
                 </button>
               </div>
             </div>
@@ -396,6 +512,20 @@ export default function ProjectPage({ id }: { id: string }) {
             </div>
           </div>
         </div>
+
+        {/* Knowledge Documents Viewer */}
+        <KnowledgeViewer
+          documents={knowledgeUpload.documents}
+          selectedDocument={knowledgeUpload.selectedDocument}
+          parsedChunks={knowledgeUpload.parsedChunks}
+          loadingChunks={knowledgeUpload.loadingChunks}
+          showChunks={knowledgeUpload.showChunks}
+          onTestDocument={knowledgeUpload.testDocumentParsing}
+          onDeleteDocument={knowledgeUpload.deleteDocument}
+          onCloseChunks={() => knowledgeUpload.setShowChunks(false)}
+          formatFileSize={knowledgeUpload.formatFileSize}
+          formatDate={knowledgeUpload.formatDate}
+        />
 
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '2rem' }}>
           <button

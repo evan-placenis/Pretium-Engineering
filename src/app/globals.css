@@ -399,7 +399,8 @@ a:hover {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 .loading-container {
@@ -662,3 +663,22 @@ a:hover {
   opacity: 1;
   pointer-events: auto;
 } 
+
+.title {
+  font-size: 2.5rem; /* large and readable */
+  font-weight: 700; /* bold for emphasis */
+  letter-spacing: -0.5px; /* slight tightening for sleek look */
+  color: #1a202c; /* dark charcoal, change for dark mode */
+  margin-bottom: 1rem;
+  text-align: center;
+
+  /* Optional effects */
+  background: linear-gradient(90deg, #1c85e7, #18a0f5);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+
+  /* Responsive scaling */
+  @media (max-width: 768px) {
+    font-size: 2rem;
+  }
+}

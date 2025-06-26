@@ -6,8 +6,7 @@ import Link from 'next/link';
 import { supabase, Project, Report, ChatMessage, ReportImage } from '@/lib/supabase';
 import { createWordDocumentWithImages} from '@/lib/word-utils';
 import { useChatMessages } from '@/lib/chat-utils';
-import { ReportEditor } from './components/ReportEditor';
-import { ReportChat } from './components/ReportChat';
+import { ReportEditor, ReportChat } from './components';
 import './report_style.css';
 
 const SECTION_TEMPLATES: Record<string, string> = {

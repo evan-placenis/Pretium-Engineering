@@ -11,7 +11,8 @@ export class EmbeddingService {
   private openaiApiKey: string;
 
   private constructor() {
-    this.openaiApiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY || '';
+    // Use OPENAI_API_KEY for server-side, fallback to NEXT_PUBLIC_OPENAI_API_KEY for client-side
+    this.openaiApiKey = process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY || '';
   }
 
   public static getInstance(): EmbeddingService {
@@ -56,7 +57,7 @@ export class EmbeddingService {
         const batchEmbeddings = data.data.map((item: any) => item.embedding);
         embeddings.push(...batchEmbeddings);
         
-        console.log(`Processed batch ${Math.floor(i / 100) + 1}, got ${batchEmbeddings.length} embeddings`);
+        console.log(`Generated embeddings for batch ${Math.floor(i / 100) + 1}/${Math.ceil(texts.length / 100)}`);
         
       } catch (error) {
         console.error(`Error processing batch ${Math.floor(i / 100) + 1}:`, error);
@@ -78,20 +79,17 @@ export class EmbeddingService {
     fileName: string
   ): Promise<void> {
     try {
-      console.log('=== STARTING EMBEDDING PROCESSING ===');
-      console.log('Project ID:', projectId);
-      console.log('Knowledge ID:', knowledgeId);
-      console.log('Content length:', content.length);
-      console.log('File name:', fileName);
+      console.log(`=== STARTING EMBEDDING PROCESSING ===`);
+      console.log(`File: ${fileName}, Content length: ${content.length} characters`);
 
       // Split content into chunks
       const chunks = this.splitIntoChunks(content);
-      console.log('Created', chunks.length, 'chunks');
+      console.log(`Created ${chunks.length} chunks`);
 
       // Generate embeddings
       console.log('Generating embeddings...');
       const embeddings = await this.generateEmbeddings(chunks);
-      console.log('Generated', embeddings.length, 'embeddings');
+      console.log(`Generated ${embeddings.length} embeddings`);
 
       // Store in database
       console.log('Storing embeddings in database...');
@@ -109,7 +107,6 @@ export class EmbeddingService {
             });
           
           if (error) throw error;
-          console.log(`Stored chunk ${i + 1}/${chunks.length}`);
         } catch (error) {
           console.error(`Error storing chunk ${i}:`, error);
         }
@@ -129,7 +126,7 @@ export class EmbeddingService {
         console.error('Error updating knowledge record:', updateError);
       }
 
-      console.log('=== EMBEDDING PROCESSING COMPLETED ===');
+      console.log(`=== EMBEDDING PROCESSING COMPLETED ===`);
       
     } catch (error) {
       console.error('Error in embedding processing:', error);
@@ -190,25 +187,66 @@ export class EmbeddingService {
     limit: number = 5
   ): Promise<EmbeddingResult[]> {
     try {
+      console.log(`=== SIMILARITY SEARCH ===`);
+      console.log(`Query: "${query}", Limit: ${limit}`);
+      
       // Generate embedding for query
       const queryEmbeddings = await this.generateEmbeddings([query]);
       const queryEmbedding = queryEmbeddings[0];
+
+      // Check how many chunks exist for this project
+      const { count: totalChunks, error: countError } = await supabase
+        .from('project_embeddings')
+        .select('*', { count: 'exact', head: true })
+        .eq('project_id', projectId);
+      
+      if (countError) {
+        console.error('Error counting chunks:', countError);
+      } else {
+        console.log(`Total chunks in database: ${totalChunks}`);
+      }
 
       // Search in database using cosine similarity
       const { data, error } = await supabase.rpc('search_embeddings', {
         query_embedding: queryEmbedding,
         project_id: projectId,
-        match_threshold: 0.7,
+        match_threshold: 0.6, // Increased threshold
         match_count: limit
       });
 
       if (error) {
+        console.error('Database search error:', error);
         throw error;
       }
 
-      return data || [];
+      const results = data || [];
+      console.log(`Found ${results.length} similar chunks`);
+      
+      // Debug: Check for duplicate chunks
+      const uniqueIds = new Set();
+      const uniqueResults = results.filter((result: any) => {
+        if (uniqueIds.has(result.id)) {
+          console.log(`⚠️ Duplicate chunk ID found: ${result.id}`);
+          return false;
+        }
+        uniqueIds.add(result.id);
+        return true;
+      });
+      
+      if (uniqueResults.length !== results.length) {
+        console.log(`⚠️ Removed ${results.length - uniqueResults.length} duplicate chunks`);
+      }
+      
+      // Log each result with details
+      uniqueResults.forEach((result: any, index: number) => {
+        console.log(`Result ${index + 1}: ${(result.similarity * 100).toFixed(1)}% similar - "${result.content_chunk.substring(0, 100)}..."`);
+      });
+
+      console.log(`=== SEARCH COMPLETED ===`);
+      return uniqueResults;
       
     } catch (error) {
+      console.error('=== SEARCH FAILED ===');
       console.error('Error searching embeddings:', error);
       return [];
     }

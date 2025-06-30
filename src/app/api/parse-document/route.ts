@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase';
+import { embeddingService } from '../../projects/[id]/hooks/embedding-service';
 
 // Simple test endpoint
 export async function GET() {
@@ -8,19 +9,21 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('=== API ROUTE CALLED ===');
+    console.log('=== DOCUMENT PARSING STARTED ===');
     
-    const { filePath, fileName } = await request.json();
-    console.log(`Document processing requested for: ${fileName}`);
-    console.log(`File path: ${filePath}`);
+    const { filePath, fileName, projectId, knowledgeId, skipEmbeddings } = await request.json();
+    console.log(`Processing: ${fileName}, Skip embeddings: ${skipEmbeddings}`);
 
     if (!filePath || !fileName) {
       return NextResponse.json({ error: 'Missing filePath or fileName' }, { status: 400 });
     }
 
+    if (!projectId || !knowledgeId) {
+      return NextResponse.json({ error: 'Missing projectId or knowledgeId' }, { status: 400 });
+    }
+
     // Create server-side Supabase client
     const supabase = createServerSupabaseClient();
-    console.log('Supabase client created');
 
     // Download file from Supabase storage
     const { data: fileData, error: downloadError } = await supabase.storage
@@ -36,7 +39,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No file data received' }, { status: 400 });
     }
 
-    console.log(`File downloaded successfully: ${fileData.size} bytes`);
+    console.log(`File downloaded: ${fileData.size} bytes`);
 
     // Determine file type and parse accordingly
     const fileExtension = fileName.toLowerCase().split('.').pop();
@@ -48,7 +51,6 @@ export async function POST(request: NextRequest) {
       // Parse DOCX file using mammoth
       try {
         const mammoth = await import('mammoth');
-        console.log('Mammoth module loaded successfully');
         
         const arrayBuffer = await fileData.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
@@ -86,11 +88,7 @@ export async function POST(request: NextRequest) {
             producer: 'Mammoth Parser'
           };
           
-          console.log(`DOCX parsed successfully:`);
-          console.log(`- Full text length: ${fullText.length} characters`);
-          console.log(`- Extracted sections length: ${rawText.length} characters`);
-          console.log(`- First 200 chars: ${rawText.substring(0, 200)}`);
-          console.log(`- Last 200 chars: ${rawText.substring(Math.max(0, rawText.length - 200))}`);
+          console.log(`DOCX parsed: ${fullText.length} chars total, ${rawText.length} chars extracted`);
           
           if (rawText.length < 100) {
             console.warn('Very little text extracted from specified sections');
@@ -142,10 +140,7 @@ export async function POST(request: NextRequest) {
       };
     }
 
-    console.log(`Document processed successfully:`);
-    console.log(`- File type: ${fileExtension}`);
-    console.log(`- File size: ${fileData.size} bytes`);
-    console.log(`- Text length: ${rawText.length} characters`);
+    console.log(`Document processed: ${fileExtension}, ${fileData.size} bytes, ${rawText.length} chars`);
 
     // Create chunks from the raw text
     const chunks = createSimpleChunks(rawText, fileName);
@@ -154,6 +149,26 @@ export async function POST(request: NextRequest) {
       content: rawText,
       level: 1
     }];
+
+    // Process embeddings and store in database
+    if (!skipEmbeddings) {
+      console.log('Starting embedding processing...');
+      try {
+        await embeddingService.processAndStoreEmbeddings(
+          projectId,
+          knowledgeId,
+          rawText,
+          fileName
+        );
+        console.log('Embedding processing completed');
+      } catch (embeddingError) {
+        console.error('Embedding processing failed:', embeddingError);
+        // Continue with the response even if embedding fails
+        // The chunks are still available for immediate use
+      }
+    } else {
+      console.log('Skipping embedding processing (test mode)');
+    }
 
     const result = {
       content: rawText,
@@ -170,8 +185,7 @@ export async function POST(request: NextRequest) {
       }
     };
 
-    console.log(`Document processed: ${sections.length} sections, ${chunks.length} chunks`);
-    console.log(`Final result - Content length: ${result.content.length}, Chunks: ${result.chunks.length}`);
+    console.log(`Parsing completed: ${sections.length} sections, ${chunks.length} chunks`);
 
     return NextResponse.json(result);
 
@@ -188,12 +202,8 @@ export async function POST(request: NextRequest) {
  * Create simple chunks from raw text
  */
 function createSimpleChunks(text: string, fileName: string): string[] {
-  console.log(`Creating chunks from text length: ${text.length}`);
-  
   const chunks: string[] = [];
   const sentences = text.split(/[.!?]+/).filter((s: string) => s.trim().length > 0);
-  
-  console.log(`Found ${sentences.length} sentences`);
   
   let currentChunk = `Document: ${fileName}\n\n`;
   
@@ -214,11 +224,6 @@ function createSimpleChunks(text: string, fileName: string): string[] {
   if (currentChunk.length > 50) {
     chunks.push(currentChunk.trim());
   }
-
-  console.log(`Created ${chunks.length} chunks`);
-  chunks.forEach((chunk, index) => {
-    console.log(`Chunk ${index + 1}: ${chunk.length} characters`);
-  });
 
   return chunks;
 }
@@ -439,11 +444,6 @@ function extractSpecificSections(fullText: string, fileName: string): string {
       // Extract the full section content
       const sectionContent = fullText.substring(sectionStart, sectionEnd).trim();
       extractedText += `${sectionContent}\n\n`;
-      
-      console.log(`Found section with keyword "${keyword}": ${sectionContent.length} characters`);
-      console.log(`Section starts at: ${sectionStart}, ends at: ${sectionEnd}`);
-    } else {
-      console.log(`Keyword not found: ${keyword}`);
     }
   }
 
@@ -465,6 +465,5 @@ function extractSpecificSections(fullText: string, fileName: string): string {
     }
   }
 
-  console.log(`Extracted ${foundSections} target sections`);
   return extractedText.trim();
 } 

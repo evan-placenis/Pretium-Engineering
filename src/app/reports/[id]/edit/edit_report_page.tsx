@@ -5,8 +5,9 @@ import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Project, Report, ChatMessage, ReportImage } from '@/lib/supabase';
 import { createWordDocumentWithImages} from '@/lib/word-utils';
-import { useChatMessages } from '@/lib/chat-utils';
-import { ReportEditor, ReportChat } from './components';
+import { useChatMessages } from '@/app/reports/[id]/edit/hooks/chat-utils';
+import { ReportEditor, EnhancedReportChat } from './components';
+import { EmbeddingTestPanel } from './components/EmbeddingTestPanel';
 import './report_style.css';
 
 const SECTION_TEMPLATES: Record<string, string> = {
@@ -258,6 +259,7 @@ export default function EditReportPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingStatus, setStreamingStatus] = useState('');
   const [showSectionDropdown, setShowSectionDropdown] = useState(false);
+  const [showEmbeddingTest, setShowEmbeddingTest] = useState(false);
   const [sectionSelection, setSectionSelection] = useState<SectionSelection>({
     locationPlan: false,
     generalProjectStatus: false,
@@ -683,6 +685,20 @@ export default function EditReportPage() {
           >
             {showChat ? 'Hide Chat' : 'Show Chat'}
           </button>
+          <button
+            onClick={() => setShowEmbeddingTest(true)}
+            style={{
+              background: '#FF9800',
+              border: 'none',
+              borderRadius: '4px',
+              padding: '0.5rem 1rem',
+              color: 'white',
+              cursor: 'pointer',
+              fontSize: '1rem'
+            }}
+          >
+            Test Embeddings
+          </button>
         </div>
       </div>
 
@@ -834,17 +850,25 @@ export default function EditReportPage() {
             width: '500px',
             flexShrink: 0
           }}>
-            <ReportChat
+            <EnhancedReportChat
               reportId={reportId}
               content={content}
               project={project}
               report={report}
               user={user}
               reportImages={reportImages}
+              setContent={setContent}
             />
           </div>
         )}
       </div>
+      
+      {showEmbeddingTest && (
+        <EmbeddingTestPanel
+          project={project}
+          onClose={() => setShowEmbeddingTest(false)}
+        />
+      )}
     </div>
   );
 } 

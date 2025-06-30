@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 import { ReportImage } from '@/lib/supabase';
+import { embeddingService } from '@/app/projects/[id]/hooks/embedding-service';
 
 // Helper function to chunk array
 function chunk<T>(array: T[], size: number): T[][] {
@@ -28,7 +29,7 @@ Use these to guide your analysis:
 - DEFICIENCY: Emphasize the issue observed and its potential implications
 
 # INSTRUCTIONS:
-1. For each photo, write one or more professional engineering observations.
+1. For each photo, write one or more professional engineering observations. This AI assistant is not responsible for assessing or ensuring safety, compliance, or regulatory procedures. It must not make any statements that imply safety measures were taken, are adequate, 
 2. Enhance the provided description with technical insights where appropriate.
 3. You may incorporate relevant general engineering knowledge if applicable.
 4. Write **multiple bullet points per image if needed**, but:
@@ -37,12 +38,19 @@ Use these to guide your analysis:
 5. Every photo must be referenced at least once.
 6. If a photo number is missing, assign it based on its position in the batch and leave a note that the number is not provided.
 7. Use the reference bullet points (provided by the user) as supporting context when writing your observations.
-8. Do **not** include any headers, intros, or summaries.
+8. Project specifications will be provided alongside each image and may include important facts or requirements. You must reference these specifications meaningfully and constructively in your observations.
+  - Avoid unhelpful or circular language such as:
+    - “As stated in the spec…”
+    - “The site should be inspected as per the spec…”
+  -Instead, integrate the specification details naturally into your observations to support factual, technical writing. For example:
+    - *(good)* “A minimum concrete cover of 50mm is required at this location, per project specifications.”
+    - *(bad)* “Site should follow the spec requirements for concrete cover.”
+9. Do **not** include any headers, intros, or summaries.
 
 # FORMATTING:
 - Number each bullet using the format: 1.1, 1.2, 1.3, etc.
 - Use plain text only — no markdown, asterisks, or symbols.
-- Do **not** use dashes (“-”) for bullets.
+- Do **not** use dashes (") for bullets.
 - Each bullet must include a photo reference in the format "[IMAGE:X]", based on the image number provided.
 - Section numbers (1., 2., etc.) will be added later by the system — you do **not** need to include them.
 
@@ -210,21 +218,49 @@ async function resizeImageForAI(imageUrl: string, maxWidth: number = 1024, maxHe
   }
 }
 
+// Helper function to get relevant knowledge chunks for an image
+async function getRelevantKnowledgeChunks(projectId: string, imageDescription: string, imageTag: string): Promise<string> {
+  try {
+    // Create a search query based on the image description and tag
+    const searchQuery = `${imageDescription}`;
+    
+    // Search for relevant chunks
+    const results = await embeddingService.searchSimilarContent(projectId, searchQuery, 2);
+    
+    if (results.length === 0) {
+      return ''; // No relevant knowledge found
+    }
+    
+    // Format the relevant knowledge as context
+    const relevantKnowledge = results.map((result: any, index: number) => {
+      const similarity = (result.similarity * 100).toFixed(1);
+      return `[Knowledge ${index + 1} - ${similarity}% relevant]: ${result.content_chunk}`;
+    }).join('\n\n');
+    console.log(`\n\nRELEVANT KNOWLEDGE CONTEXT:\n${relevantKnowledge}\n`)
+    return `\n\nRELEVANT KNOWLEDGE CONTEXT:\n${relevantKnowledge}\n`;
+    
+    
+  } catch (error) {
+    console.error('Error getting relevant knowledge chunks:', error);
+    return ''; // Return empty string if search fails
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { bulletPoints, contractName, location, reportId, images } = body;
+    const { bulletPoints, contractName, location, reportId, images, projectId } = body;
 
-    if (!bulletPoints || !reportId) {
+    if (!bulletPoints || !reportId || !projectId) {
       return NextResponse.json(
-        { error: 'Missing required fields' },
+        { error: 'Missing required fields: bulletPoints, reportId, or projectId' },
         { status: 400 }
       );
     }
 
     // Start the async processing
     try {
-      await processReportAsync(bulletPoints, contractName, location, reportId, images);
+      await processReportAsync(bulletPoints, contractName, location, reportId, images, projectId);
     } catch (error: any) {
       // Update the report with the error
       await supabase
@@ -249,7 +285,7 @@ export async function POST(request: Request) {
   }
 }
 
-async function processReportAsync(bulletPoints: string, contractName: string, location: string, reportId: string, images: any[]) {
+async function processReportAsync(bulletPoints: string, contractName: string, location: string, reportId: string, images: any[], projectId: string) {
   try {
     // First, verify the report exists in the database
     const { data: existingReport, error: checkError } = await supabase
@@ -331,41 +367,54 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
         console.error(`Error updating database before batch ${i + 1}:`, updateErrorBatch);
       }
 
+      // Prepare content parts for this batch
+      const contentParts: any[] = [
+        {
+          type: 'text',
+          text: `You are processing Image Batch #${i + 1} of ${imageChunks.length}.
+      
+                Your task is to write clear, technical, and structured bullet-point observation(s) for each photo provided below. Follow these exact rules:
+                
+                1. IMPORTANT:Every bullet point **must** reference its image and group using the format [IMAGE:<image_number>:<GROUP_NAME>]. This is the most important rule to follow, without this the output wont display.
+                2. If no number is provided, assign one based on its position in this batch , and add a note that the number is not provided.
+                3. If you write multiple points for a single image, each bullet must include its own [IMAGE:<image_number>:<GROUP_NAME>] reference.
+                5. Observations must be written professionally and objectively. Focus on the description provided and what is visible and relevant.
+                6. Use the relevant knowledge context provided for each image to enhance your observations with technical specifications and requirements.
+                
+                IMPORTANT: The following instructions are provided by the user. If they relate to your job of writing photo-based observations, they MUST be followed exactly:\n\n${bulletPoints}`,
+        }
+      ];
+
+      // Process each image in the batch
+      for (let j = 0; j < currentChunk.length; j++) {
+        const img = currentChunk[j];
+        
+        // Get relevant knowledge chunks for this image
+        const relevantKnowledge = await getRelevantKnowledgeChunks(projectId, img.description || '', img.tag || 'OVERVIEW');
+        
+        // Add image description with knowledge context
+        contentParts.push({
+          type: 'text',
+          text: `New Photo - Description: ${img.description || 'No description provided'}, Group: (${img.group || 'NO GROUP'}), Number: (${img.number || `NO NUMBER: Position in batch ${i * 5 + j + 1}`}), Tag: (${img.tag?.toUpperCase() || 'OVERVIEW'}) The following information comes from the project Specifications which should be referecenced for facts: \n${relevantKnowledge}`,
+        });
+        
+        // Add image
+        contentParts.push({
+          type: 'image_url',
+          image_url: {
+            url: img.url,
+            detail: 'auto',
+          },
+        });
+      }
+
       const batchMessages: OpenAI.ChatCompletionMessageParam[] = [
         ...baseMessages,
         {
           role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: `You are processing Image Batch #${i + 1} of ${imageChunks.length}.
-      
-                    Your task is to write clear, technical, and structured bullet-point observation(s) for each photo provided below. Follow these exact rules:
-                    
-                    1. IMPORTANT:Every bullet point **must** reference its image and group using the format [IMAGE:<image_number>:<GROUP_NAME>]. This is the most important rule to follow, without this the output wont display.
-                    2. If no number is provided, assign one based on its position in this batch , and add a note: "(number not provided)".
-                    3. If you write multiple points for a single image, each bullet must include its own [IMAGE:<image_number>:<GROUP_NAME>] reference.
-                    5. Observations must be written professionally and objectively. Focus on the description provided and what is visible and relevant.
-                    
-                    IMPORTANT: The following instructions are provided by the user. If they relate to your job of writing photo-based observations, they MUST be followed exactly:\n\n${bulletPoints}`,
-            },
-            ...currentChunk.flatMap((img: ReportImage, index: number) => [
-              {
-                type: 'text' as const,
-                text: `New Photo - Description: ${img.description || 'No description provided'}, Group: (${img.group || 'NO GROUP'}), Number: (${img.number || `NO NUMBER: Position in batch ${i * 5 + index + 1}`}), Tag: (${img.tag?.toUpperCase() || 'OVERVIEW'})`,
-              },
-              {
-                type: 'image_url' as const,
-                image_url: {
-                  url: img.url,
-                  detail: 'auto' as const,
-                },
-              },
-            ]),
-          ],
+          content: contentParts,
         },
       ];
-
 
       const response = await openai.chat.completions.create({
         model: 'gpt-4o',
@@ -459,5 +508,3 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       .eq('id', reportId);
   }
 }
-
- 

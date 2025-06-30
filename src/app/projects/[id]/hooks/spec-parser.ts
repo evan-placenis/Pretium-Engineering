@@ -35,7 +35,7 @@ export class SpecParser {
    * Extract text content from a file stored in Supabase storage
    * Supports both PDF and DOCX files
    */
-  async extractTextFromFile(filePath: string, fileName: string): Promise<ParsedSpec> {
+  async extractTextFromFile(filePath: string, fileName: string, projectId?: string, knowledgeId?: string, skipEmbeddings: boolean = false): Promise<ParsedSpec> {
     try {
       const fileExtension = fileName.toLowerCase().split('.').pop();
       console.log(`Calling document parsing API for: ${fileName} (${fileExtension})`);
@@ -48,7 +48,10 @@ export class SpecParser {
         },
         body: JSON.stringify({
           filePath,
-          fileName
+          fileName,
+          projectId,
+          knowledgeId,
+          skipEmbeddings
         }),
       });
 
@@ -87,12 +90,13 @@ export class SpecParser {
   /**
    * Test method to debug document parsing
    */
-  async testDocumentParsing(filePath: string, fileName: string): Promise<void> {
+  async testDocumentParsing(filePath: string, fileName: string, projectId?: string, knowledgeId?: string): Promise<void> {
     try {
       const fileExtension = fileName.toLowerCase().split('.').pop();
       console.log(`Testing ${fileExtension} parsing for: ${fileName}`);
       
-      const result = await this.extractTextFromFile(filePath, fileName);
+      // Skip embedding processing during testing to avoid creating duplicates
+      const result = await this.extractTextFromFile(filePath, fileName, projectId, knowledgeId, true);
       
       console.log(`Parsing results: ${result.sections.length} sections, ${result.content.length} characters`);
       

@@ -1,7 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { specParser } from '../hooks/spec-parser';
 
 interface KnowledgeUploadProps {
   projectId: string;
@@ -25,13 +24,13 @@ interface ParsedChunk {
 }
 
 export default function KnowledgeUpload({ projectId, onUploadComplete, onError }: KnowledgeUploadProps) {
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({});
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [selectedDocument, setSelectedDocument] = useState<KnowledgeDocument | null>(null);
   const [parsedChunks, setParsedChunks] = useState<ParsedChunk[]>([]);
-  const [loadingChunks, setLoadingChunks] = useState(false);
   const [showChunks, setShowChunks] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Load documents on component mount
   useEffect(() => {
@@ -58,33 +57,26 @@ export default function KnowledgeUpload({ projectId, onUploadComplete, onError }
   };
 
   const handleFileUpload = async (file: File, fileType: 'spec' | 'building_code') => {
-    if (!file) return;
-
-    console.log(`Starting upload: ${file.name} (${fileType})`);
-
+    if (!projectId) return;
+    
     setUploading(true);
-    setUploadProgress(prev => ({ ...prev, [file.name]: 0 }));
-
+    setError(null);
+    
     try {
-      // 1. Upload file to Supabase Storage
-      const filePath = `${projectId}/${fileType}/${Date.now()}_${file.name}`;
-      
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      // 1. Upload file to Supabase storage
+      const filePath = `${projectId}/${Date.now()}-${file.name}`;
+      const { error: uploadError } = await supabase.storage
         .from('project-knowledge')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false
-        });
+        .upload(filePath, file);
 
       if (uploadError) {
         throw new Error(`Upload failed: ${uploadError.message}`);
       }
 
-      console.log(`File uploaded successfully: ${file.name}`);
       setUploadProgress(prev => ({ ...prev, [file.name]: 50 }));
 
-      // 3. Insert record into project_knowledge table
-      const { error: dbError } = await supabase
+      // 2. Insert record into project_knowledge table
+      const { data: insertData, error: dbError } = await supabase
         .from('project_knowledge')
         .insert({
           project_id: projectId,
@@ -93,7 +85,9 @@ export default function KnowledgeUpload({ projectId, onUploadComplete, onError }
           file_type: fileType,
           file_size: file.size,
           uploaded_at: new Date().toISOString()
-        });
+        })
+        .select()
+        .single();
 
       if (dbError) {
         // If database insert fails, clean up the uploaded file
@@ -103,26 +97,48 @@ export default function KnowledgeUpload({ projectId, onUploadComplete, onError }
         throw new Error(`Database insert failed: ${dbError.message}`);
       }
 
+      const knowledgeId = insertData.id;
+      console.log(`Knowledge record created with ID: ${knowledgeId}`);
+
       setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
 
-      // 4. Test parsing if it's a supported file type
+      // 3. Process document and generate embeddings if it's a supported file type
       const fileExtension = file.name.split('.').pop()?.toLowerCase();
       
-      if ( fileExtension === 'docx') {
-        console.log(`Testing ${fileExtension} parsing...`);
+      if (fileExtension === 'docx') {
+        console.log(`Processing ${fileExtension} document and generating embeddings...`);
         
         try {
-          await specParser.testDocumentParsing(filePath, file.name);
-          console.log(`${fileExtension} parsing test completed successfully`);
+          // Call the parse-document API directly for embedding processing
+          const response = await fetch('/api/parse-document', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              filePath,
+              fileName: file.name,
+              projectId,
+              knowledgeId,
+              skipEmbeddings: false
+            }),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Document processing failed');
+          }
+
+          console.log(`${fileExtension} processing and embedding generation completed successfully`);
         } catch (parseError) {
-          console.error(`${fileExtension} parsing test failed:`, parseError);
+          console.error(`${fileExtension} processing and embedding generation failed:`, parseError);
         }
       }
 
-      // 5. Reload documents list
+      // 4. Reload documents list
       await loadDocuments();
 
-      // 6. Call success callback
+      // 5. Call success callback
       if (onUploadComplete) {
         onUploadComplete();
       }
@@ -142,36 +158,6 @@ export default function KnowledgeUpload({ projectId, onUploadComplete, onError }
           return newProgress;
         });
       }, 2000);
-    }
-  };
-
-  const testDocumentParsing = async (document: KnowledgeDocument) => {
-    setLoadingChunks(true);
-    setSelectedDocument(document);
-    
-    try {
-      // Extract the file path without the bucket prefix for the API
-      const filePath = document.file_path.replace(/^project-knowledge\//, '');
-      
-      const result = await specParser.extractTextFromFile(filePath, document.file_name);
-      
-      // Convert chunks to our format
-      const chunks: ParsedChunk[] = result.chunks.map((chunk: string, index: number) => ({
-        content: chunk,
-        chunkIndex: index + 1
-      }));
-      
-      setParsedChunks(chunks);
-      setShowChunks(true);
-      
-      console.log(`Parsed ${chunks.length} chunks from ${document.file_name}`);
-    } catch (error) {
-      console.error('Error parsing document:', error);
-      if (onError) {
-        onError(`Failed to parse document: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      }
-    } finally {
-      setLoadingChunks(false);
     }
   };
 
@@ -205,10 +191,24 @@ export default function KnowledgeUpload({ projectId, onUploadComplete, onError }
         throw new Error(`Failed to delete from database: ${dbError.message}`);
       }
 
-      // 3. Reload documents list
+      // 3. Delete related embeddings from project_embeddings table
+      const { error: embeddingsError } = await supabase
+        .from('project_embeddings')
+        .delete()
+        .eq('knowledge_id', document.id);
+
+      if (embeddingsError) {
+        console.error('Embeddings deletion error:', embeddingsError);
+        // Don't throw error here as the main document is already deleted
+        console.warn(`Failed to delete embeddings for document ${document.id}: ${embeddingsError.message}`);
+      } else {
+        console.log(`Deleted embeddings for document: ${document.id}`);
+      }
+
+      // 4. Reload documents list
       await loadDocuments();
 
-      // 4. Clear any active chunks if the deleted document was selected
+      // 5. Clear any active chunks if the deleted document was selected
       if (selectedDocument?.id === document.id) {
         setSelectedDocument(null);
         setParsedChunks([]);
@@ -217,7 +217,7 @@ export default function KnowledgeUpload({ projectId, onUploadComplete, onError }
 
       console.log(`Document deleted successfully: ${document.file_name}`);
       
-      // 5. Show success message
+      // 6. Show success message
       if (onUploadComplete) {
         onUploadComplete(); // Reuse the success callback
       }
@@ -267,9 +267,7 @@ export default function KnowledgeUpload({ projectId, onUploadComplete, onError }
     documents,
     selectedDocument,
     parsedChunks,
-    loadingChunks,
     showChunks,
-    testDocumentParsing,
     setShowChunks,
     formatFileSize,
     formatDate,

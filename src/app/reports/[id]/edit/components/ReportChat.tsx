@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { useChatMessages } from '@/lib/chat-utils';
+import { useChatMessages } from '@/app/reports/[id]/edit/hooks/chat-utils';
 import { Project, Report, ReportImage } from '@/lib/supabase';
 
 interface ChatMessage {

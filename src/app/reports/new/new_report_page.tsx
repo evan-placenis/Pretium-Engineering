@@ -337,8 +337,8 @@ export default function NewReport() {
           },
           body: JSON.stringify({
             bulletPoints,
-            projectName: project?.name,
-            contractName: project?.["Client Name"], // Also send as contractName for backend compatibility
+            projectId: project?.id,
+            contractName: project?.["Client Name"],
             location: project?.location,
             reportId: reportData.id,
             images: sortedImages,
@@ -366,7 +366,7 @@ export default function NewReport() {
         },
         body: JSON.stringify({
           bulletPoints,
-          projectName: project?.name,
+          projectId: project?.id,
           location: project?.location,
           reportId: reportData.id,
           images: sortedImages,

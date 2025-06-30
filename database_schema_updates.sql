@@ -1,13 +1,43 @@
--- Add processing status fields to project_knowledge table
-ALTER TABLE project_knowledge 
-ADD COLUMN processed BOOLEAN DEFAULT FALSE,
-ADD COLUMN processed_at TIMESTAMP WITH TIME ZONE,
-ADD COLUMN chunks_count INTEGER,
-ADD COLUMN processing_error TEXT;
+-- -- Add processing status fields to project_knowledge table
+-- ALTER TABLE project_knowledge 
+-- ADD COLUMN processed BOOLEAN DEFAULT FALSE,
+-- ADD COLUMN processed_at TIMESTAMP WITH TIME ZONE,
+-- ADD COLUMN chunks_count INTEGER,
+-- ADD COLUMN processing_error TEXT;
 
--- Create index for faster queries on unprocessed files
-CREATE INDEX idx_project_knowledge_processed ON project_knowledge(processed);
+-- -- Create index for faster queries on unprocessed files
+-- CREATE INDEX idx_project_knowledge_processed ON project_knowledge(processed);
 
--- Create index for project embeddings queries
-CREATE INDEX idx_project_embeddings_project_id ON project_embeddings(project_id);
-CREATE INDEX idx_project_embeddings_knowledge_id ON project_embeddings(knowledge_id); 
+-- -- Create index for project embeddings queries
+-- CREATE INDEX idx_project_embeddings_project_id ON project_embeddings(project_id);
+-- CREATE INDEX idx_project_embeddings_knowledge_id ON project_embeddings(knowledge_id);
+
+-- -- Create function for similarity search using embeddings
+-- CREATE OR REPLACE FUNCTION search_embeddings(
+--   query_embedding vector(1536),
+--   project_id uuid,
+--   match_threshold float DEFAULT 0.7,
+--   match_count int DEFAULT 5
+-- )
+-- RETURNS TABLE (
+--   id uuid,
+--   content_chunk text,
+--   chunk_index int,
+--   similarity float
+-- )
+-- LANGUAGE plpgsql
+-- AS $$
+-- BEGIN
+--   RETURN QUERY
+--   SELECT 
+--     pe.id,
+--     pe.content_chunk,
+--     pe.chunk_index,
+--     1 - (pe.embedding <=> query_embedding) as similarity
+--   FROM project_embeddings pe
+--   WHERE pe.project_id = search_embeddings.project_id
+--     AND 1 - (pe.embedding <=> query_embedding) > match_threshold
+--   ORDER BY pe.embedding <=> query_embedding
+--   LIMIT match_count;
+-- END;
+-- $$; 

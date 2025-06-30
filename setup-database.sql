@@ -1,0 +1,47 @@
+-- -- Database Setup for Embedding Functionality
+-- -- Run this in your Supabase SQL editor
+
+-- -- 1. Add processing status fields to project_knowledge table
+-- ALTER TABLE project_knowledge 
+-- ADD COLUMN IF NOT EXISTS processed BOOLEAN DEFAULT FALSE,
+-- ADD COLUMN IF NOT EXISTS processed_at TIMESTAMP WITH TIME ZONE,
+-- ADD COLUMN IF NOT EXISTS chunks_count INTEGER,
+-- ADD COLUMN IF NOT EXISTS processing_error TEXT;
+
+-- -- 2. Create indexes for better performance
+-- CREATE INDEX IF NOT EXISTS idx_project_knowledge_processed ON project_knowledge(processed);
+-- CREATE INDEX IF NOT EXISTS idx_project_embeddings_project_id ON project_embeddings(project_id);
+-- CREATE INDEX IF NOT EXISTS idx_project_embeddings_knowledge_id ON project_embeddings(knowledge_id);
+
+-- -- 3. Create function for similarity search using embeddings
+-- CREATE OR REPLACE FUNCTION search_embeddings(
+--   query_embedding vector(1536),
+--   project_id uuid,
+--   match_threshold float DEFAULT 0.7,
+--   match_count int DEFAULT 5
+-- )
+-- RETURNS TABLE (
+--   id uuid,
+--   content_chunk text,
+--   chunk_index int,
+--   similarity float
+-- )
+-- LANGUAGE plpgsql
+-- AS $$
+-- BEGIN
+--   RETURN QUERY
+--   SELECT 
+--     pe.id,
+--     pe.content_chunk,
+--     pe.chunk_index,
+--     1 - (pe.embedding <=> query_embedding) as similarity
+--   FROM project_embeddings pe
+--   WHERE pe.project_id = search_embeddings.project_id
+--     AND 1 - (pe.embedding <=> query_embedding) > match_threshold
+--   ORDER BY pe.embedding <=> query_embedding
+--   LIMIT match_count;
+-- END;
+-- $$;
+
+-- -- 4. Verify the setup
+-- SELECT 'Database setup completed successfully!' as status; 

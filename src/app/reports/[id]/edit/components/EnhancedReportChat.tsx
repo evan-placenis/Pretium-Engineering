@@ -1,6 +1,10 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useEnhancedChat, EmbeddingSearchResult } from '../hooks/useEnhancedChat';
 import { Project, Report, ReportImage } from '@/lib/supabase';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -188,8 +192,10 @@ export const EnhancedReportChat: React.FC<EnhancedReportChatProps> = ({
     embeddingResults,
     showEmbeddingResults,
     isInitialized,
+    canRevert,
     setChatMessage,
     sendChatMessage,
+    revertLastChange,
     searchEmbeddings,
     toggleEmbeddingResults,
     initializeChat,
@@ -236,6 +242,33 @@ export const EnhancedReportChat: React.FC<EnhancedReportChatProps> = ({
     }
   };
 
+  // Handle reverting the last change
+  const handleRevertLastChange = async () => {
+    const revertedContent = await revertLastChange();
+    if (revertedContent) {
+      console.log('Reverting to previous content');
+      setContent(revertedContent);
+    }
+  };
+
+  const handleKnowledgeButtonClick = () => {
+    // Toggle the panel
+    const newShowState = !showEmbeddingResults;
+    toggleEmbeddingResults();
+    
+    // If we're opening the panel and there are no results yet, trigger a search
+    if (newShowState && embeddingResults.length === 0) {
+      // Use the last user message as the search query, or a default query
+      const lastUserMessage = chatMessages
+        .filter(msg => msg.role === 'user')
+        .pop()?.content;
+      
+      const searchQuery = lastUserMessage || 'building codes specifications requirements';
+      console.log('Auto-triggering embedding search with query:', searchQuery);
+      searchEmbeddings(searchQuery);
+    }
+  };
+
   return (
     <div style={{
       width: '500px',
@@ -262,23 +295,77 @@ export const EnhancedReportChat: React.FC<EnhancedReportChatProps> = ({
         alignItems: 'center'
       }}>
         <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Enhanced Chat Assistant</h3>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
           <button
-            onClick={toggleEmbeddingResults}
+            onClick={handleRevertLastChange}
+            disabled={!canRevert}
             style={{
-              padding: '0.5rem 0.75rem',
-              background: showEmbeddingResults ? '#0E2841' : '#666',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '0.8rem',
+              padding: '0.6rem 1rem',
+              background: canRevert ? '#dc3545' : '#e9ecef',
+              color: canRevert ? 'white' : '#6c757d',
+              border: '1px solid',
+              borderColor: canRevert ? '#dc3545' : '#dee2e6',
+              borderRadius: '6px',
+              cursor: canRevert ? 'pointer' : 'not-allowed',
+              fontSize: '0.85rem',
+              fontWeight: '500',
+              transition: 'all 0.2s ease',
               display: 'flex',
               alignItems: 'center',
-              gap: '0.25rem'
+              gap: '0.5rem',
+              minWidth: '80px',
+              justifyContent: 'center'
+            }}
+            onMouseEnter={(e) => {
+              if (canRevert) {
+                e.currentTarget.style.background = '#c82333';
+                e.currentTarget.style.borderColor = '#c82333';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (canRevert) {
+                e.currentTarget.style.background = '#dc3545';
+                e.currentTarget.style.borderColor = '#dc3545';
+              }
             }}
           >
-            📚 Knowledge
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+            </svg>
+            Revert
+          </button>
+          <button
+            onClick={handleKnowledgeButtonClick}
+            style={{
+              padding: '0.6rem 1rem',
+              background: showEmbeddingResults ? '#0E2841' : '#6c757d',
+              color: 'white',
+              border: '1px solid',
+              borderColor: showEmbeddingResults ? '#0E2841' : '#6c757d',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              fontWeight: '500',
+              transition: 'all 0.2s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              minWidth: '100px',
+              justifyContent: 'center'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = showEmbeddingResults ? '#0a1f2e' : '#5a6268';
+              e.currentTarget.style.borderColor = showEmbeddingResults ? '#0a1f2e' : '#5a6268';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = showEmbeddingResults ? '#0E2841' : '#6c757d';
+              e.currentTarget.style.borderColor = showEmbeddingResults ? '#0E2841' : '#6c757d';
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+            </svg>
+            Knowledge
           </button>
         </div>
       </div>
@@ -338,14 +425,23 @@ export const EnhancedReportChat: React.FC<EnhancedReportChatProps> = ({
                   maxWidth: '85%',
                   background: msg.role === 'user' ? '#0E2841' : '#f0f0f0',
                   color: msg.role === 'user' ? 'white' : 'black',
-                  padding: '1rem',
+                  padding: '1.25rem 1.5rem',
                   borderRadius: '12px',
                   fontSize: '0.95rem',
                   wordBreak: 'break-word',
-                  lineHeight: '1.5'
+                  lineHeight: '1.5',
+                  minWidth: '220px',
                 }}
               >
-                {msg.content}
+                {React.createElement(
+                  ReactMarkdown as any,
+                  {
+                    remarkPlugins: [remarkGfm],
+                    rehypePlugins: [rehypeKatex],
+                    components: {},
+                    children: msg.content
+                  }
+                )}
               </div>
             ))}
             {(isSendingMessage || isSearchingEmbeddings) && (

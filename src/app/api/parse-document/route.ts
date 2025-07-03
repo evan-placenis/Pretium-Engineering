@@ -73,10 +73,15 @@ export async function POST(request: NextRequest) {
         } else {
           const result = await mammoth.extractRawText({ buffer });
           const fullText = result.value;
-          
-          // Extract only specific sections
-          const extractedText = extractSpecificSections(fullText, fileName);
-          rawText = extractedText;
+
+          // Extract and log PRODUCTS and EXECUTION sections
+          const productsSection = extractSectionByHeader(fullText, 'PRODUCTS');
+          const executionSection = extractSectionByHeader(fullText, 'EXECUTION');
+          console.log('PRODUCTS SECTION:\n', productsSection || 'Not found');
+          console.log('EXECUTION SECTION:\n', executionSection || 'Not found');
+
+          // Use the full text for intelligent chunking as before
+          rawText = fullText;
           
           // Get document metadata
           const metadata = await mammoth.extractRawText({ buffer });
@@ -88,10 +93,10 @@ export async function POST(request: NextRequest) {
             producer: 'Mammoth Parser'
           };
           
-          console.log(`DOCX parsed: ${fullText.length} chars total, ${rawText.length} chars extracted`);
+          console.log(`DOCX parsed: ${fullText.length} chars total, using full text for intelligent chunking`);
           
           if (rawText.length < 100) {
-            console.warn('Very little text extracted from specified sections');
+            console.warn('Very little text extracted from document');
           }
         }
         
@@ -143,7 +148,7 @@ export async function POST(request: NextRequest) {
     console.log(`Document processed: ${fileExtension}, ${fileData.size} bytes, ${rawText.length} chars`);
 
     // Create chunks from the raw text
-    const chunks = createSimpleChunks(rawText, fileName);
+    const chunks = createIntelligentChunks(rawText, fileName);
     const sections = [{
       title: fileExtension === 'docx' ? "Document Content" : "Document Information",
       content: rawText,
@@ -199,24 +204,48 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Create simple chunks from raw text
+ * Create intelligent chunks that preserve complete ideas and track document sources
+ * This replaces the old 1000-character limit with section-based chunking
  */
-function createSimpleChunks(text: string, fileName: string): string[] {
+function createIntelligentChunks(text: string, fileName: string): string[] {
   const chunks: string[] = [];
-  const sentences = text.split(/[.!?]+/).filter((s: string) => s.trim().length > 0);
+  
+  // First, try to parse into sections
+  const { sections, chunks: sectionChunks } = parseTechnicalDocument(text, fileName);
+  
+  if (sections.length > 0) {
+    // Use section-based chunks
+    return sectionChunks;
+  } else {
+    // Fallback to paragraph-based chunks for unstructured text
+    return createParagraphBasedChunks(text, fileName);
+  }
+}
+
+/**
+ * Create chunks based on paragraphs for unstructured text
+ * This preserves complete thoughts while still being manageable
+ */
+function createParagraphBasedChunks(text: string, fileName: string): string[] {
+  const chunks: string[] = [];
+  
+  // Split by paragraphs (double newlines)
+  const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
   
   let currentChunk = `Document: ${fileName}\n\n`;
+  let paragraphCount = 0;
   
-  for (const sentence of sentences) {
-    const sentenceWithPunctuation = sentence.trim() + '.';
+  for (const paragraph of paragraphs) {
+    const trimmedParagraph = paragraph.trim();
     
-    if (currentChunk.length + sentenceWithPunctuation.length > 1000) {
-      if (currentChunk.length > 50) {
-        chunks.push(currentChunk.trim());
-      }
-      currentChunk = `Document: ${fileName}\n\n${sentenceWithPunctuation}`;
+    // If adding this paragraph would exceed 2000 characters, start a new chunk
+    if (currentChunk.length + trimmedParagraph.length > 2000 && currentChunk.length > 50) {
+      chunks.push(currentChunk.trim());
+      currentChunk = `Document: ${fileName}\n\n${trimmedParagraph}`;
+      paragraphCount = 1;
     } else {
-      currentChunk += (currentChunk.length > 50 ? ' ' : '') + sentenceWithPunctuation;
+      currentChunk += (currentChunk.length > 50 ? '\n\n' : '') + trimmedParagraph;
+      paragraphCount++;
     }
   }
   
@@ -224,12 +253,12 @@ function createSimpleChunks(text: string, fileName: string): string[] {
   if (currentChunk.length > 50) {
     chunks.push(currentChunk.trim());
   }
-
+  
   return chunks;
 }
 
 /**
- * Parse technical document into sections and chunks optimized for RAG
+ * Enhanced section parsing that creates complete idea chunks
  */
 function parseTechnicalDocument(text: string, fileName: string) {
   const sections: any[] = [];
@@ -254,9 +283,9 @@ function parseTechnicalDocument(text: string, fileName: string) {
         currentSection.content = currentContent.join('\n');
         sections.push(currentSection);
         
-        // Create chunks from this section
-        const sectionChunks = createChunksFromSection(currentSection);
-        chunks.push(...sectionChunks);
+        // Create complete section chunk (no splitting within sections)
+        const sectionChunk = createCompleteSectionChunk(currentSection, fileName);
+        chunks.push(sectionChunk);
       }
       
       // Start new section
@@ -282,13 +311,13 @@ function parseTechnicalDocument(text: string, fileName: string) {
     currentSection.content = currentContent.join('\n');
     sections.push(currentSection);
     
-    const sectionChunks = createChunksFromSection(currentSection);
-    chunks.push(...sectionChunks);
+    const sectionChunk = createCompleteSectionChunk(currentSection, fileName);
+    chunks.push(sectionChunk);
   }
 
-  // If no sections were detected, create chunks from the whole text
+  // If no sections were detected, create paragraph-based chunks
   if (sections.length === 0) {
-    const fallbackChunks = createChunksFromText(text, fileName);
+    const fallbackChunks = createParagraphBasedChunks(text, fileName);
     chunks.push(...fallbackChunks);
     
     sections.push({
@@ -299,6 +328,18 @@ function parseTechnicalDocument(text: string, fileName: string) {
   }
 
   return { sections, chunks };
+}
+
+/**
+ * Create a complete chunk from a section (no splitting within sections)
+ * This ensures complete ideas are preserved
+ */
+function createCompleteSectionChunk(section: any, fileName: string): string {
+  const sectionHeader = section.title;
+  const sectionContent = section.content;
+  
+  // Create chunk with document source and complete section
+  return `Document: ${fileName}\nSection: ${sectionHeader}\n\n${sectionContent}`;
 }
 
 /**
@@ -342,80 +383,15 @@ function determineHeaderLevel(line: string): number {
 }
 
 /**
- * Create chunks from a section with context preservation
- */
-function createChunksFromSection(section: any): string[] {
-  const chunks: string[] = [];
-  const content = section.content;
-  
-  if (content.length <= 1000) {
-    // Small section - keep as single chunk with header
-    chunks.push(`${section.title}\n\n${content}`);
-    return chunks;
-  }
-
-  // Large section - split into chunks while preserving context
-  const sentences = content.split(/[.!?]+/).filter((s: string) => s.trim().length > 0);
-  let currentChunk = `${section.title}\n\n`;
-  
-  for (const sentence of sentences) {
-    const sentenceWithPunctuation = sentence.trim() + '.';
-    
-    if (currentChunk.length + sentenceWithPunctuation.length > 1000) {
-      if (currentChunk.length > section.title.length + 10) {
-        chunks.push(currentChunk.trim());
-      }
-      currentChunk = `${section.title}\n\n${sentenceWithPunctuation}`;
-    } else {
-      currentChunk += (currentChunk.length > section.title.length + 10 ? ' ' : '') + sentenceWithPunctuation;
-    }
-  }
-  
-  // Add the last chunk
-  if (currentChunk.length > section.title.length + 10) {
-    chunks.push(currentChunk.trim());
-  }
-
-  return chunks;
-}
-
-/**
- * Create chunks from raw text when no sections are detected
- */
-function createChunksFromText(text: string, fileName: string): string[] {
-  const chunks: string[] = [];
-  const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
-  
-  let currentChunk = `Document: ${fileName}\n\n`;
-  
-  for (const sentence of sentences) {
-    const sentenceWithPunctuation = sentence.trim() + '.';
-    
-    if (currentChunk.length + sentenceWithPunctuation.length > 1000) {
-      if (currentChunk.length > 50) {
-        chunks.push(currentChunk.trim());
-      }
-      currentChunk = `Document: ${fileName}\n\n${sentenceWithPunctuation}`;
-    } else {
-      currentChunk += (currentChunk.length > 50 ? ' ' : '') + sentenceWithPunctuation;
-    }
-  }
-  
-  // Add the last chunk
-  if (currentChunk.length > 50) {
-    chunks.push(currentChunk.trim());
-  }
-
-  return chunks;
-}
-
-/**
  * Extract specific sections from the full text
  */
 function extractSpecificSections(fullText: string, fileName: string): string {
   const targetKeywords = [
     'PRODUCTS',
-    'EXECUTION'
+    'EXECUTION',
+    'UNIT PRICES',
+    'STIPULATED AND UNIT PRICE ITEMS',
+    'EXISTING CONDITIONS AND OBJECTCIVES',
   ];
 
   let extractedText = `Document: ${fileName}\n\nExtracted Sections:\n\n`;
@@ -466,4 +442,49 @@ function extractSpecificSections(fullText: string, fileName: string): string {
   }
 
   return extractedText.trim();
+}
+
+// Add this function to robustly extract a section by its PART header
+function extractSectionByHeader(fullText: string, sectionName: string): string | null {
+  const lines = fullText.split('\n');
+  let headerLineIdx = -1;
+  let headerPattern = new RegExp(`^PART\\s*\\d+\\s*[-–—]\\s*${sectionName}\\s*$`, 'i');
+
+  // Find the header line index
+  for (let i = 0; i < lines.length; i++) {
+    // Normalize dashes, spaces, and case
+    const norm = lines[i]
+      .replace(/[–—-]/g, '-') // all dashes to hyphen
+      .replace(/\u00A0/g, ' ') // non-breaking space to space
+      .replace(/\s+/g, ' ')    // collapse whitespace
+      .trim();
+    if (headerPattern.test(norm)) {
+      headerLineIdx = i;
+      break;
+    }
+  }
+
+  if (headerLineIdx === -1) {
+    return null; // Section not found
+  }
+
+  // Find the next PART header after this one
+  let nextHeaderIdx = lines.length;
+  const nextHeaderPattern = /^PART\s*\d+\s*[-–—]\s*[A-Z\s]+$/i;
+  for (let i = headerLineIdx + 1; i < lines.length; i++) {
+    // Normalize as above
+    const norm = lines[i]
+      .replace(/[–—-]/g, '-')
+      .replace(/\u00A0/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (nextHeaderPattern.test(norm)) {
+      nextHeaderIdx = i;
+      break;
+    }
+  }
+
+  // Extract the section content
+  const sectionLines = lines.slice(headerLineIdx, nextHeaderIdx);
+  return sectionLines.join('\n').trim();
 } 

@@ -17,48 +17,85 @@ function chunk<T>(array: T[], size: number): T[][] {
 
 const photoWritingPrompt = `
 # ROLE:
-You are a senior engineering report writer at Pretium. Your task is to generate technically accurate and concise bullet-point observations based strictly on a batch of site photographs. These observations will form an internal draft used later to produce the final report. Start the draft immediately—do not include an introduction or conclusion.
+You are a professional report-writing assistant for a contracting and engineering company. Your job is to convert technical point-form site descriptions into clear, neutral, and **concise** written observations suitable for inclusion in an internal or client-facing construction report. Start the draft immediately—do not include an introduction or conclusion.
 
-# CONTEXT:
-Each image includes:
-- A brief description that must be heavily used to guide your analysis.
-- A tag indicating either OVERVIEW or DEFICIENCY
+# MISSION:
+Your output must be technically accurate and professional, but **never verbose**, **never flowery**, and **never include opinions or assumptions**. You are not a marketer — you are writing documentation. Focus on **facts only**.
 
-Use these to guide your analysis:
-- OVERVIEW: Describe general site conditions or context
-- DEFICIENCY: Emphasize the issue observed and its potential implications
 
-# INSTRUCTIONS:
-1. For each photo, write one or more professional engineering observations. This AI assistant is not responsible for assessing or ensuring safety, compliance, or regulatory procedures. It must not make any statements that imply safety measures were taken, are adequate, 
-2. Enhance the provided description with technical insights where appropriate.
-3. You may incorporate relevant general engineering knowledge if applicable.
-4. Write **multiple bullet points per image if needed**, but:
-   - Each bullet must independently reference the image using the placeholder format [IMAGE:<image_number>:<GROUP_NAME>].
-   - Do **not** merge multiple ideas into one bullet point.
-5. Every photo must be referenced at least once.
-6. If a photo number is missing, assign it based on its position in the batch and leave a note that the number is not provided.
-7. Use the reference bullet points (provided by the user) as supporting context when writing your observations.
-8. Project specifications will be provided alongside each image and may include important facts or requirements. You must reference these specifications meaningfully and constructively in your observations.
-  - Avoid unhelpful or circular language such as:
-    - “As stated in the spec…”
-    - “The site should be inspected as per the spec…”
-  -Instead, integrate the specification details naturally into your observations to support factual, technical writing. For example:
-    - *(good)* “A minimum concrete cover of 50mm is required at this location, per project specifications.”
-    - *(bad)* “Site should follow the spec requirements for concrete cover.”
-9. Do **not** include any headers, intros, or summaries.
+# RULES:
+- For each photo, write one or more professional engineering observations. Every photo must be referenced at least once.
+- Do **not** include any headers, intros, or summaries.
+- DO NOT include filler words or phrases like "suggesting," "typically," "providing effective," "well-executed," or "appears to."
+- DO NOT make positive assumptions or compliments unless explicitly stated in the input or required by the spec.
+- DO NOT refer to work as "successful," "complete," or "effective" unless those words are used in the input.
+- DO NOT speculate on intent or process unless described directly.
+- ONLY state that something "meets spec" or "as specified" if that is explicitly stated or visually verified.
+- LESS TEXT IS BETTER. Be minimal, technical, and clear.
+- **ONLY cite specifications when they are provided in the RELEVANT SPECIFICATIONS section.**
+
+# INPUT:
+You are given a point-form description and possibly an image tag (e.g. DEFICIENCY or OVERVIEW). Use that to write one or two sentences. Your tone must remain factual and compliant-focused.
+Project specifications may be provided alongside image and which can include important facts or requirements. You must reference these specifications if it is meaningful to do so.
 
 # FORMATTING:
 - Number each bullet using the format: 1.1, 1.2, 1.3, etc.
+- Write **multiple bullet points per image if needed**, but each bullet must independently reference the image using the placeholder format [IMAGE:<image_number>:<GROUP_NAME>].
 - Use plain text only — no markdown, asterisks, or symbols.
 - Do **not** use dashes (") for bullets.
-- Each bullet must include a photo reference in the format "[IMAGE:X]", based on the image number provided.
 - Section numbers (1., 2., etc.) will be added later by the system — you do **not** need to include them.
 
-# STYLE:
-- Tone: Professional, technical, and objective
-- Be precise and clear
-- No unnecessary embellishments
-- Plain text only — no styling markdown, asterisks, or symbols.
+# SPECIFICATION CITATION REQUIREMENTS:
+**ONLY cite specifications when they are explicitly provided to you in the "RELEVANT SPECIFICATIONS" section below.**
+
+When specifications ARE provided:
+1. **Cite specific documents and sections** using the format: "as specified in [Document Name] - [Section Title]"
+2. **Reference exact requirements** from the specifications when making compliance statements
+3. **Use file names and section headers** from the provided knowledge context to create precise citations
+4. **Connect observations directly to specification requirements** rather than making general statements
+5. **Include section numbers** when available (e.g., "as specified in Roofing Specs - Section 2.1 Materials")
+
+When NO specifications are provided:
+- Write factual observations without referencing any specifications
+- Do NOT use phrases like "as specified," "as noted in," "per spec," etc.
+- Focus on describing what is observed without making compliance statements
+
+# CITATION EXAMPLES:
+**When specifications ARE provided:**
+- ✅ "Metal drip edge flashings must be mitered and gap-free as specified in Roofing Specifications - Section 2.1 Materials"
+- ✅ "Insulation depth measured at 18 to 20 inches, providing R-value of R-63 to R-70 as required by Building Envelope Specs - Section 3.2 Insulation Requirements"
+
+**When NO specifications are provided:**
+- ✅ "Self-adhered membrane applied at roof eaves and rakes with underlayment in the field"
+- ✅ "Insulation depth measured at 18 to 20 inches, providing R-value of R-63 to R-70"
+- ❌ "Self-adhered membrane applied as noted in" (incomplete reference)
+- ❌ "Insulation meets requirements as specified" (no specification provided)
+
+# BAD EXAMPLES (do not imitate text in brackets):
+
+1. **Input description**: "Insulation is 18 to 20 inches deep"
+   - Output: *Insulation depth is measured between 18 to 20 inches, providing an R-value of R-63 to R-70, (**which meets or exceeds typical standards for attic insulation**).*
+   - Fix: *Insulation depth measured at 18 to 20 inches, providing R-value of R-63 to R-70.*
+
+2. **Input description**: "Shingles removed and deck exposed"
+   - Output: *(Shingle removal and deck replacement are underway, **indicating the initial stages of the roofing project**. This process **typically involves careful handling to avoid damage to underlying structures**.)*
+   - Fix: *Shingles removed; deck exposed for replacement.*
+
+# GOOD EXAMPLES (follow this style):
+
+1. **Input**: "Metal drip edge to be mitered and gap-free"
+   - Output: *The Contractor was instructed to ensure that going forward, metal drip edge flashings at the top of the gable are to be neatly mitered and contain no gaps, as specified in Roofing Specifications - Section 2.1 Materials.*
+
+2. **Input**: "Damaged insulation observed"
+   - Output: *Section of insulation observed to be damaged; replacement required.*
+
+3. **Input**: "Rebar installed at footing per drawings"
+   - Output: *Rebar installed at footing location in accordance with construction drawings.*
+
+4. **Input**: "Shingle removal and deck replacement underway"
+   - Output: 1.1 The Contractor was reminded that all plywood sheathing replacement is to have a minimum span across three (3) roof trusses, as specified.
+             1.2 Where tongue and groove plywood is not utilized, metal H-clips should be implemented to provide edge support between roof trusses as per specifications.
+
 `;
 
 
@@ -98,10 +135,10 @@ You are the final editor of a Civil Engineering report for Pretium. Your job is 
 - Maintain a clear, professional layout with proper spacing between sections.
 
 # STYLE:
-- Tone: Professional, objective, and concise.
-- Do not embellish or add filler text.
-- Your edits should improve clarity, grammar, and flow only when necessary.
+- Your edits should improve clarity and flow only when necessary.
 - No markdown or styling – use plain text output only.
+- Ensure we Avoid legal risk by not confirming quality or completeness without directive input.
+
 `;
 
 
@@ -231,13 +268,28 @@ async function getRelevantKnowledgeChunks(projectId: string, imageDescription: s
       return ''; // No relevant knowledge found
     }
     
-    // Format the relevant knowledge as context
+    // Format the relevant knowledge as context with enhanced citations
     const relevantKnowledge = results.map((result: any, index: number) => {
       const similarity = (result.similarity * 100).toFixed(1);
-      return `[Knowledge ${index + 1} - ${similarity}% relevant]: ${result.content_chunk}`;
+      
+      // Extract document name and section for better citation
+      const documentSource = result.documentSource || 'Unknown Document';
+      const sectionTitle = result.sectionTitle || 'General Content';
+      
+      // Create a clean document name (remove file extension and clean up)
+      const documentName = documentSource
+        .replace(/\.[^/.]+$/, '') // Remove file extension
+        .replace(/[-_]/g, ' ') // Replace dashes/underscores with spaces
+        .replace(/\b\w/g, (l: string) => l.toUpperCase()); // Title case
+      
+      // Create citation format that matches the prompt requirements
+      const citation = `${documentName} - ${sectionTitle}`;
+      
+      return `[Specification ${index + 1} - ${similarity}% relevant from ${citation}]:\n${result.content_chunk}`;
     }).join('\n\n');
-    console.log(`\n\nRELEVANT KNOWLEDGE CONTEXT:\n${relevantKnowledge}\n`)
-    return `\n\nRELEVANT KNOWLEDGE CONTEXT:\n${relevantKnowledge}\n`;
+    
+    console.log(`\n\nRELEVANT KNOWLEDGE CONTEXT:\n${relevantKnowledge}\n`);
+    return `\n\nRELEVANT SPECIFICATIONS:\n${relevantKnowledge}\n\nIMPORTANT: When referencing these specifications in your observations, use the exact document name and section title provided in the citations above.`;
     
     
   } catch (error) {
@@ -375,12 +427,19 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       
                 Your task is to write clear, technical, and structured bullet-point observation(s) for each photo provided below. Follow these exact rules:
                 
-                1. IMPORTANT:Every bullet point **must** reference its image and group using the format [IMAGE:<image_number>:<GROUP_NAME>]. This is the most important rule to follow, without this the output wont display.
+                #IMPORTANT:
+                1. Every bullet point **must** reference its image and group using the format [IMAGE:<image_number>:<GROUP_NAME>]. This is the most important rule to follow, without this the output wont display.
                 2. If no number is provided, assign one based on its position in this batch , and add a note that the number is not provided.
                 3. If you write multiple points for a single image, each bullet must include its own [IMAGE:<image_number>:<GROUP_NAME>] reference.
-                5. Observations must be written professionally and objectively. Focus on the description provided and what is visible and relevant.
-                6. Use the relevant knowledge context provided for each image to enhance your observations with technical specifications and requirements.
                 
+                # REMEMBER:
+                - Use minimal, factual language in accordance with the project specifications or user description.
+                - Only mention compliance or effectiveness if specified.
+                - Do not include process descriptions unless provided.
+                - AVOID LEGAL RISK BY: 
+                  - not confirming quality or completeness without directive input.
+                  - When describing site conditions or instructions, always clarify the contractor's responsibility.
+                  - connect actions to the specification where applicable ("...as per spec", "...is required by spec", etc.).
                 IMPORTANT: The following instructions are provided by the user. If they relate to your job of writing photo-based observations, they MUST be followed exactly:\n\n${bulletPoints}`,
         }
       ];
@@ -395,7 +454,11 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
         // Add image description with knowledge context
         contentParts.push({
           type: 'text',
-          text: `New Photo - Description: ${img.description || 'No description provided'}, Group: (${img.group || 'NO GROUP'}), Number: (${img.number || `NO NUMBER: Position in batch ${i * 5 + j + 1}`}), Tag: (${img.tag?.toUpperCase() || 'OVERVIEW'}) The following information comes from the project Specifications which should be referecenced for facts: \n${relevantKnowledge}`,
+          text: `New Photo - Description: ${img.description || 'No description provided'}, Group: (${img.group || 'NO GROUP'}), Number: (${img.number || `NO NUMBER: Position in batch ${i * 5 + j + 1}`}), Tag: (${img.tag?.toUpperCase() || 'OVERVIEW'})
+
+${relevantKnowledge ? `The following specifications are relevant to this photo and should be referenced in your observations. Use the exact document name and section title when citing requirements:
+
+${relevantKnowledge}` : 'No relevant specifications found for this photo. Write factual observations without referencing any specifications.'}`,
         });
         
         // Add image
@@ -468,6 +531,7 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
                   1. **Group observations under appropriate section headers based on their group name tag in the reference bullet point- [IMAGE:<image_number>:<GROUP_NAME>].**
                   2. **Within each group, reorder the observations by their associated image number** (i.e., Photo 2 comes before Photo 4).
                   3. Retain all original content — you are rewriting and reformatting, not summarizing.
+                  4. Maintain the original format - do not duplicate any content
 
                   Failure to follow any of these steps will be considered incorrect output.
 

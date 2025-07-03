@@ -190,14 +190,14 @@ function determineAgentType(message: string): 'knowledge' | 'modification' | 'as
   const knowledgeKeywords = [
     'spec', 'specification', 'code', 'requirement', 'standard', 'fact', 'facts',
     'check', 'tell me about', 'what are', 'what is', 'find', 'search', 'look up',
-    'building code', 'roofing spec', 'safety requirement', 'material requirement'
+    'building code', 'roofing spec', 'safety requirement', 'material requirement', 'what does', 'what do',
   ];
   
   // Modification keywords
   const modificationKeywords = [
     'add', 'remove', 'delete', 'change', 'modify', 'update', 'edit', 'rewrite',
     'reorganize', 'restructure', 'insert', 'replace', 'include', 'improve', 'enhance',
-    'make', 'create', 'insert', 'append', 'prepend'
+    'make', 'create', 'insert', 'append', 'prepend', 'write', 'rewrite', 'reword', 'rephrase',
   ];
   
   // Check for knowledge requests first (most specific)

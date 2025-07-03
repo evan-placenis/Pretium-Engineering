@@ -70,7 +70,7 @@ export class EmbeddingService {
   }
 
   /**
-   * Process text content and store embeddings in database
+   * Process text content and store embeddings in database with enhanced metadata
    */
   async processAndStoreEmbeddings(
     projectId: string,
@@ -82,19 +82,21 @@ export class EmbeddingService {
       console.log(`=== STARTING EMBEDDING PROCESSING ===`);
       console.log(`File: ${fileName}, Content length: ${content.length} characters`);
 
-      // Split content into chunks
-      const chunks = this.splitIntoChunks(content);
-      console.log(`Created ${chunks.length} chunks`);
+      // Split content into intelligent chunks
+      const chunks = this.splitIntoIntelligentChunks(content, fileName);
+      console.log(`Created ${chunks.length} intelligent chunks`);
 
       // Generate embeddings
       console.log('Generating embeddings...');
       const embeddings = await this.generateEmbeddings(chunks);
       console.log(`Generated ${embeddings.length} embeddings`);
 
-      // Store in database
+      // Store in database with enhanced metadata
       console.log('Storing embeddings in database...');
       for (let i = 0; i < chunks.length; i++) {
         try {
+          const chunkMetadata = this.extractChunkMetadata(chunks[i], fileName);
+          
           const { error } = await supabase
             .from('project_embeddings')
             .insert({
@@ -103,6 +105,9 @@ export class EmbeddingService {
               content_chunk: chunks[i],
               embedding: embeddings[i],
               chunk_index: i,
+              document_source: fileName,
+              section_title: chunkMetadata.sectionTitle,
+              chunk_type: chunkMetadata.chunkType,
               created_at: new Date().toISOString()
             });
           
@@ -149,29 +154,142 @@ export class EmbeddingService {
   }
 
   /**
-   * Split text into chunks suitable for embedding
+   * Split text into intelligent chunks that preserve complete ideas
+   * This replaces the old 1000-character limit with section-based chunking
    */
-  private splitIntoChunks(text: string, maxChunkSize: number = 1000): string[] {
-    const chunks: string[] = [];
-    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+  private splitIntoIntelligentChunks(text: string, fileName: string): string[] {
+    // First, try to parse into sections
+    const sections = this.parseDocumentSections(text);
     
-    let currentChunk = '';
+    if (sections.length > 0) {
+      // Use section-based chunks
+      return sections.map(section => this.createCompleteSectionChunk(section, fileName));
+    } else {
+      // Fallback to paragraph-based chunks for unstructured text
+      return this.createParagraphBasedChunks(text, fileName);
+    }
+  }
+
+  /**
+   * Parse document into sections based on headers
+   */
+  private parseDocumentSections(text: string): any[] {
+    const sections: any[] = [];
+    const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
     
-    for (const sentence of sentences) {
-      const sentenceWithPunctuation = sentence.trim() + '.';
+    let currentSection: any = null;
+    let currentContent: string[] = [];
+
+    for (const line of lines) {
+      // Detect section headers (common patterns in technical docs)
+      const isHeader = this.detectSectionHeader(line);
       
-      if (currentChunk.length + sentenceWithPunctuation.length > maxChunkSize) {
-        if (currentChunk.trim()) {
-          chunks.push(currentChunk.trim());
+      if (isHeader) {
+        // Save previous section if exists
+        if (currentSection && currentContent.length > 0) {
+          currentSection.content = currentContent.join('\n');
+          sections.push(currentSection);
         }
-        currentChunk = sentenceWithPunctuation;
+        
+        // Start new section
+        currentSection = {
+          title: line,
+          content: '',
+          level: this.determineHeaderLevel(line)
+        };
+        currentContent = [];
       } else {
-        currentChunk += (currentChunk ? ' ' : '') + sentenceWithPunctuation;
+        // Add content to current section
+        if (currentSection) {
+          currentContent.push(line);
+        }
+      }
+    }
+
+    // Handle the last section
+    if (currentSection && currentContent.length > 0) {
+      currentSection.content = currentContent.join('\n');
+      sections.push(currentSection);
+    }
+
+    return sections;
+  }
+
+  /**
+   * Detect if a line is a section header
+   */
+  private detectSectionHeader(line: string): boolean {
+    const headerPatterns = [
+      /^\d+\.\s+/, // 1. Section
+      /^\d+\.\d+\s+/, // 1.1 Subsection
+      /^\d+\.\d+\.\d+\s+/, // 1.1.1 Sub-subsection
+      /^[A-Z][A-Z\s]{2,}$/, // ALL CAPS HEADERS
+      /^[A-Z][a-z]+(\s+[A-Z][a-z]+)*\s*$/, // Title Case Headers
+      /^Section\s+\d+/i, // Section 1
+      /^Part\s+\d+/i, // Part 1
+      /^Chapter\s+\d+/i, // Chapter 1
+      /^Appendix\s+[A-Z]/i, // Appendix A
+      /^Table\s+\d+/i, // Table 1
+      /^Figure\s+\d+/i, // Figure 1
+      /^Specification\s+\d+/i, // Specification 1
+      /^Requirements?\s+\d+/i, // Requirements 1
+      /^Materials?\s+\d+/i, // Materials 1
+      /^Installation\s+\d+/i, // Installation 1
+      /^Testing\s+\d+/i, // Testing 1
+      /^Quality\s+Control/i, // Quality Control
+      /^Safety\s+Requirements/i, // Safety Requirements
+    ];
+
+    return headerPatterns.some(pattern => pattern.test(line));
+  }
+
+  /**
+   * Determine the level of a header
+   */
+  private determineHeaderLevel(line: string): number {
+    if (/^\d+\.\d+\.\d+\s+/.test(line)) return 3;
+    if (/^\d+\.\d+\s+/.test(line)) return 2;
+    if (/^\d+\.\s+/.test(line)) return 1;
+    if (/^[A-Z][A-Z\s]{2,}$/.test(line)) return 1; // ALL CAPS
+    return 1; // Default
+  }
+
+  /**
+   * Create a complete chunk from a section (no splitting within sections)
+   */
+  private createCompleteSectionChunk(section: any, fileName: string): string {
+    const sectionHeader = section.title;
+    const sectionContent = section.content;
+    
+    // Create chunk with document source and complete section
+    return `Document: ${fileName}\nSection: ${sectionHeader}\n\n${sectionContent}`;
+  }
+
+  /**
+   * Create chunks based on paragraphs for unstructured text
+   */
+  private createParagraphBasedChunks(text: string, fileName: string): string[] {
+    const chunks: string[] = [];
+    
+    // Split by paragraphs (double newlines)
+    const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+    
+    let currentChunk = `Document: ${fileName}\n\n`;
+    
+    for (const paragraph of paragraphs) {
+      const trimmedParagraph = paragraph.trim();
+      
+      // If adding this paragraph would exceed 2000 characters, start a new chunk
+      if (currentChunk.length + trimmedParagraph.length > 2000 && currentChunk.length > 50) {
+        chunks.push(currentChunk.trim());
+        currentChunk = `Document: ${fileName}\n\n${trimmedParagraph}`;
+      } else {
+        currentChunk += (currentChunk.length > 50 ? '\n\n' : '') + trimmedParagraph;
       }
     }
     
     // Add the last chunk
-    if (currentChunk.trim()) {
+    if (currentChunk.length > 50) {
       chunks.push(currentChunk.trim());
     }
     
@@ -179,7 +297,34 @@ export class EmbeddingService {
   }
 
   /**
-   * Search for similar content using embeddings
+   * Extract metadata from a chunk for database storage
+   */
+  private extractChunkMetadata(chunk: string, fileName: string): { sectionTitle: string, chunkType: string } {
+    // Check if it's a section-based chunk
+    const sectionMatch = chunk.match(/Section: (.+?)\n/);
+    if (sectionMatch) {
+      return {
+        sectionTitle: sectionMatch[1],
+        chunkType: 'section'
+      };
+    }
+    
+    // Check if it's a paragraph-based chunk
+    if (chunk.includes('Document: ') && !chunk.includes('Section: ')) {
+      return {
+        sectionTitle: 'General Content',
+        chunkType: 'paragraph'
+      };
+    }
+    
+    return {
+      sectionTitle: 'Unknown',
+      chunkType: 'unknown'
+    };
+  }
+
+  /**
+   * Search for similar content using embeddings with enhanced metadata
    */
   async searchSimilarContent(
     projectId: string,
@@ -206,7 +351,7 @@ export class EmbeddingService {
         console.log(`Total chunks in database: ${totalChunks}`);
       }
 
-      // Search in database using cosine similarity
+      // Search in database using cosine similarity with enhanced metadata
       const { data, error } = await supabase.rpc('search_embeddings', {
         query_embedding: queryEmbedding,
         project_id: projectId,
@@ -237,13 +382,27 @@ export class EmbeddingService {
         console.log(`⚠️ Removed ${results.length - uniqueResults.length} duplicate chunks`);
       }
       
-      // Log each result with details
-      uniqueResults.forEach((result: any, index: number) => {
+      // Enhance results with document source and section information
+      const enhancedResults = uniqueResults.map((result: any, index: number) => {
+        const documentSource = result.document_source || 'Unknown Document';
+        const sectionTitle = result.section_title || 'General Content';
+        const chunkType = result.chunk_type || 'unknown';
+        
         console.log(`Result ${index + 1}: ${(result.similarity * 100).toFixed(1)}% similar - "${result.content_chunk.substring(0, 100)}..."`);
+        console.log(`  Source: ${documentSource}, Section: ${sectionTitle}, Type: ${chunkType}`);
+        
+        return {
+          ...result,
+          documentSource,
+          sectionTitle,
+          chunkType,
+          // Add citation information
+          citation: `${documentSource} - ${sectionTitle}`
+        };
       });
 
       console.log(`=== SEARCH COMPLETED ===`);
-      return uniqueResults;
+      return enhancedResults;
       
     } catch (error) {
       console.error('=== SEARCH FAILED ===');

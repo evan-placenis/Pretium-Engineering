@@ -238,7 +238,7 @@ export const useEnhancedChat = (
         body: JSON.stringify({
           reportId,
           message: 'Initialize chat assistant',
-          reportContent: content,
+          reportContent: content || 'Report generation in progress...',
           projectName: project?.project_name,
           bulletPoints: report?.bullet_points,
           images: [],

@@ -6,6 +6,53 @@ export interface ExcelUploadResult {
   error?: string;
 }
 
+/**
+ * Extracts the relative file path from a full Supabase storage URL
+ * This is useful when you need to call createSignedUrl which expects relative paths
+ * 
+ * @param fullUrl - The full URL from Supabase storage (e.g., https://xxx.supabase.co/storage/v1/object/public/bucket/path)
+ * @returns The relative path (e.g., "bucket/path") or null if extraction fails
+ */
+export const extractStorageRelativePath = (fullUrl: string): string | null => {
+  try {
+    // Check if it's already a relative path
+    if (!fullUrl.startsWith('http')) {
+      return fullUrl;
+    }
+    
+    // Extract path after '/storage/v1/object/public/'
+    const publicPathMatch = fullUrl.match(/\/storage\/v1\/object\/public\/(.+)$/);
+    if (publicPathMatch) {
+      return publicPathMatch[1];
+    }
+    
+    // Fallback: extract everything after the bucket name
+    const bucketMatch = fullUrl.match(/(?:reports-images|project-images|images)\/(.+)$/);
+    if (bucketMatch) {
+      return bucketMatch[1]; // Exclude the bucket name from the path
+    }
+    
+    console.warn('Could not extract relative path from URL:', fullUrl);
+    return null;
+  } catch (error) {
+    console.error('Error extracting relative path:', error);
+    return null;
+  }
+};
+
+/**
+ * Determines the appropriate Supabase storage bucket name from a URL
+ * 
+ * @param url - The storage URL
+ * @returns The bucket name or 'project-images' as default
+ */
+export const extractStorageBucketName = (url: string): string => {
+  if (url.includes('reports-images')) return 'reports-images';
+  if (url.includes('project-images')) return 'project-images';
+  if (url.includes('/images/')) return 'images';
+  return 'project-images'; // Default fallback
+};
+
 export const handleExcelUpload = (file: File): Promise<ExcelUploadResult> => {
   return new Promise((resolve) => {
     const reader = new FileReader();

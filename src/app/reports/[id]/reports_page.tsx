@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Project, Report, ReportImage } from '@/lib/supabase';
 import { createWordDocumentWithImages } from '@/lib/word-utils';
+import { extractStorageRelativePath, extractStorageBucketName } from '@/lib/utils';
 
 interface ReportViewProps {
   id: string;
@@ -66,24 +67,48 @@ export default function ReportView({ id }: ReportViewProps) {
 
       if (imagesData) {
         console.log('Raw image data:', imagesData);
+        
+
+        
         // Get the signed URLs for the images
         const imagesWithUrls = await Promise.all(
           imagesData.map(async (image) => {
-            // Generate a signed URL that's valid for 8 hours
-            const { data, error } = await supabase.storage
-              .from('reports-images')
-              .createSignedUrl(image.url, 60 * 60 * 8); // 8 hours in seconds
+            try {
+              // If URL is already a full public URL, use it directly (no need for signed URL)
+              if (image.url.startsWith('https://') && image.url.includes('/storage/v1/object/public/')) {
+                console.log('Using existing public URL:', image.url);
+                return image;
+              }
+              
+              // Extract relative path for signed URL generation
+              const relativePath = extractStorageRelativePath(image.url);
+              if (!relativePath) {
+                console.warn('Could not extract relative path, using original URL:', image.url);
+                return image;
+              }
+              
+              // Determine which bucket to use based on the URL
+              const bucketName = extractStorageBucketName(image.url);
+              
+              // Generate a signed URL that's valid for 8 hours
+              const { data, error } = await supabase.storage
+                .from(bucketName)
+                .createSignedUrl(relativePath, 60 * 60 * 8); // 8 hours in seconds
 
-            if (error) {
-              console.error('Error generating signed URL:', error);
-              return image;
+              if (error) {
+                console.error('Error generating signed URL for path:', relativePath, 'Error:', error);
+                return image; // Return original image if signed URL fails
+              }
+
+              console.log('Generated signed URL for path:', relativePath, 'URL:', data.signedUrl);
+              return {
+                ...image,
+                url: data.signedUrl
+              };
+            } catch (urlError) {
+              console.error('Error processing image URL:', image.url, 'Error:', urlError);
+              return image; // Return original image if processing fails
             }
-
-            console.log('Generated signed URL:', data.signedUrl);
-            return {
-              ...image,
-              url: data.signedUrl
-            };
           })
         );
         console.log('Final images with URLs:', imagesWithUrls);

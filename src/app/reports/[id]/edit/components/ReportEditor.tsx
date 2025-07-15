@@ -1,5 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { PreviewWithControls } from './PreviewWithControls';
+import React, { useState, useRef, useEffect } from 'react';
 
 interface ReportEditorProps {
   content: string | null;
@@ -62,16 +61,6 @@ export const ReportEditor: React.FC<ReportEditorProps> = ({
     if (!isStreaming) {
       setContent(e.target.value);
     }
-  };
-
-  const handleImagePlus = (imageId: number, groupName: string) => {
-    console.log('Plus clicked for image:', imageId, 'group:', groupName);
-    // Placeholder for plus button functionality
-  };
-
-  const handleImageMinus = (imageId: number, groupName: string) => {
-    console.log('Minus clicked for image:', imageId, 'group:', groupName);
-    // Placeholder for minus button functionality
   };
 
   const renderEditMode = () => {
@@ -201,11 +190,7 @@ export const ReportEditor: React.FC<ReportEditorProps> = ({
                 <strong>Preview:</strong> How your content will appear in the final document.
               </div>
               <div style={{ opacity: isStreaming && !content ? 0.3 : 1 }}>
-                <PreviewWithControls
-                  htmlContent={processedContent}
-                  onImagePlus={handleImagePlus}
-                  onImageMinus={handleImageMinus}
-                />
+                <div dangerouslySetInnerHTML={{ __html: processedContent }} />
               </div>
             </div>
           </div>
@@ -231,11 +216,7 @@ export const ReportEditor: React.FC<ReportEditorProps> = ({
                   opacity: isStreaming && !content ? 0.3 : 1,
                 }}
               >
-                <PreviewWithControls
-                  htmlContent={processedContent}
-                  onImagePlus={handleImagePlus}
-                  onImageMinus={handleImageMinus}
-                />
+                <div dangerouslySetInnerHTML={{ __html: processedContent }} />
               </div>
               
               {/* Loading Overlay for Streaming */}

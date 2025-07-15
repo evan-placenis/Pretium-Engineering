@@ -259,6 +259,13 @@ export default function KnowledgeUpload({ projectId, onUploadComplete, onError }
     event.target.value = '';
   };
 
+  const handleShowChunks = (document: KnowledgeDocument) => {
+    setSelectedDocument(document);
+    setShowChunks(true);
+    // TODO: Load chunks for the selected document if needed
+    // For now, the chunks will be shown if they're already loaded
+  };
+
   return {
     handleSpecUpload,
     handleBuildingCodeUpload,
@@ -271,6 +278,7 @@ export default function KnowledgeUpload({ projectId, onUploadComplete, onError }
     setShowChunks,
     formatFileSize,
     formatDate,
-    deleteDocument
+    deleteDocument,
+    handleShowChunks
   };
 } 

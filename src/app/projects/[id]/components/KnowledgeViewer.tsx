@@ -60,6 +60,7 @@ export default function KnowledgeViewer({
   const [testQuery, setTestQuery] = useState('');
   const [testResults, setTestResults] = useState<any[]>([]);
   const [testing, setTesting] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(true);
 
   const handleTestSearch = async () => {
     if (!testQuery.trim()) return;
@@ -186,8 +187,37 @@ export default function KnowledgeViewer({
     <>
       <div className="card" style={{ marginBottom: "2rem" }}>
         <div className="card-body">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: "1.5rem" }}>
+          <div 
+            style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'space-between', 
+              marginBottom: isExpanded ? "1.5rem" : "0",
+              cursor: 'pointer',
+              padding: '0.5rem',
+              borderRadius: '8px',
+              transition: 'all 0.2s ease'
+            }}
+            onClick={() => setIsExpanded(!isExpanded)}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--color-background-hover)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
+          >
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{ 
+                width: '20px', 
+                height: '20px', 
+                opacity: 0.8,
+                transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                transition: 'transform 0.2s ease'
+              }}>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ width: '100%', height: '100%', color: 'var(--color-primary)' }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
               <div style={{ width: '24px', height: '24px', opacity: 0.8 }}>
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ width: '100%', height: '100%', color: 'var(--color-primary)' }}>
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -244,20 +274,28 @@ export default function KnowledgeViewer({
             </div>
           </div>
           
-          {/* Upload status messages */}
-          {uploadError && (
-            <div className="alert alert-error" style={{ marginBottom: "1rem" }}>
-              {uploadError}
-            </div>
-          )}
-          
-          {uploadSuccess && (
-            <div className="alert alert-success" style={{ marginBottom: "1rem" }}>
-              {uploadSuccess}
-            </div>
-          )}
-          
-          {/* Documents List */}
+          {/* Collapsible Content */}
+          {isExpanded && (
+            <div style={{ 
+              transition: 'all 0.3s ease',
+              opacity: isExpanded ? 1 : 0,
+              maxHeight: isExpanded ? 'none' : '0',
+              overflow: 'hidden'
+            }}>
+              {/* Upload status messages */}
+              {uploadError && (
+                <div className="alert alert-error" style={{ marginBottom: "1rem" }}>
+                  {uploadError}
+                </div>
+              )}
+              
+              {uploadSuccess && (
+                <div className="alert alert-success" style={{ marginBottom: "1rem" }}>
+                  {uploadSuccess}
+                </div>
+              )}
+              
+              {/* Documents List */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: showChunks ? '2rem' : '0' }}>
             {documents.map((doc) => (
               <div key={doc.id} style={{ 
@@ -415,6 +453,8 @@ export default function KnowledgeViewer({
               </div>
             ))}
           </div>
+            </div>
+          )}
 
           {/* Chunks Viewer */}
           {showChunks && selectedDocument && (

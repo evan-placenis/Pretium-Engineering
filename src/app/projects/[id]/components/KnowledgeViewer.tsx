@@ -60,7 +60,7 @@ export default function KnowledgeViewer({
   const [testQuery, setTestQuery] = useState('');
   const [testResults, setTestResults] = useState<any[]>([]);
   const [testing, setTesting] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const handleTestSearch = async () => {
     if (!testQuery.trim()) return;

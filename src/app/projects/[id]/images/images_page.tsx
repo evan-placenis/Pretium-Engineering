@@ -12,7 +12,6 @@ import { UploadPhotoModal } from './components';
 // Extended interface to track rotation and changes
 interface ExtendedProjectImage extends ProjectImage {
   rotation?: number;
-  hasChanges?: boolean;
   originalDescription?: string;
   originalTag?: TagValue;
   number?: number | null;
@@ -182,7 +181,6 @@ export default function ProjectImagesPage() {
         const extendedData = (data || []).map(img => ({
           ...img,
           rotation: 0,
-          hasChanges: false,
           originalDescription: img.description,
           originalTag: img.tag,
           number: img.number
@@ -221,10 +219,18 @@ export default function ProjectImagesPage() {
     
     // Date filter
     if (dateFilter) {
-      const filterDate = new Date(dateFilter);
       filtered = filtered.filter(img => {
         const imgDate = new Date(img.created_at);
-        return imgDate.toDateString() === filterDate.toDateString();
+        
+        // Parse the date filter in a timezone-neutral way
+        // dateFilter comes as "YYYY-MM-DD" from the date input
+        const [year, month, day] = dateFilter.split('-').map(Number);
+        const filterDateOnly = new Date(year, month - 1, day); // month is 0-indexed
+        
+        // Extract just the date parts from image date
+        const imgDateOnly = new Date(imgDate.getFullYear(), imgDate.getMonth(), imgDate.getDate());
+        
+        return imgDateOnly.getTime() === filterDateOnly.getTime();
       });
     }
     
@@ -346,11 +352,6 @@ export default function ProjectImagesPage() {
     setImages(prev => prev.map(img => {
       if (img.id === update.imageId) {
         const updated = { ...img, [update.field]: update.value };
-        
-        // Check if this creates a change from original
-        const hasDescriptionChange = updated.description !== img.originalDescription;
-        const hasTagChange = updated.tag !== img.originalTag;
-        updated.hasChanges = hasDescriptionChange || hasTagChange;
         
         return updated;
       }
@@ -537,7 +538,6 @@ export default function ProjectImagesPage() {
               uploadedImages.push({
                 ...imageData,
                 rotation: 0,
-                hasChanges: false,
                 originalDescription: imageData.description,
                 originalTag: imageData.tag,
                 number: imageData.number
@@ -658,7 +658,7 @@ export default function ProjectImagesPage() {
     }
   };
 
-  // Update handleSaveGroup to add group to array
+  // Update handleSaveGroup to add group to array and auto-number from 1-x
   const handleSaveGroup = async () => {
     if (!groupName.trim() || selectedImages.size === 0) return;
     setUploadLoading(true);
@@ -677,6 +677,22 @@ export default function ProjectImagesPage() {
         return { ...img, group: groups };
       });
       const updatedImages = await Promise.all(updates);
+
+      // Auto-number the grouped photos from 1 to x
+      for (let i = 0; i < updatedImages.length; i++) {
+        const img = updatedImages[i];
+        const newNumber = i + 1;
+        
+        // Update number in database
+        await supabase
+          .from('project_images')
+          .update({ number: newNumber })
+          .eq('id', img.id);
+        
+        // Update the local object
+        img.number = newNumber;
+      }
+
       setImages(prev => prev.map(img => {
         const updated = updatedImages.find(u => u.id === img.id);
         return updated ? updated : img;
@@ -685,7 +701,7 @@ export default function ProjectImagesPage() {
         const updated = updatedImages.find(u => u.id === img.id);
         return updated ? updated : img;
       }));
-      setSuccessMessage(`Grouped ${selectedImages.size} photo(s) as "${groupName.trim()}"`);
+      setSuccessMessage(`Grouped and numbered ${selectedImages.size} photo(s) as "${groupName.trim()}" (1-${selectedImages.size})`);
       setCreateGroupMode(false);
       setGroupName('');
       setSelectedImages(new Set());
@@ -1077,7 +1093,6 @@ export default function ProjectImagesPage() {
                       tag: img.tag,
                       created_at: img.created_at,
                       user_id: img.user_id || undefined,
-                      hasChanges: img.hasChanges,
                       rotation: img.rotation,
                       number: img.number
                     }))}
@@ -1086,11 +1101,6 @@ export default function ProjectImagesPage() {
                       setImages(prev => prev.map(img => {
                         if (img.id === update.imageId) {
                           const updated = { ...img, [update.field]: update.value };
-                          
-                          // Check if this creates a change from original
-                          const hasDescriptionChange = updated.description !== img.originalDescription;
-                          const hasTagChange = updated.tag !== img.originalTag;
-                          updated.hasChanges = hasDescriptionChange || hasTagChange;
                           
                           return updated;
                         }
@@ -1115,9 +1125,130 @@ export default function ProjectImagesPage() {
           );
         })}
         
+        {/* Create Group UI - appears above ungrouped section */}
+        {createGroupMode && (
+          <div style={{ 
+            marginBottom: '2rem',
+            background: 'linear-gradient(135deg,rgb(23, 27, 48) 0%,rgb(24, 26, 51) 100%)',
+            color: 'white',
+            padding: '2rem',
+            borderRadius: '12px',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+            border: '1px solid rgba(255, 255, 255, 0.2)'
+          }}>
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              marginBottom: '1.5rem',
+              gap: '0.75rem'
+            }}>
+              <div style={{
+                width: '3rem',
+                height: '3rem',
+                background: 'rgba(255, 255, 255, 0.2)',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '1.5rem'
+              }}>
+                📁
+              </div>
+              <div>
+                                 <h3 style={{ 
+                   margin: 0, 
+                   fontSize: '1.5rem',
+                   fontWeight: 'bold',
+                   color: 'white',
+                   textShadow: '0 2px 4px rgba(0, 0, 0, 0.3)'
+                 }}>
+                   Create New Group
+                 </h3>
+                 <p style={{ 
+                   margin: 0, 
+                   fontSize: '0.95rem',
+                   marginTop: '0.25rem',
+                   color: 'white',
+                   fontWeight: 'bold'
+                 }}>
+                   Select photos below and give your group a name
+                 </p>
+              </div>
+            </div>
+            
+            <div style={{ 
+              display: 'flex', 
+              gap: '1rem', 
+              alignItems: 'center',
+              flexWrap: 'wrap'
+            }}>
+              <input
+                type="text"
+                value={groupName}
+                onChange={e => setGroupName(e.target.value)}
+                placeholder="Enter group name (e.g., 'Kitchen', 'Bathroom')"
+                style={{ 
+                  padding: '0.75rem 1rem', 
+                  fontSize: '1rem', 
+                  border: 'none',
+                  borderRadius: '8px', 
+                  minWidth: '300px',
+                  flex: 1,
+                  background: 'rgba(255, 255, 255, 0.95)',
+                  color: '#333',
+                  outline: 'none',
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
+                }}
+              />
+              <button
+                className="btn"
+                onClick={handleSaveGroup}
+                disabled={!groupName.trim() || selectedImages.size === 0 || uploadLoading}
+                style={{
+                  background: selectedImages.size > 0 && groupName.trim() 
+                    ? 'rgba(34, 197, 94, 0.9)' 
+                    : 'rgba(107, 114, 128, 0.5)',
+                  color: 'white',
+                  border: 'none',
+                  padding: '0.75rem 1.5rem',
+                  borderRadius: '8px',
+                  fontWeight: '600',
+                  fontSize: '0.95rem',
+                  cursor: !groupName.trim() || selectedImages.size === 0 || uploadLoading ? 'not-allowed' : 'pointer',
+                  opacity: !groupName.trim() || selectedImages.size === 0 || uploadLoading ? 0.6 : 1,
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                {uploadLoading ? 'Creating...' : `Create Group (${selectedImages.size} selected)`}
+              </button>
+              <button
+                className="btn"
+                onClick={() => { setCreateGroupMode(false); setGroupName(''); setSelectedImages(new Set()); }}
+                disabled={uploadLoading}
+                style={{
+                  background: 'rgba(239, 68, 68, 0.9)',
+                  color: 'white',
+                  border: 'none',
+                  padding: '0.75rem 1.5rem',
+                  borderRadius: '8px',
+                  fontWeight: '600',
+                  fontSize: '0.95rem',
+                  cursor: uploadLoading ? 'not-allowed' : 'pointer',
+                  opacity: uploadLoading ? 0.6 : 1,
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Render ungrouped images */}
         {ungroupedImages.length > 0 && (
-          <div style={{ marginTop: '2rem' }}>
+          <div style={{ marginTop: createGroupMode ? '0' : '2rem' }}>
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -1176,39 +1307,6 @@ export default function ProjectImagesPage() {
                   >
                     📋 List
                   </button>
-                  <button
-                    className="btn btn-sm btn-secondary"
-                    onClick={() => {
-                      // Number all ungrouped photos starting from 1
-                      ungroupedImages.forEach((img, index) => {
-                        updatePhotoNumber(img.id, index + 1);
-                      });
-                      setSuccessMessage(`Numbered ${ungroupedImages.length} ungrouped photos starting from 1`);
-                    }}
-                    style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
-                  >
-                    🔢 Number
-                  </button>
-                  <button
-                    className="btn btn-sm btn-outline"
-                    onClick={() => {
-                      const numberedImages = ungroupedImages.filter(img => img.number);
-                      if (numberedImages.length === 0) {
-                        setSuccessMessage('No ungrouped photos are numbered!');
-                        return;
-                      }
-                      
-                      if (confirm(`Clear numbers from ${numberedImages.length} ungrouped photos?`)) {
-                        numberedImages.forEach(img => {
-                          updatePhotoNumber(img.id, null);
-                        });
-                        setSuccessMessage(`Cleared numbers from ${numberedImages.length} ungrouped photos`);
-                      }
-                    }}
-                    style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
-                  >
-                    🗑️ Clear Numbers
-                  </button>
                 </div>
               )}
               
@@ -1256,7 +1354,6 @@ export default function ProjectImagesPage() {
                     tag: img.tag,
                     created_at: img.created_at,
                     user_id: img.user_id || undefined,
-                    hasChanges: img.hasChanges,
                     rotation: img.rotation,
                     number: img.number
                   }))}
@@ -1265,11 +1362,6 @@ export default function ProjectImagesPage() {
                     setImages(prev => prev.map(img => {
                       if (img.id === update.imageId) {
                         const updated = { ...img, [update.field]: update.value };
-                        
-                        // Check if this creates a change from original
-                        const hasDescriptionChange = updated.description !== img.originalDescription;
-                        const hasTagChange = updated.tag !== img.originalTag;
-                        updated.hasChanges = hasDescriptionChange || hasTagChange;
                         
                         return updated;
                       }
@@ -1351,6 +1443,8 @@ export default function ProjectImagesPage() {
         onClick={() => {
           if (isNumbering) {
             handleNumberingSelection(img.id);
+          } else if (selectionMode || createGroupMode || editGroupMode) {
+            handleSelect();
           } else {
             handleImageClick(img);
           }
@@ -1404,7 +1498,7 @@ export default function ProjectImagesPage() {
             </div>
           </div>
         ) : (
-          img.number && (
+          img.number && img.group && img.group.length > 0 && (
             <div style={{
               position: 'absolute',
               top: '0.75rem',
@@ -1719,37 +1813,7 @@ export default function ProjectImagesPage() {
       ) : (
         <>
          
-          {createGroupMode && (
-            <div style={{ marginBottom: '2rem', background: '#f8f9fa', padding: '1rem', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
-              <h3 style={{ marginBottom: '1rem' }}>Create a New Group</h3>
-              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem' }}>
-                <input
-                  type="text"
-                  value={groupName}
-                  onChange={e => setGroupName(e.target.value)}
-                  placeholder="Enter group name"
-                  style={{ padding: '0.5rem', fontSize: '1rem', border: '1px solid #ccc', borderRadius: '4px', minWidth: '200px' }}
-                />
-                <button
-                  className="btn btn-success"
-                  onClick={handleSaveGroup}
-                  disabled={!groupName.trim() || selectedImages.size === 0 || uploadLoading}
-                >
-                  {uploadLoading ? 'Saving...' : `Save Group (${selectedImages.size} selected)`}
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => { setCreateGroupMode(false); setGroupName(''); setSelectedImages(new Set()); }}
-                  disabled={uploadLoading}
-                >
-                  Cancel
-                </button>
-              </div>
-              <div style={{ color: '#888', fontSize: '0.95rem', marginBottom: '0.5rem' }}>
-                Select photos below to add to this group.
-              </div>
-            </div>
-          )}
+
           
           {/* Always render in grid view with groups */}
           {renderGridWithGroups()}

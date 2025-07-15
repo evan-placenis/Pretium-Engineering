@@ -15,7 +15,6 @@ export interface ImageItem {
   tag: TagValue;
   created_at?: string;
   user_id?: string;
-  hasChanges?: boolean;
   rotation?: number;
   number?: number | null;
 }
@@ -115,7 +114,7 @@ export default function ImageListView({
       
       console.log('Save successful:', data);
       
-      // First update the parent component to reset hasChanges
+      // Update the parent component
       onUpdateImage?.(imageId, 'description', newValue.trim());
       
       // Then notify about the auto-save
@@ -182,13 +181,12 @@ export default function ImageListView({
                 <DescriptionInput
                   value={image.description || ''}
                   onChange={(value) => {
-                    // When the value changes, update the image and set hasChanges to true
+                    // When the value changes, update the image
                     onUpdateImage?.(image.id, 'description', value);
                   }}
                   onBlur={(value) => handleAutoSave(image.id, image.description || '', value)}
                   placeholder="Enter notes for this image..."
                   disabled={readonly || selectionMode}
-                  hasChanges={image.hasChanges}
                   userId={currentUserId}
                   projectId={projectId}
                 />
@@ -287,19 +285,6 @@ export default function ImageListView({
                   </>
                 )}
                 
-                {/* Unsaved changes indicator */}
-                {image.hasChanges && (
-                  <span style={{ 
-                    fontSize: '0.75rem', 
-                    color: 'var(--color-warning)', 
-                    backgroundColor: 'rgba(255, 193, 7, 0.1)',
-                    padding: '0.5rem 0.75rem',
-                    borderRadius: '0.5rem',
-                    fontWeight: '500'
-                  }}>
-                    ⚠️ Unsaved changes
-                  </span>
-                )}
               </div>
               
               {/* Image metadata */}

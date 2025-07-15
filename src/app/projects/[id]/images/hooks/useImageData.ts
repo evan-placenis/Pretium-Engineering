@@ -5,7 +5,6 @@ import { TagValue } from '@/lib/tagConfig';
 // Extended interface to track rotation and changes
 export interface ExtendedProjectImage extends ProjectImage {
   rotation?: number;
-  hasChanges?: boolean;
   originalDescription?: string;
   originalTag?: TagValue;
   number?: number | null;
@@ -79,7 +78,6 @@ export function useImageData({ projectId }: UseImageDataProps): UseImageDataRetu
       const extendedData = (data || []).map(img => ({
         ...img,
         rotation: 0,
-        hasChanges: false,
         originalDescription: img.description,
         originalTag: img.tag,
         number: img.number
@@ -121,13 +119,6 @@ export function useImageData({ projectId }: UseImageDataProps): UseImageDataRetu
         if (img.id === imageId) {
           const updated = { ...img, [field]: value };
           
-          // Track changes for description and tag
-          if (field === 'description' || field === 'tag') {
-            updated.hasChanges = 
-              (field === 'description' && updated.description !== updated.originalDescription) ||
-              (field === 'tag' && updated.tag !== updated.originalTag);
-          }
-          
           return updated;
         }
         return img;
@@ -138,13 +129,6 @@ export function useImageData({ projectId }: UseImageDataProps): UseImageDataRetu
       prevFiltered.map(img => {
         if (img.id === imageId) {
           const updated = { ...img, [field]: value };
-          
-          // Track changes for description and tag
-          if (field === 'description' || field === 'tag') {
-            updated.hasChanges = 
-              (field === 'description' && updated.description !== updated.originalDescription) ||
-              (field === 'tag' && updated.tag !== updated.originalTag);
-          }
           
           return updated;
         }

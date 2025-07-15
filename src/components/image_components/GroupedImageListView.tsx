@@ -27,7 +27,6 @@ interface GroupedImageItem extends ImageItem {
   number?: number | null;
   originalDescription?: string;
   originalTag?: TagValue;
-  hasChanges?: boolean;
 }
 
 /**
@@ -206,7 +205,6 @@ export default function GroupedImageListView({
                   tag: img.tag,
                   created_at: img.created_at || '',
                   user_id: img.user_id,
-                  hasChanges: img.hasChanges,
                   rotation: img.rotation,
                   number: img.number
                 }))}
@@ -286,7 +284,6 @@ export default function GroupedImageListView({
                 tag: img.tag,
                 created_at: img.created_at || '',
                 user_id: img.user_id,
-                hasChanges: img.hasChanges,
                 rotation: img.rotation,
                 number: img.number
               }))}

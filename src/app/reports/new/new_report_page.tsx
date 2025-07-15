@@ -618,10 +618,6 @@ export default function NewReport() {
                     if (img.id === update.imageId) {
                       const updated = { ...img, [update.field]: update.value };
                       
-                      // Check if this creates a change from original
-                      const hasDescriptionChange = updated.description !== img.originalDescription;
-                      updated.hasChanges = hasDescriptionChange;
-                      
                       return updated;
                     }
                     return img;

@@ -132,7 +132,7 @@ const AGENT_PROMPTS = {
       "message": "I've removed the first image and its associated text from the report.",
       "fullUpdatedContent": null,
       "partialUpdatedContent": null,
-      "removeContent": ["1.1, 1.2, 1.3"],
+      "removeContent": ["1.1", "1.2", "1.3"],
       "embeddingResults": null
     }
     Note: The AI should analyze the content to find which section actually contains the first image reference [IMAGE:1:...]. When all bullet points referencing an image are removed, the image will not be displayed in the rendered report.

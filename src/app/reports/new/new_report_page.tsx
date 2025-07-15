@@ -21,6 +21,7 @@ interface ExtendedImageItem extends ImageItem {
 
 // Define available models and their corresponding API routes
 const AVAILABLE_MODELS = [
+  { id: 'grok4', name: 'Grok-4 (xAI)', route: '/api/models/generate_report_grok4', description: 'Latest xAI model with advanced reasoning capabilities', supportsStreaming: false },
   { id: 'advanced-streaming', name: 'Advanced Model (Streaming)', route: '/api/models/generate-report-advanced-stream', streamRoute: '/api/models/generate-report-advanced-stream', description: 'Real-time generation with live updates', supportsStreaming: true },
   { id: 'advanced', name: 'Advanced Model (Standard)', route: '/api/models/generate-report-advanced', description: 'Higher quality, slower processing', supportsStreaming: false },
   { id: 'lightweight', name: 'Lightweight Model', route: '/api/models/generate-report-lite', description: 'Faster processing, basic quality', supportsStreaming: false },
@@ -36,7 +37,7 @@ export default function NewReport() {
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
   const [allImages, setAllImages] = useState<ExtendedImageItem[]>([]);
-  const [selectedModel, setSelectedModel] = useState(AVAILABLE_MODELS[0].id);
+  const [selectedModel, setSelectedModel] = useState('advanced-streaming');
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [debugInfo, setDebugInfo] = useState<any>(null);
   const [showDebugInfo, setShowDebugInfo] = useState(false);

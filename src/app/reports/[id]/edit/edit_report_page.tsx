@@ -842,6 +842,7 @@ export default function EditReportPage() {
             streamingStatus={streamingStatus}
             processedContent={processedContent}
             error={error}
+            showChat={showChat}
           />
         </div>
 

@@ -9,12 +9,14 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@ai-sdk/xai": "^1.2.17",
     "@pdf-lib/standard-fonts": "^1.0.0",
     "@supabase/auth-helpers-nextjs": "^0.10.0",
     "@supabase/auth-ui-react": "^0.4.7",
     "@supabase/auth-ui-shared": "^0.1.8",
     "@supabase/supabase-js": "^2.49.4",
     "@types/sharp": "^0.31.1",
+    "ai": "^4.3.17",
     "axios": "^1.9.0",
     "docx": "^9.5.0",
     "file-saver": "^2.0.5",

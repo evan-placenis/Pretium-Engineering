@@ -83,6 +83,21 @@ export const useEnhancedChat = (
       
       if (allSectionsFound) {
         console.log('✅ All sections removed successfully');
+        
+        // Validation: Check if removal resulted in too little content
+        const originalLength = currentContent.trim().length;
+        const updatedLength = updatedContent.trim().length;
+        const removalPercentage = ((originalLength - updatedLength) / originalLength) * 100;
+        
+        console.log(`Content length: ${originalLength} → ${updatedLength} (${removalPercentage.toFixed(1)}% removed)`);
+        
+        // If we removed more than 90% of the content or less than 200 characters remain, something went wrong
+        if (updatedLength < 200 || removalPercentage > 90) {
+          console.log('⚠️ Removal resulted in too little content, this seems wrong. Falling back to original content.');
+          console.log('Updated content preview:', updatedContent.substring(0, 200));
+          return fullContent || currentContent;
+        }
+        
         return updatedContent;
       } else {
         console.log('⚠️ Some sections not found for removal, returning full content');

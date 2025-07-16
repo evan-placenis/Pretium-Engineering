@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Project, Report } from '@/lib/supabase';
-import { handleExcelUpload } from '@/lib/utils';
+import { handleExcelUpload, validateProjectData } from '@/lib/utils';
 import * as XLSX from 'xlsx';
 import { useViewPreference } from '@/hooks/useViewPreference';
 import KnowledgeUpload from './components/KnowledgeUpload';
@@ -126,11 +126,17 @@ export default function ProjectPage({ id }: { id: string }) {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    // Clear any previous errors
+    setError(null);
+
     const result = await handleExcelUpload(file);
+    
     if (result.success && result.data) {
       setFileData(result.data);
     } else {
       setError(result.error || 'An error occurred while processing the file');
+      // Clear any cached fileData on error
+      setFileData(null);
     }
   };
 
@@ -144,9 +150,28 @@ export default function ProjectPage({ id }: { id: string }) {
     setError(null);
 
     try {
+      // Validate and sanitize the fileData
+      const validation = validateProjectData(fileData);
+      
+      // Log any invalid fields that were filtered out
+      if (validation.invalidFields.length > 0) {
+        console.warn('⚠️ Filtered out invalid database fields:', validation.invalidFields);
+        
+        if (validation.invalidContractors.length > 0) {
+          console.warn('❌ Invalid contractor numbers detected:', validation.invalidContractors);
+        }
+      }
+
+      // Check if we have any valid data left after filtering
+      if (!validation.hasValidData) {
+        throw new Error('No valid database fields found in the uploaded data. Please check your Excel file format.');
+      }
+
+
+
       const { error: updateError } = await supabase
         .from('projects')
-        .update(fileData)
+        .update(validation.sanitizedData)
         .eq('id', id);
 
       if (updateError) throw updateError;
@@ -262,6 +287,24 @@ export default function ProjectPage({ id }: { id: string }) {
                       <p style={{ fontSize: "0.875rem", color: "var(--color-success)" }}>
                         ✓ Excel file loaded successfully
                       </p>
+                    )}
+                    {fileData && (
+                      <div style={{ marginTop: "0.5rem" }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFileData(null);
+                            setError(null);
+                          }}
+                          className="btn btn-secondary btn-sm"
+                          style={{ fontSize: "0.75rem" }}
+                        >
+                          Clear Excel Data
+                        </button>
+                        <p style={{ fontSize: "0.75rem", color: "var(--color-text-light)", marginTop: "0.25rem" }}>
+                          {Object.keys(fileData).length} fields loaded from Excel
+                        </p>
+                      </div>
                     )}
                   </div>
                 </div>

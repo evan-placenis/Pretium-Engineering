@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { handleExcelUpload } from '@/lib/utils';
+import { handleExcelUpload, validateProjectData } from '@/lib/utils';
 
 export default function NewProject() {
 
@@ -67,11 +67,29 @@ export default function NewProject() {
     setError(null);
 
     try {
+      let sanitizedFileData: Record<string, any> = {};
+      
+      // If we have Excel data, validate it against database schema
+      if (fileData && Object.keys(fileData).length > 0) {
+        const validation = validateProjectData(fileData);
+
+        if (validation.invalidFields.length > 0) {
+          console.warn('⚠️ Filtered out invalid database fields during project creation:', validation.invalidFields);
+          
+          if (validation.invalidContractors.length > 0) {
+            console.warn('❌ Invalid contractor numbers detected:', validation.invalidContractors);
+          }
+        }
+
+        sanitizedFileData = validation.sanitizedData;
+
+      }
+
       const projectData = {
         project_name: project_name.trim(),
         user_id: user.id,
         created_at: new Date().toISOString(),
-        ...(fileData && Object.keys(fileData).length > 0 ? fileData : {}) // Only include Excel data if it exists
+        ...sanitizedFileData // Use sanitized data instead of raw fileData
       };
       
       const { error: insertError } = await supabase

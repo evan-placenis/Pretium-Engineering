@@ -353,7 +353,13 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
     let imagesToUse: (ReportImage)[] = [];
     
     if (images && images.length > 0) {
-      imagesToUse = images;
+      // Limit images for Vercel serverless environment
+      if (images.length > 20) {
+        console.warn(`Too many images (${images.length}) for Vercel serverless. Limiting to 20.`);
+        imagesToUse = images.slice(0, 20);
+      } else {
+        imagesToUse = images;
+      }
     } else {
       return;
     }
@@ -380,8 +386,8 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       throw updateError2;
     }
 
-    // Split the images into chunks for better performance
-    const imageChunks = chunk(resizedImages, 5);
+    // Split the images into smaller chunks for Vercel serverless environment
+    const imageChunks = chunk(resizedImages, 2);
     const batchResponses: string[] = [];
 
     // Set up the initial conversation with system prompt and instructions
@@ -396,11 +402,13 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
     for (let i = 0; i < imageChunks.length; i++) {
       const currentChunk = imageChunks[i];
       
-      // Update status in database
+      // Update status in database with progress percentage and timing info
+      const progressPercent = Math.round(((i + 1) / imageChunks.length) * 100);
+      const startTime = new Date().toISOString();
       const { error: updateErrorBatch } = await supabase
         .from('reports')
         .update({ 
-          generated_content: `Processing batch ${i + 1}/${imageChunks.length} (${currentChunk.length} images)...\n\n${batchResponses.join('\n\n')}\n\n[PROCESSING IN PROGRESS...]`
+          generated_content: `Processing batch ${i + 1}/${imageChunks.length} (${currentChunk.length} images) - ${progressPercent}% complete...\nStarted at: ${startTime}\n\n${batchResponses.join('\n\n')}\n\n[PROCESSING IN PROGRESS...]`
         })
         .eq('id', reportId);
         
@@ -430,7 +438,7 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
                   - not confirming quality or completeness without directive input.
                   - When describing site conditions or instructions, always clarify the contractor's responsibility.
                   - connect actions to the specification where applicable ("...as per spec", "...is required by spec", etc.).
-                IMPORTANT: The following instructions are provided by the user. If they relate to your job of writing photo-based observations, they MUST be followed exactly:\n\n${bulletPoints}`,
+               `,
         }
       ];
 
@@ -477,24 +485,41 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
           model: 'gpt-4o',
           messages: batchMessages,
           temperature: 0.7,
-          max_tokens: 10000, // Increased token limit to match Grok
+          max_tokens: 4000, // Reduced for Vercel serverless environment
         }, {
-          timeout: 120000, // 2 minute timeout per batch
+          timeout: 30000, // 30 second timeout per batch (Vercel serverless limit)
         });
       } catch (openaiError: any) {
         console.error(`OpenAI API error in batch ${i + 1}:`, openaiError);
         
-        // Update database with error and continue with next batch
-        const errorMessage = `Error processing batch ${i + 1}: ${openaiError.message || 'OpenAI API timeout or error'}`;
+        // Check if it's a timeout or token limit error
+        const isTimeout = openaiError.message?.includes('timeout') || 
+                         openaiError.code === 'ECONNRESET' ||
+                         openaiError.status === 408;
+        const isTokenLimit = openaiError.message?.includes('token') || 
+                           openaiError.status === 400;
+        
+        let errorMessage = '';
+        if (isTimeout) {
+          errorMessage = `Batch ${i + 1} timed out - this is likely due to serverless function limits. Try using fewer images or the Grok model.`;
+        } else if (isTokenLimit) {
+          errorMessage = `Batch ${i + 1} hit token limit - try using fewer images or shorter descriptions.`;
+        } else {
+          errorMessage = `Error processing batch ${i + 1}: ${openaiError.message || 'OpenAI API error'}`;
+        }
+        
+        // Update database with detailed error and STOP processing
+        const finalErrorContent = `${batchResponses.join('\n\n')}\n\n❌ ${errorMessage}\n\n[PROCESSING FAILED - Please try again with fewer images or use a different model]`;
         await supabase
           .from('reports')
           .update({ 
-            generated_content: `${batchResponses.join('\n\n')}\n\n${errorMessage}\n\n[PROCESSING IN PROGRESS...]`
+            generated_content: finalErrorContent
           })
           .eq('id', reportId);
         
-        // Skip this batch and continue with next
-        continue;
+        // Stop processing - don't continue with more batches
+        console.error(`Stopping report generation due to error in batch ${i + 1}`);
+        return;
       }
     
       const section = response.choices[0]?.message.content || '';
@@ -560,15 +585,31 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
         model: 'gpt-4o',
         messages: FinalReportMessage,
         temperature: 0.7,
-        max_tokens: 6000, // grok is 4000
+        max_tokens: 3000, // Reduced for Vercel serverless environment
       }, {
-        timeout: 180000, // 3 minute timeout for final review
+        timeout: 45000, // 45 second timeout for final review (Vercel serverless limit)
       });
     } catch (finalError: any) {
       console.error('Final review OpenAI API error:', finalError);
       
-      // If final review fails, use the combined draft as the final result
-      const finalReport = combinedDraft + '\n\n[Note: Final formatting step failed due to API timeout. Report content is complete but may need manual formatting.]';
+      // Check if it's a timeout or token limit error
+      const isTimeout = finalError.message?.includes('timeout') || 
+                       finalError.code === 'ECONNRESET' ||
+                       finalError.status === 408;
+      const isTokenLimit = finalError.message?.includes('token') || 
+                         finalError.status === 400;
+      
+      let errorMessage = '';
+      if (isTimeout) {
+        errorMessage = 'Final review timed out - this is likely due to serverless function limits.';
+      } else if (isTokenLimit) {
+        errorMessage = 'Final review hit token limit - report is too large for processing.';
+      } else {
+        errorMessage = `Final review failed: ${finalError.message || 'OpenAI API error'}`;
+      }
+      
+      // Use the combined draft as the final result with error note
+      const finalReport = combinedDraft + `\n\n⚠️ ${errorMessage}\n\n[Note: Report content is complete but final formatting failed. You may need to manually format the report.]`;
       
       await supabase
         .from('reports')
@@ -593,11 +634,24 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
 
   } catch (error: any) {
     console.error('Error in async processing:', error);
-    // Update database with error
+    
+    // Provide more specific error messages
+    let errorMessage = '';
+    if (error.message?.includes('timeout')) {
+      errorMessage = 'Report generation timed out due to serverless function limits. Try using fewer images or the Grok model.';
+    } else if (error.message?.includes('memory')) {
+      errorMessage = 'Report generation failed due to memory limits. Try using fewer images.';
+    } else if (error.message?.includes('token')) {
+      errorMessage = 'Report generation failed due to token limits. Try using fewer images or shorter descriptions.';
+    } else {
+      errorMessage = `Error generating report: ${error.message}\n\nPlease try again with fewer images or use a different model.`;
+    }
+    
+    // Update database with detailed error
     await supabase
       .from('reports')
       .update({ 
-        generated_content: `Error generating report: ${error.message}\n\nPlease try again or use a different model.`
+        generated_content: `❌ ${errorMessage}\n\n[PROCESSING FAILED - Please try again with fewer images or use the Grok model]`
       })
       .eq('id', reportId);
   }

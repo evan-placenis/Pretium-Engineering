@@ -403,7 +403,7 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
                 - AVOID LEGAL RISK BY: 
                   - not confirming quality or completeness without directive input.
                   - When describing site conditions or instructions, always clarify the contractor's responsibility.
-                LASTLY: The following instructions are provided by the user. If they relate to your job of writing photo-based observations, they MUST be followed exactly:\n\n${bulletPoints}`,
+                `,
         }
       ];
 

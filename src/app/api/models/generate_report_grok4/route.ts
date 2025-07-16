@@ -102,7 +102,7 @@ You are the final editor of a Civil Engineering report for Pretium. Your job is 
 3. **Retype the entire report** to enforce the correct order and format.
    - Do not skip, delete, or merge any observations (unless it is intented).
    - Every observation must be kept and clearly visible in the final version.
-4. **Number subheadings** using whole numbers (e.g., 1, 2, 3...).
+4. **Number subheadings** using whole numbers (e.g., 1., 2., 3., ...).  **CRITICAL**: Always include the period (.) after the number - this indicated a subheading.
 5. **Number bullet points within each subheading** as decimals: 1.1, 1.2, 1.3... and 2.1, 2.2... etc.
    - Restart the bullet numbering for each new subheading.
    - There may be **multiple bullet points per image**, each on its own line.

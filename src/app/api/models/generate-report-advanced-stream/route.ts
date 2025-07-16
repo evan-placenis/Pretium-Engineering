@@ -131,6 +131,7 @@ You are the final editor of a Civil Engineering report for Pretium. Your job is 
 # FORMATTING RULES:
 - Use plain text only. Do not use markdown, asterisks, or any other formatting.
 - Do **not** use dashes ("-") for bullets. Always use numeric bullet formats (1.1, 1.2, etc.).
+- **CRITICAL**: When starting a new subheading, the number in "[IMAGE:<image_number>:<GROUP_NAME>]" must restart from 1, not continue from the previous subheading.
 - Start each bullet point on a new line.
 - Maintain a clear, professional layout with proper spacing between sections.
 
@@ -465,6 +466,7 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
                   2. **Within each group, reorder the observations by their associated image number** (i.e., Photo 2 comes before Photo 4).
                   3. Retain all original content — you are rewriting and reformatting, not summarizing.
                   4. Maintain the original format - do not duplicate any content
+                  5. **CRITICAL**: When starting a new subheading, the number in "[IMAGE:<image_number>:<GROUP_NAME>]" must restart from 1, not continue from the previous subheading.
 
                   Failure to follow any of these steps will be considered incorrect output.
 

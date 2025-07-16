@@ -216,6 +216,14 @@ async function getRelevantKnowledgeChunks(projectId: string, imageDescription: s
 
 export async function POST(request: Request) {
   try {
+    // Validate environment variables
+    if (!process.env.GROK_API_KEY) {
+      return NextResponse.json(
+        { error: 'GROK_API_KEY not configured' },
+        { status: 500 }
+      );
+    }
+
     const body = await request.json();
     const { bulletPoints, contractName, location, reportId, images, projectId } = body;
 
@@ -226,18 +234,66 @@ export async function POST(request: Request) {
       );
     }
 
-    // Start the async processing
+    // Check if report already exists and is not already processing
+    const { data: existingReport, error: checkError } = await supabase
+      .from('reports')
+      .select('id, generated_content')
+      .eq('id', reportId)
+      .single();
+      
+    if (checkError) {
+      return NextResponse.json(
+        { error: `Report ${reportId} not found in database` },
+        { status: 404 }
+      );
+    }
+
+    // If report is already being processed, return early
+    if (existingReport.generated_content?.includes('[PROCESSING IN PROGRESS...]')) {
+      return NextResponse.json({
+        success: true,
+        message: 'Report generation already in progress',
+        reportId: reportId
+      });
+    }
+
+    // Start the async processing with better error handling
     try {
-      await processReportAsync(bulletPoints, contractName, location, reportId, images, projectId);
+      // Set initial processing status
+      await supabase
+        .from('reports')
+        .update({ 
+          generated_content: 'Starting report generation...\n\n[PROCESSING IN PROGRESS...]'
+        })
+        .eq('id', reportId);
+
+      // Start processing in background (don't await here to prevent timeout)
+      processReportAsync(bulletPoints, contractName, location, reportId, images, projectId)
+        .catch(async (error: any) => {
+          console.error('Background processing error:', error);
+          // Update the report with the error
+          await supabase
+            .from('reports')
+            .update({ 
+              generated_content: `Error generating report: ${error.message}\n\nPlease try again or contact support if the issue persists.`
+            })
+            .eq('id', reportId);
+        });
+
     } catch (error: any) {
+      console.error('Error starting report generation:', error);
       // Update the report with the error
       await supabase
         .from('reports')
         .update({ 
-          generated_content: `Error generating report: ${error.message}\n\nPlease try again or use a different model.`
+          generated_content: `Error starting report generation: ${error.message}\n\nPlease try again or contact support if the issue persists.`
         })
         .eq('id', reportId);
-      throw error;
+      
+      return NextResponse.json(
+        { error: 'Failed to start report generation' },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({
@@ -275,17 +331,7 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       return;
     }
 
-    // Update status in database
-    const { error: updateError1 } = await supabase
-      .from('reports')
-      .update({ 
-        generated_content: 'Starting report generation...\n\n[PROCESSING IN PROGRESS...]'
-      })
-      .eq('id', reportId);
-    
-    if (updateError1) {
-      throw updateError1;
-    }
+    // Status is already set in the main POST function
 
     // Resize images for AI processing
     const resizedImages = await Promise.all(
@@ -398,12 +444,33 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
         },
       ];
 
-      const response = await grokClient.chat.completions.create({
-        model: 'grok-4',
-        messages: batchMessages as any,
-        temperature: 0.7,
-        max_tokens: 10000,
-      });
+      let response;
+      try {
+        console.log(`Processing Grok batch ${i + 1}/${imageChunks.length} with ${currentChunk.length} images`);
+        response = await grokClient.chat.completions.create({
+          model: 'grok-4',
+          messages: batchMessages as any,
+          temperature: 0.7,
+          max_tokens: 10000,
+        }, {
+          timeout: 120000, // 2 minute timeout per batch
+        });
+        console.log(`Grok batch ${i + 1} completed successfully`);
+      } catch (grokError: any) {
+        console.error(`Grok API error in batch ${i + 1}:`, grokError);
+        
+        // Update database with error and continue with next batch
+        const errorMessage = `Error processing batch ${i + 1}: ${grokError.message || 'Grok API timeout or error'}`;
+        await supabase
+          .from('reports')
+          .update({ 
+            generated_content: `${batchResponses.join('\n\n')}\n\n${errorMessage}\n\n[PROCESSING IN PROGRESS...]`
+          })
+          .eq('id', reportId);
+        
+        // Skip this batch and continue with next
+        continue;
+      }
       const section = response.choices[0]?.message?.content || '';
       batchResponses.push(section);
       
@@ -460,12 +527,31 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
       },
     ];
 
-    const FinalReportOutput = await grokClient.chat.completions.create({
-      model: 'grok-4',
-      messages: FinalReportMessage as any,
-      temperature: 0.7,
-      max_tokens: 4000,
-    });
+    let FinalReportOutput;
+    try {
+      console.log('Starting Grok final review step');
+      FinalReportOutput = await grokClient.chat.completions.create({
+        model: 'grok-4',
+        messages: FinalReportMessage as any,
+        temperature: 0.7,
+        max_tokens: 4000,
+      }, {
+        timeout: 180000, // 3 minute timeout for final review
+      });
+      console.log('Grok final review completed successfully');
+    } catch (finalError: any) {
+      console.error('Final review Grok API error:', finalError);
+      
+      // If final review fails, use the combined draft as the final result
+      const finalReport = combinedDraft + '\n\n[Note: Final formatting step failed due to API timeout. Report content is complete but may need manual formatting.]';
+      
+      await supabase
+        .from('reports')
+        .update({ generated_content: finalReport })
+        .eq('id', reportId);
+      
+      return; // Exit successfully with partial result
+    }
     const finalReport = FinalReportOutput.choices[0]?.message?.content || '';
 
     

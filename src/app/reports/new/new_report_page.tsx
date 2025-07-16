@@ -1,6 +1,6 @@
 'use client';
 //page to create a new report - fullscreen bullet points entry
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase, Project } from '@/lib/supabase';
 import Link from 'next/link';
@@ -21,8 +21,8 @@ interface ExtendedImageItem extends ImageItem {
 
 // Define available models and their corresponding API routes
 const AVAILABLE_MODELS = [
-  { id: 'grok4', name: 'Grok-4 (xAI)', route: '/api/models/generate_report_grok4', description: 'Latest xAI model with advanced reasoning capabilities', supportsStreaming: false },
-  { id: 'advanced-streaming', name: 'Advanced Model (Streaming)', route: '/api/models/generate-report-advanced-stream', streamRoute: '/api/models/generate-report-advanced-stream', description: 'Real-time generation with live updates', supportsStreaming: true },
+  { id: 'grok4', name: 'Grok-4 ', route: '/api/models/generate_report_grok4', streamRoute: '/api/models/generate_report_grok4', description: 'Latest xAI model with advanced reasoning capabilities', supportsStreaming: true },
+  { id: 'advanced-streaming', name: 'gpt-4o', route: '/api/models/generate-report-advanced-stream', streamRoute: '/api/models/generate-report-advanced-stream', description: 'Open AI model with strong image understanding', supportsStreaming: true },
   { id: 'advanced', name: 'Advanced Model (Standard)', route: '/api/models/generate-report-advanced', description: 'Higher quality, slower processing', supportsStreaming: false },
   { id: 'lightweight', name: 'Lightweight Model', route: '/api/models/generate-report-lite', description: 'Faster processing, basic quality', supportsStreaming: false },
   { id: 'custom', name: 'Custom Fine-tuned', route: '/api/models/generate-report-custom', description: 'Your fine-tuned model', supportsStreaming: false },
@@ -42,6 +42,8 @@ export default function NewReport() {
   const [debugInfo, setDebugInfo] = useState<any>(null);
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [hasManuallySelectedModel, setHasManuallySelectedModel] = useState(false);
+  const hasRestoredFormData = useRef(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get('project_id');
@@ -50,9 +52,10 @@ export default function NewReport() {
   
 
 
-  // Load form data from localStorage on component mount
+  // Load form data from localStorage on component mount (only once)
   useEffect(() => {
-    if (projectId) {
+    if (projectId && !hasRestoredFormData.current) {
+      hasRestoredFormData.current = true;
       const savedData = localStorage.getItem(`report-form-${projectId}`);
       if (savedData) {
         try {
@@ -66,7 +69,8 @@ export default function NewReport() {
             setBulletPoints(parsed.bulletPoints);
             restored = true;
           }
-          if (parsed.selectedModel) {
+          // Only restore selectedModel if we're still on the default and haven't manually selected a model
+          if (parsed.selectedModel && selectedModel === 'advanced-streaming' && !hasManuallySelectedModel) {
             setSelectedModel(parsed.selectedModel);
             restored = true;
           }
@@ -79,7 +83,7 @@ export default function NewReport() {
         }
       }
     }
-  }, [projectId]);
+  }, [projectId]); // Only depend on projectId
 
   // Save form data to localStorage whenever it changes
   useEffect(() => {
@@ -98,6 +102,8 @@ export default function NewReport() {
   const clearSavedFormData = () => {
     if (projectId) {
       localStorage.removeItem(`report-form-${projectId}`);
+      setHasManuallySelectedModel(false); // Reset the manual selection flag
+      hasRestoredFormData.current = false; // Reset the restoration flag
     }
   };
 
@@ -539,6 +545,7 @@ export default function NewReport() {
                       type="button"
                       onClick={() => {
                         setSelectedModel(model.id);
+                        setHasManuallySelectedModel(true);
                         setShowModelDropdown(false);
                       }}
                       style={{

@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
 
     // Generate embedding for the query
     const embeddingResponse = await openai.embeddings.create({
-      model: 'text-embedding-3-small',
+      model: 'text-embedding-3-large',
       input: query,
     });
 

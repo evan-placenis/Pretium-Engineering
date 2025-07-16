@@ -440,6 +440,19 @@ export async function POST(req: NextRequest) {
     // Prepare messages for OpenAI
     const messages: any[] = [];
 
+    // Check for silent initialization (when there's existing chat history)
+    if (isInitialLoad && message === 'Silent initialization - do not generate welcome message') {
+      console.log('Silent initialization detected - agent initialized without welcome message');
+      return NextResponse.json({
+        type: 'silent_init',
+        message: null,
+        fullUpdatedContent: null,
+        partialUpdatedContent: null,
+        removeContent: null,
+        embeddingResults: null
+      });
+    }
+
     // Add system message only on initial load
     if (isInitialLoad) {
       // For initialization, use the modification agent

@@ -229,7 +229,41 @@ export const useEnhancedChat = (
     try {
       console.log('Initializing enhanced chat...');
       
-      // Send an initialization message to set up the system prompt
+      // Check if there are existing chat messages first
+      if (chatMessages.length > 0) {
+        console.log('Chat history exists, skipping welcome message but still initializing agent');
+        
+        // Initialize agent without generating a welcome message
+        const response = await fetch('/api/enhanced-chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            reportId,
+            message: 'Silent initialization - do not generate welcome message',
+            reportContent: content || 'Report generation in progress...',
+            projectName: project?.project_name,
+            bulletPoints: report?.bullet_points,
+            images: [],
+            projectId: project?.id,
+            isInitialLoad: true,
+            conversationHistory: chatMessages.map(msg => ({
+              role: msg.role,
+              content: msg.content
+            }))
+          }),
+        });
+        
+        if (response.ok) {
+          console.log('Agent initialized silently (no welcome message)');
+        }
+        
+        setIsInitialized(true);
+        return;
+      }
+      
+      // Send an initialization message to set up the system prompt with welcome message
       const response = await fetch('/api/enhanced-chat', {
         method: 'POST',
         headers: {
@@ -284,7 +318,7 @@ export const useEnhancedChat = (
     } catch (error) {
       console.error('Error initializing chat:', error);
     }
-  }, [project?.id, isInitialized, reportId, content, project?.project_name, report?.bullet_points]);
+  }, [project?.id, isInitialized, reportId, content, project?.project_name, report?.bullet_points, chatMessages.length]);
 
   // Search embeddings for relevant project knowledge
   const searchEmbeddings = useCallback(async (query: string): Promise<void> => {

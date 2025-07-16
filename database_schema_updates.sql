@@ -34,8 +34,11 @@ ADD CONSTRAINT IF NOT EXISTS unique_knowledge_chunk
 UNIQUE (knowledge_id, chunk_index);
 
 -- Update the search_embeddings function to include new metadata
+-- First drop the existing function to change parameter types
+DROP FUNCTION IF EXISTS search_embeddings(vector, uuid, double precision, integer);
+
 CREATE OR REPLACE FUNCTION search_embeddings(
-  query_embedding vector(1536),
+  query_embedding vector(3072),
   project_id uuid,
   match_threshold float DEFAULT 0.6,
   match_count int DEFAULT 5

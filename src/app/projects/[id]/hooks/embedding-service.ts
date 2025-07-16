@@ -44,7 +44,7 @@ export class EmbeddingService {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'text-embedding-3-small',
+            model: 'text-embedding-3-large',
             input: batch,
           }),
         });
@@ -62,7 +62,7 @@ export class EmbeddingService {
       } catch (error) {
         console.error(`Error processing batch ${Math.floor(i / 100) + 1}:`, error);
         // Add zero embeddings for failed chunks
-        embeddings.push(...batch.map(() => new Array(1536).fill(0)));
+        embeddings.push(...batch.map(() => new Array(3072).fill(0)));
       }
     }
 

@@ -220,12 +220,7 @@ export default function ProjectPage({ id }: { id: string }) {
               >
                 Update Project Info
               </button>
-              <button
-                onClick={() => router.push(`/reports/new?project_id=${project.id}`)}
-                className="btn btn-primary"
-              >
-                New Report
-              </button>
+              
             </div>
           </div>
         </div>
@@ -434,13 +429,20 @@ export default function ProjectPage({ id }: { id: string }) {
           projectId={id}
         />
 
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '2rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', marginBottom: '2rem' }}>
           <button
             className="btn btn-primary btn-md"
-            style={{ width: '100%', maxWidth: '400px' }}
+            style={{ flex: '1', maxWidth: '300px' }}
             onClick={() => router.push(`/projects/${project.id}/images`)}
           >
             View All Project Images
+          </button>
+          <button
+            className="btn btn-secondary btn-md"
+            style={{ flex: '1', maxWidth: '300px' }}
+            onClick={() => router.push(`/reports/new?project_id=${project.id}`)}
+          >
+            Create New Report
           </button>
         </div>
 
@@ -465,14 +467,8 @@ export default function ProjectPage({ id }: { id: string }) {
                 </div>
                 <h4 style={{ marginBottom: "0.5rem" }}>No reports yet</h4>
                 <p style={{ marginBottom: "1rem" }} className="text-secondary">
-                  Create your first report to get started.
+                  Create your first report using the "Create New Report" button above.
                 </p>
-                <button
-                  onClick={() => router.push(`/reports/new?project_id=${project.id}`)}
-                  className="btn btn-primary"
-                >
-                  Create New Report
-                </button>
               </div>
             </div>
           ) : (

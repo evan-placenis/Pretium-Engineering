@@ -83,7 +83,7 @@ extractor.process_pdf_and_store_embeddings(
 - `project_id`: Reference to projects table
 - `knowledge_id`: Reference to project_knowledge table
 - `content_chunk`: Text chunk content
-- `embedding`: Vector embedding (1536 dimensions)
+- `embedding`: Vector embedding (3072 dimensions)
 - `chunk_index`: Order of chunk in document
 - `created_at`: Timestamp
 

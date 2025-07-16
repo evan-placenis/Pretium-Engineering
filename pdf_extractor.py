@@ -31,7 +31,7 @@ class PDFExtractor:
             batch = texts[i:i+100]
             try:
                 response = self.openai_client.embeddings.create(
-                    model="text-embedding-3-small",
+                    model="text-embedding-3-large",
                     input=batch
                 )
                 batch_embeddings = [d.embedding for d in response.data]
@@ -40,7 +40,7 @@ class PDFExtractor:
             except Exception as e:
                 print(f"Error processing batch {i//100 + 1}: {e}")
                 # Add zero embeddings for failed chunks
-                embeddings.extend([[0.0] * 1536] * len(batch))
+                embeddings.extend([[0.0] * 3072] * len(batch))
                 
         return np.array(embeddings)
     

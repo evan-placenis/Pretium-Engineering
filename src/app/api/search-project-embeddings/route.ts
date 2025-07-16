@@ -38,12 +38,24 @@ export async function POST(req: NextRequest) {
 
     const queryEmbedding = embeddingResponse.data[0].embedding;
 
-    // Search in database using cosine similarity
+    // First check if there are any embeddings for this project
+    const { count: totalEmbeddings, error: countError } = await supabase
+      .from('project_embeddings')
+      .select('*', { count: 'exact', head: true })
+      .eq('project_id', projectId);
+
+    if (countError) {
+      console.error('Error counting embeddings:', countError);
+    } else {
+      console.log(`Total embeddings in database for project ${projectId}: ${totalEmbeddings || 0}`);
+    }
+
+    // Search in database using cosine similarity (with lower threshold to get debug info)
     const { data, error } = await supabase.rpc('search_embeddings', {
       query_embedding: queryEmbedding,
       project_id: projectId,
-      match_threshold: 0.6,
-      match_count: limit
+      match_threshold: 0.1, // Much lower threshold to see all results
+      match_count: Math.max(limit * 2, 10) // Get more results for debugging
     });
 
     if (error) {
@@ -54,8 +66,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const results = data || [];
-    console.log(`Found ${results.length} similar chunks for query: "${query}"`);
+    const allResults = data || [];
+    console.log(`Database returned ${allResults.length} chunks (threshold: 0.1)`);
+    
+    // Show top 5 results for debugging, regardless of threshold
+    if (allResults.length > 0) {
+      console.log('Top results (for debugging):');
+      allResults.slice(0, 5).forEach((result: any, index: number) => {
+        console.log(`  ${index + 1}. Similarity: ${(result.similarity * 100).toFixed(1)}% - "${result.content_chunk.substring(0, 100)}..."`);
+      });
+    } else {
+      console.log('⚠️ No results returned from database at all!');
+    }
+
+    // Filter results that meet the original threshold
+    const goodResults = allResults.filter((result: any) => result.similarity >= 0.5);
+    console.log(`Found ${goodResults.length} chunks above 50% similarity threshold for query: "${query}"`);
+    
+    // Use the filtered results for the actual response
+    const results = goodResults.slice(0, limit);
 
     // Get additional metadata for results
     const enhancedResults = await Promise.all(

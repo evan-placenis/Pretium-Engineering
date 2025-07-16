@@ -1027,7 +1027,7 @@ export default function ProjectImagesPage() {
                               onClick={() => startNumberingMode(groupName)}
                               style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
                             >
-                              🔢 Number
+                              Number
                             </button>
                             <button
                               className="btn btn-sm btn-outline"
@@ -1047,7 +1047,7 @@ export default function ProjectImagesPage() {
                               }}
                               style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
                             >
-                              🗑️ Clear Numbers
+                              Clear Numbers
                             </button>
                           </>
                         )}
@@ -1059,7 +1059,7 @@ export default function ProjectImagesPage() {
                       style={{ marginLeft: isCollapsed ? 'auto' : '1rem' }}
                       onClick={() => startEditGroup(groupName)}
                     >
-                      ✏️ Edit
+                      Add/Drop
                     </button>
                     <button
                       className="btn btn-danger btn-sm"

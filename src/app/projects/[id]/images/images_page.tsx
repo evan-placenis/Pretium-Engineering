@@ -180,7 +180,7 @@ export default function ProjectImagesPage() {
         // Initialize extended properties
         const extendedData = (data || []).map(img => ({
           ...img,
-          rotation: 0,
+          rotation: img.rotation || 0,
           originalDescription: img.description,
           originalTag: img.tag,
           number: img.number
@@ -537,7 +537,7 @@ export default function ProjectImagesPage() {
             imageDataArray.forEach(imageData => {
               uploadedImages.push({
                 ...imageData,
-                rotation: 0,
+                rotation: imageData.rotation || 0,
                 originalDescription: imageData.description,
                 originalTag: imageData.tag,
                 number: imageData.number

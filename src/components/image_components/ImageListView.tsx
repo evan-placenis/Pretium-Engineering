@@ -254,9 +254,30 @@ export default function ImageListView({
                     {showRotateButton && (
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           const newRotation = ((image.rotation || 0) + 90) % 360;
                           onUpdateImage?.(image.id, 'rotation', newRotation);
+                          
+                          // Auto-save rotation change to database
+                          try {
+                            console.log(`Saving rotation ${newRotation} for image ${image.id}`);
+                            const { error } = await supabase
+                              .from('project_images')
+                              .update({ rotation: newRotation })
+                              .eq('id', image.id);
+
+                            if (error) {
+                              console.error('Failed to save rotation:', error);
+                              onShowSuccessMessage?.('Failed to save rotation');
+                              return;
+                            }
+                            
+                            console.log(`Successfully saved rotation ${newRotation} for image ${image.id}`);
+                            onShowSuccessMessage?.('Rotation auto-saved');
+                          } catch (error: any) {
+                            console.error('Error saving rotation:', error);
+                            onShowSuccessMessage?.('Failed to save rotation');
+                          }
                         }}
                         className="btn btn-secondary btn-sm"
                         style={{

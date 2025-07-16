@@ -331,7 +331,7 @@ export default function EditReportPage() {
         if (imagesError) {
           console.error('Error fetching report images:', imagesError);
         } else {
-          console.log('Fetched report images with ordering:', imagesData?.map(img => ({ id: img.id, number: img.number, description: img.description })));
+          console.log('Fetched report images with ordering:', imagesData?.map(img => ({ id: img.id, number: img.number, description: img.description, rotation: img.rotation })));
           
           // Debug: Show all unique groups
           const allGroups = new Set<string>();
@@ -466,6 +466,14 @@ export default function EditReportPage() {
     
     setIsDownloading(true);
     setDownloadStatus('Preparing document...');
+    
+    // Debug: Log image rotation data
+    console.log('Edit page - Images being passed to Word export:', reportImages.map(img => ({
+      id: img.id,
+      description: img.description,
+      rotation: img.rotation,
+      url: img.url
+    })));
     
     try {
       await createWordDocumentWithImages(

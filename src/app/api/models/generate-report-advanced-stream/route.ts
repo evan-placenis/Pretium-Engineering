@@ -13,6 +13,41 @@ function chunk<T>(array: T[], size: number): T[][] {
   return chunked;
 }
 
+// Helper function to resize image
+async function resizeImageForAI(imageUrl: string, maxWidth: number = 1024, maxHeight: number = 1024, quality: number = 0.8): Promise<string> {
+  try {
+    // Fetch the original image
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: ${response.statusText}`);
+    }
+    
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    
+    // Import sharp dynamically (install with: npm install sharp @types/sharp)
+    const sharp = require('sharp');
+    
+    // Resize and compress the image
+    const resizedImageBuffer = await sharp(buffer)
+      .resize(maxWidth, maxHeight, { 
+        fit: 'inside', 
+        withoutEnlargement: true 
+      })
+      .jpeg({ quality: Math.round(quality * 100) })
+      .toBuffer();
+    
+    // Convert to base64 data URL
+    const base64Image = resizedImageBuffer.toString('base64');
+    return `data:image/jpeg;base64,${base64Image}`;
+    
+  } catch (error) {
+    console.error('Error resizing image:', error);
+    // Fallback to original URL if resizing fails
+    return imageUrl;
+  }
+}
+
 //### PROMPT 1 ###
 
 const photoWritingPrompt = `
@@ -197,6 +232,14 @@ async function getRelevantKnowledgeChunks(projectId: string, imageDescription: s
 
 export async function POST(request: Request) {
   try {
+    // Validate environment variables
+    if (!process.env.OPENAI_API_KEY) {
+      return NextResponse.json(
+        { error: 'OPENAI_API_KEY not configured' },
+        { status: 500 }
+      );
+    }
+
     const body = await request.json();
     const { bulletPoints, contractName, location, reportId, images, projectId } = body;
 
@@ -214,6 +257,8 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+
+
 
     // Check if report already exists and is not already processing
     const { data: existingReport, error: checkError } = await supabase
@@ -293,6 +338,17 @@ export async function POST(request: Request) {
 
 async function processReportAsync(bulletPoints: string, contractName: string, location: string, reportId: string, images: any[], projectId: string) {
   try {
+    // First, verify the report exists in the database
+    const { data: existingReport, error: checkError } = await supabase
+      .from('reports')
+      .select('id, generated_content')
+      .eq('id', reportId)
+      .single();
+      
+    if (checkError) {
+      throw new Error(`Report ${reportId} not found in database`);
+    }
+
     // Use images passed in the request body
     let imagesToUse: (ReportImage)[] = [];
     
@@ -302,8 +358,30 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       return;
     }
 
+    // Status is already set in the main POST function
+
+    // Resize images for AI processing
+    const resizedImages = await Promise.all(
+      imagesToUse.map(async (img) => {
+        const resizedUrl = await resizeImageForAI(img.url, 1600, 1600, 0.85);
+        return { ...img, url: resizedUrl };
+      })
+    );
+
+    // Update status
+    const { error: updateError2 } = await supabase
+      .from('reports')
+      .update({ 
+        generated_content: `Images resized (${resizedImages.length}). Starting batch processing...\n\n[PROCESSING IN PROGRESS...]`
+      })
+      .eq('id', reportId);
+      
+    if (updateError2) {
+      throw updateError2;
+    }
+
     // Split the images into chunks for better performance
-    const imageChunks = chunk(imagesToUse, 5);
+    const imageChunks = chunk(resizedImages, 5);
     const batchResponses: string[] = [];
 
     // Set up the initial conversation with system prompt and instructions
@@ -399,7 +477,7 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
           model: 'gpt-4o',
           messages: batchMessages,
           temperature: 0.7,
-          max_tokens: 4000, // Limit response size
+          max_tokens: 10000, // Increased token limit to match Grok
         }, {
           timeout: 120000, // 2 minute timeout per batch
         });
@@ -482,7 +560,7 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
         model: 'gpt-4o',
         messages: FinalReportMessage,
         temperature: 0.7,
-        max_tokens: 8000, // Larger limit for final review
+        max_tokens: 6000, // grok is 4000
       }, {
         timeout: 180000, // 3 minute timeout for final review
       });

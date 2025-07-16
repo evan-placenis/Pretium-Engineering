@@ -145,6 +145,7 @@ export type ReportImage = {
   user_id?: string;
   group?: string[];
   number?: number;
+  rotation?: number;
 };
 
 export type ProjectImage = {
@@ -157,6 +158,7 @@ export type ProjectImage = {
   user_id?: string;
   group?: string[];
   number?: number | null;
+  rotation?: number;
 };
 
 export type ChatMessage = {

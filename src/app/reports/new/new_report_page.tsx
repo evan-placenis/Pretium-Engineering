@@ -227,20 +227,21 @@ export default function NewReport() {
         .order('number', { ascending: true, nullsFirst: false }) // Order by number first, then by created_at
         .order('created_at', { ascending: false });
       if (error) throw error;
-      // Avoid duplicates by id and initialize original values
-      setAllImages(prev => ([
-        ...prev,
-        ...((data || [])
-          .filter(img => !prev.some(existing => existing.id === img.id))
-          .map(img => ({
-            ...img,
-            originalDescription: img.description,
-            originalTag: img.tag,
-            hasChanges: false,
-            group: img.group || [], // Preserve group information
-            number: img.number // Preserve number information
-          })))
-      ]));
+              // Avoid duplicates by id and initialize original values
+        setAllImages(prev => ([
+          ...prev,
+          ...((data || [])
+            .filter(img => !prev.some(existing => existing.id === img.id))
+            .map(img => ({
+              ...img,
+              originalDescription: img.description,
+              originalTag: img.tag,
+              hasChanges: false,
+              group: img.group || [], // Preserve group information
+              number: img.number, // Preserve number information
+              rotation: img.rotation || 0 // Preserve rotation information
+            })))
+        ]));
     } catch (error: any) {
       setError('Failed to load project images: ' + error.message);
     } finally {
@@ -317,6 +318,12 @@ export default function NewReport() {
 
       // Insert all images into report_images with report_id first
       console.log('Attempting to insert report images...');
+      console.log('Images with rotation data:', sortedImages.map(img => ({
+        id: img.id,
+        description: img.description,
+        rotation: img.rotation,
+        number: img.number
+      })));
       const { error: imagesError } = await supabase.from('report_images').insert(sortedImages.map(img => ({
         report_id: reportData.id,
         url: img.url,
@@ -324,6 +331,7 @@ export default function NewReport() {
         description: img.description,
         number: img.number, // Preserve the number field for proper ordering
         group: img.group, // Add group information
+        rotation: img.rotation || 0, // Preserve rotation information
         user_id: user.id // Add user tracking
       })));
       

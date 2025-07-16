@@ -77,7 +77,7 @@ export function useImageData({ projectId }: UseImageDataProps): UseImageDataRetu
       // Initialize extended properties
       const extendedData = (data || []).map(img => ({
         ...img,
-        rotation: 0,
+        rotation: img.rotation || 0,
         originalDescription: img.description,
         originalTag: img.tag,
         number: img.number

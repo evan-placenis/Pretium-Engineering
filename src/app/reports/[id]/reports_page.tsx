@@ -62,7 +62,7 @@ export default function ReportView({ id }: ReportViewProps) {
       // Fetch report images
       const { data: imagesData } = await supabase
         .from('report_images')
-        .select('id, report_id, url, description, tag, user_id')
+        .select('id, report_id, url, description, tag, user_id, rotation')
         .eq('report_id', id);
 
       if (imagesData) {

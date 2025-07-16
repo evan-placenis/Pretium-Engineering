@@ -168,10 +168,17 @@ const processContentWithImages = (rawContent: string, images: ReportImage[]): st
           const hasGroup = img.group && img.group.length > 0;
           const groupMatches = hasGroup && img.group!.some(g => g === groupName);
           const numberMatches = img.number === imageNum;
+          
+          // Debug logging
+          console.log(`Looking for image: number=${imageNum}, group="${groupName}"`);
+          console.log(`Checking image: number=${img.number}, groups=${JSON.stringify(img.group)}`);
+          console.log(`Group matches: ${groupMatches}, Number matches: ${numberMatches}`);
+          
           return groupMatches && numberMatches;
         });
         // If not found with exact match, try fuzzy matching
         if (!img) {
+          console.log(`Exact match failed, trying fuzzy matching for number=${imageNum}, group="${groupName}"`);
           const fuzzyImg = images.find(img => {
             const hasGroup = img.group && img.group.length > 0;
             if (!hasGroup || img.number !== imageNum) return false;
@@ -182,10 +189,17 @@ const processContentWithImages = (rawContent: string, images: ReportImage[]): st
             const containsMatch = img.group!.some(g =>
               g.toLowerCase().includes(groupName.toLowerCase()) || groupName.toLowerCase().includes(g.toLowerCase())
             );
+            
+            console.log(`Fuzzy checking image: number=${img.number}, groups=${JSON.stringify(img.group)}`);
+            console.log(`Fuzzy matches: exact=${exactMatch}, normalized=${normalizedMatch}, contains=${containsMatch}`);
+            
             return exactMatch || normalizedMatch || containsMatch;
           });
           if (fuzzyImg) {
+            console.log(`Fuzzy match found!`);
             img = fuzzyImg;
+          } else {
+            console.log(`No fuzzy match found either`);
           }
         }
         html += `

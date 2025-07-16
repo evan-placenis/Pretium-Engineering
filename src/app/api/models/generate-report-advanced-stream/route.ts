@@ -220,41 +220,6 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-// Helper function to resize image
-async function resizeImageForAI(imageUrl: string, maxWidth: number = 1024, maxHeight: number = 1024, quality: number = 0.8): Promise<string> {
-  try {
-    // Fetch the original image
-    const response = await fetch(imageUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch image: ${response.statusText}`);
-    }
-    
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    
-    // Import sharp dynamically (install with: npm install sharp @types/sharp)
-    const sharp = require('sharp');
-    
-    // Resize and compress the image
-    const resizedImageBuffer = await sharp(buffer)
-      .resize(maxWidth, maxHeight, { 
-        fit: 'inside', 
-        withoutEnlargement: true 
-      })
-      .jpeg({ quality: Math.round(quality * 100) })
-      .toBuffer();
-    
-    // Convert to base64 data URL
-    const base64Image = resizedImageBuffer.toString('base64');
-    return `data:image/jpeg;base64,${base64Image}`;
-    
-  } catch (error) {
-    console.error('Error resizing image:', error);
-    // Fallback to original URL if resizing fails
-    return imageUrl;
-  }
-}
-
 // Helper function to get relevant knowledge chunks for an image
 async function getRelevantKnowledgeChunks(projectId: string, imageDescription: string, imageTag: string): Promise<string> {
   try {
@@ -310,36 +275,15 @@ export async function POST(request: Request) {
       );
     }
 
-    // Start the async processing
-    try {
-      await processReportAsync(bulletPoints, contractName, location, reportId, images, projectId);
-    } catch (error: any) {
-      // Update the report with the error
-      await supabase
-        .from('reports')
-        .update({ 
-          generated_content: `Error generating report: ${error.message}\n\nPlease try again or use a different model.`
-        })
-        .eq('id', reportId);
-      throw error;
+    // Validate images array
+    if (!images || !Array.isArray(images) || images.length === 0) {
+      return NextResponse.json(
+        { error: 'No images provided for report generation' },
+        { status: 400 }
+      );
     }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Report generation started',
-      reportId: reportId
-    });
-  } catch (error: any) {
-    return NextResponse.json(
-      { error: error.message || 'An error occurred while starting report generation' },
-      { status: 500 }
-    );
-  }
-}
-
-async function processReportAsync(bulletPoints: string, contractName: string, location: string, reportId: string, images: any[], projectId: string) {
-  try {
-    // First, verify the report exists in the database
+    // Check if report already exists and is not already processing
     const { data: existingReport, error: checkError } = await supabase
       .from('reports')
       .select('id, generated_content')
@@ -347,9 +291,76 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       .single();
       
     if (checkError) {
-      throw new Error(`Report ${reportId} not found in database`);
+      return NextResponse.json(
+        { error: `Report ${reportId} not found in database` },
+        { status: 404 }
+      );
     }
 
+    // If report is already being processed, return early
+    if (existingReport.generated_content?.includes('[PROCESSING IN PROGRESS...]')) {
+      return NextResponse.json({
+        success: true,
+        message: 'Report generation already in progress',
+        reportId: reportId
+      });
+    }
+
+    // Start the async processing with better error handling
+    try {
+      // Set initial processing status
+      await supabase
+        .from('reports')
+        .update({ 
+          generated_content: 'Starting report generation...\n\n[PROCESSING IN PROGRESS...]'
+        })
+        .eq('id', reportId);
+
+      // Start processing in background (don't await here to prevent timeout)
+      processReportAsync(bulletPoints, contractName, location, reportId, images, projectId)
+        .catch(async (error: any) => {
+          console.error('Background processing error:', error);
+          // Update the report with the error
+          await supabase
+            .from('reports')
+            .update({ 
+              generated_content: `Error generating report: ${error.message}\n\nPlease try again or contact support if the issue persists.`
+            })
+            .eq('id', reportId);
+        });
+
+    } catch (error: any) {
+      console.error('Error starting report generation:', error);
+      // Update the report with the error
+      await supabase
+        .from('reports')
+        .update({ 
+          generated_content: `Error starting report generation: ${error.message}\n\nPlease try again or contact support if the issue persists.`
+        })
+        .eq('id', reportId);
+      
+      return NextResponse.json(
+        { error: 'Failed to start report generation' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Report generation started successfully',
+      reportId: reportId
+    });
+  } catch (error: any) {
+    console.error('POST request error:', error);
+    return NextResponse.json(
+      { error: 'Invalid request format or server error' },
+      { status: 500 }
+    );
+  }
+}
+
+async function processReportAsync(bulletPoints: string, contractName: string, location: string, reportId: string, images: any[], projectId: string) {
+  try {
     // Use images passed in the request body
     let imagesToUse: (ReportImage)[] = [];
     
@@ -359,40 +370,8 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       return;
     }
 
-    // Update status in database
-    const { error: updateError1 } = await supabase
-      .from('reports')
-      .update({ 
-        generated_content: 'Starting report generation...\n\n[PROCESSING IN PROGRESS...]'
-      })
-      .eq('id', reportId);
-    
-    if (updateError1) {
-      throw updateError1;
-    }
-
-    // Resize images for AI processing
-    const resizedImages = await Promise.all(
-      imagesToUse.map(async (img) => {
-        const resizedUrl = await resizeImageForAI(img.url, 1600, 1600, 0.85);
-        return { ...img, url: resizedUrl };
-      })
-    );
-
-    // Update status
-    const { error: updateError2 } = await supabase
-      .from('reports')
-      .update({ 
-        generated_content: `Images resized (${resizedImages.length}). Starting batch processing...\n\n[PROCESSING IN PROGRESS...]`
-      })
-      .eq('id', reportId);
-      
-    if (updateError2) {
-      throw updateError2;
-    }
-
     // Split the images into chunks for better performance
-    const imageChunks = chunk(resizedImages, 5);
+    const imageChunks = chunk(imagesToUse, 5);
     const batchResponses: string[] = [];
 
     // Set up the initial conversation with system prompt and instructions
@@ -431,6 +410,7 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
                 1. Every bullet point **must** reference its image and group using the format [IMAGE:<image_number>:<GROUP_NAME>]. This is the most important rule to follow, without this the output wont display.
                 2. If no number is provided, assign one based on its position in this batch , and add a note that the number is not provided.
                 3. If you write multiple points for a single image, each bullet must include its own [IMAGE:<image_number>:<GROUP_NAME>] reference.
+                4. **CRITICAL**: Use the EXACT group name provided for each image (e.g., [IMAGE:<image_number>:<GROUP_NAME>]), NOT the tag (OVERVIEW/DEFICIENCY). The group name is the actual category the image belongs to.
                 
                 # REMEMBER:
                 - Use minimal, factual language in accordance with the project specifications or user description.
@@ -458,7 +438,9 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
 
 ${relevantKnowledge ? `The following specifications are relevant to this photo and should be referenced in your observations. Use the exact document name and section title when citing requirements:
 
-${relevantKnowledge}` : 'No relevant specifications found for this photo. Write factual observations without referencing any specifications.'}`,
+${relevantKnowledge}` : 'No relevant specifications found for this photo. Write factual observations without referencing any specifications.'}
+
+IMPORTANT: When referencing this image in your observations, use the EXACT group name "${img.group || 'NO GROUP'}" (not the tag). The correct format is [IMAGE:${img.number || (i * 5 + j + 1)}:${img.group || 'NO GROUP'}].`,
         });
         
         // Add image
@@ -479,11 +461,31 @@ ${relevantKnowledge}` : 'No relevant specifications found for this photo. Write 
         },
       ];
 
-      const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: batchMessages,
-        temperature: 0.7,
-      });
+      let response;
+      try {
+        response = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: batchMessages,
+          temperature: 0.7,
+          max_tokens: 4000, // Limit response size
+        }, {
+          timeout: 120000, // 2 minute timeout per batch
+        });
+      } catch (openaiError: any) {
+        console.error(`OpenAI API error in batch ${i + 1}:`, openaiError);
+        
+        // Update database with error and continue with next batch
+        const errorMessage = `Error processing batch ${i + 1}: ${openaiError.message || 'OpenAI API timeout or error'}`;
+        await supabase
+          .from('reports')
+          .update({ 
+            generated_content: `${batchResponses.join('\n\n')}\n\n${errorMessage}\n\n[PROCESSING IN PROGRESS...]`
+          })
+          .eq('id', reportId);
+        
+        // Skip this batch and continue with next
+        continue;
+      }
     
       const section = response.choices[0]?.message.content || '';
       batchResponses.push(section);
@@ -541,12 +543,29 @@ ${relevantKnowledge}` : 'No relevant specifications found for this photo. Write 
       },
     ];
 
-    const FinalReportOutput = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: FinalReportMessage,
-      temperature: 0.7,
-    });
-
+    let FinalReportOutput;
+    try {
+      FinalReportOutput = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: FinalReportMessage,
+        temperature: 0.7,
+        max_tokens: 8000, // Larger limit for final review
+      }, {
+        timeout: 180000, // 3 minute timeout for final review
+      });
+    } catch (finalError: any) {
+      console.error('Final review OpenAI API error:', finalError);
+      
+      // If final review fails, use the combined draft as the final result
+      const finalReport = combinedDraft + '\n\n[Note: Final formatting step failed due to API timeout. Report content is complete but may need manual formatting.]';
+      
+      await supabase
+        .from('reports')
+        .update({ generated_content: finalReport })
+        .eq('id', reportId);
+      
+      return; // Exit successfully with partial result
+    }
 
     const finalReport = FinalReportOutput.choices[0]?.message.content || '';
 

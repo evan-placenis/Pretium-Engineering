@@ -40,6 +40,7 @@ Project specifications may be provided alongside image and which can include imp
 # FORMATTING:
 - Number each bullet using the format: 1.1, 1.2, 1.3, etc.
 - Write **multiple bullet points per image if needed**, but each bullet must independently reference the image using the placeholder format [IMAGE:<image_number>:<GROUP_NAME>].
+- **CRITICAL**: The image reference [IMAGE:<image_number>:<GROUP_NAME>] must appear on the SAME LINE as the bullet point text, not on a separate line.
 - Use plain text only — no markdown, asterisks, or symbols.
 - Do **not** use dashes (") for bullets.
 - Section numbers (1., 2., etc.) will be added later by the system — you do **not** need to include them.
@@ -74,8 +75,8 @@ When NO specifications are provided:
    - Output: *Rebar installed at footing location in accordance with construction drawings.*
 
 3. **Input**: "Shingle removal and deck replacement underway"
-   - Output: 1.1 The Contractor was reminded that all plywood sheathing replacement is to have a minimum span across three (3) roof trusses, as specified.
-             1.2 Where tongue and groove plywood is not utilized, metal H-clips should be implemented to provide edge support between roof trusses as per specifications.
+   - Output: 1.1 The Contractor was reminded that all plywood sheathing replacement is to have a minimum span across three (3) roof trusses, as specified. [IMAGE:1:ROOF]
+             1.2 Where tongue and groove plywood is not utilized, metal H-clips should be implemented to provide edge support between roof trusses as per specifications. [IMAGE:1:ROOF]
 
 `;
 
@@ -105,7 +106,7 @@ You are the final editor of a Civil Engineering report for Pretium. Your job is 
 5. **Number bullet points within each subheading** as decimals: 1.1, 1.2, 1.3... and 2.1, 2.2... etc.
    - Restart the bullet numbering for each new subheading.
    - There may be **multiple bullet points per image**, each on its own line.
-6. Use the format "[IMAGE:<image_number>:<GROUP_NAME>]" to reference images.
+6. Use the format "[IMAGE:<image_number>:<GROUP_NAME>]" to reference images on the same line as the bullet point text.
    - Do not skip or omit image references.
    - Each image must appear exactly once per group.
 
@@ -345,6 +346,8 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
                 1. Every bullet point **must** reference its image and group using the format [IMAGE:<image_number>:<GROUP_NAME>]. This is the most important rule to follow, without this the output wont display.
                 2. If no number is provided, assign one based on its position in this batch , and add a note that the number is not provided.
                 3. If you write multiple points for a single image, each bullet must include its own [IMAGE:<image_number>:<GROUP_NAME>] reference.
+                4. **CRITICAL**: Use the EXACT group name provided for each image e.g ([IMAGE:<image_number>:<GROUP_NAME>]) , NOT the tag (OVERVIEW/DEFICIENCY). The group name is the actual category the image belongs to.
+                5. **CRITICAL**: The image reference [IMAGE:<image_number>:<GROUP_NAME>] must appear on the SAME LINE as the bullet point text, not on a separate line.
                 
                 # REMEMBER:
                 - Use minimal, factual language in accordance with the project specifications or user description.
@@ -371,7 +374,9 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
 
 ${relevantKnowledge ? `The following specifications are relevant to this photo and should be referenced in your observations. Use the exact document name and section title when citing requirements:
 
-${relevantKnowledge}` : 'No relevant specifications found for this photo. Write factual observations without referencing any specifications.'}`,
+${relevantKnowledge}` : 'No relevant specifications found for this photo. Write factual observations without referencing any specifications.'}
+
+IMPORTANT: When referencing this image in your observations, use the EXACT group name "${img.group || 'NO GROUP'}" (not the tag). The correct format is [IMAGE:${img.number || (i * 5 + j + 1)}:${img.group || 'NO GROUP'}].`,
         });
         
         // Add image

@@ -298,49 +298,37 @@ export async function POST(request: Request) {
       });
     }
 
-    console.log('[DEBUG] Starting background processing...');
-    // Start the async processing with better error handling
+    console.log('[DEBUG] Setting initial processing status...');
+    // Set initial processing status
+    const { error: initialUpdateError } = await supabase
+      .from('reports')
+      .update({ 
+        generated_content: 'Starting report generation...\n\n[PROCESSING IN PROGRESS...]'
+      })
+      .eq('id', reportId);
+
+    if (initialUpdateError) {
+      console.log('[DEBUG] Error setting initial status:', initialUpdateError);
+      throw initialUpdateError;
+    }
+
+    console.log('[DEBUG] Starting synchronous report processing...');
+    // Process the report synchronously instead of in background
     try {
-      // Set initial processing status
-      console.log('[DEBUG] Setting initial processing status...');
-      const { error: initialUpdateError } = await supabase
-        .from('reports')
-        .update({ 
-          generated_content: 'Starting report generation...\n\n[PROCESSING IN PROGRESS...]'
-        })
-        .eq('id', reportId);
-
-      if (initialUpdateError) {
-        console.log('[DEBUG] Error setting initial status:', initialUpdateError);
-        throw initialUpdateError;
-      }
-
-      console.log('[DEBUG] Starting processReportAsync in background...');
-      // Start processing in background (don't await here to prevent timeout)
-      processReportAsync(bulletPoints, contractName, location, reportId, images, projectId)
-        .catch(async (error: any) => {
-          console.error('[DEBUG] Background processing error:', error);
-          // Update the report with the error
-          await supabase
-            .from('reports')
-            .update({ 
-              generated_content: `Error generating report: ${error.message}\n\nPlease try again or contact support if the issue persists.`
-            })
-            .eq('id', reportId);
-        });
-
+      await processReportAsync(bulletPoints, contractName, location, reportId, images, projectId);
+      console.log('[DEBUG] Report processing completed successfully');
     } catch (error: any) {
-      console.error('[DEBUG] Error starting report generation:', error);
+      console.error('[DEBUG] Error during report processing:', error);
       // Update the report with the error
       await supabase
         .from('reports')
         .update({ 
-          generated_content: `Error starting report generation: ${error.message}\n\nPlease try again or contact support if the issue persists.`
+          generated_content: `Error generating report: ${error.message}\n\nPlease try again or contact support if the issue persists.`
         })
         .eq('id', reportId);
       
       return NextResponse.json(
-        { error: 'Failed to start report generation' },
+        { error: 'Report generation failed' },
         { status: 500 }
       );
     }
@@ -349,7 +337,7 @@ export async function POST(request: Request) {
     console.log(`[DEBUG] POST request completed successfully in ${totalTime}ms`);
     return NextResponse.json({
       success: true,
-      message: 'Report generation started successfully',
+      message: 'Report generation completed successfully',
       reportId: reportId
     });
   } catch (error: any) {
@@ -434,10 +422,10 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
 
     console.log('[DEBUG] Splitting images into chunks...');
     // Split the images into smaller chunks for Vercel serverless environment
-    const imageChunks = chunk(resizedImages, 2);
+    const imageChunks = chunk(resizedImages, 1); // Process 1 image at a time for faster processing
     const batchResponses: string[] = [];
 
-    console.log(`[DEBUG] Created ${imageChunks.length} chunks of 2 images each`);
+    console.log(`[DEBUG] Created ${imageChunks.length} chunks of 1 image each`);
 
     // Set up the initial conversation with system prompt and instructions
     const baseMessages: OpenAI.ChatCompletionMessageParam[] = [

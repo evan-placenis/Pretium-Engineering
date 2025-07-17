@@ -46,6 +46,7 @@ export const useEnhancedChat = (
   const [previousContent, setPreviousContent] = useState<string>('');
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const lastMessageTime = useRef<number>(0);
+  const hasInitializedRef = useRef<boolean>(false);
 
   // Helper function to process updated content (full report, section updates, or removals)
   const processUpdatedContent = (fullContent: string | null, partialContent: string[] | null, removeContent: string[] | null, currentContent: string): string => {
@@ -224,13 +225,15 @@ export const useEnhancedChat = (
 
   // Initialize chat with system prompt
   const initializeChat = useCallback(async (): Promise<void> => {
-    if (!project?.id || isInitialized) return;
+    if (!project?.id || isInitialized || hasInitializedRef.current) return;
 
     try {
       console.log('Initializing enhanced chat...');
+      hasInitializedRef.current = true;
       
       // Check if there are existing chat messages first
-      if (chatMessages.length > 0) {
+      const existingMessages = chatMessages.length > 0;
+      if (existingMessages) {
         console.log('Chat history exists, skipping welcome message but still initializing agent');
         
         // Initialize agent without generating a welcome message
@@ -318,7 +321,7 @@ export const useEnhancedChat = (
     } catch (error) {
       console.error('Error initializing chat:', error);
     }
-  }, [project?.id, isInitialized, reportId, content, project?.project_name, report?.bullet_points, chatMessages.length]);
+  }, [project?.id, isInitialized, reportId, content, project?.project_name, report?.bullet_points]);
 
   // Search embeddings for relevant project knowledge
   const searchEmbeddings = useCallback(async (query: string): Promise<void> => {

@@ -423,17 +423,16 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       for (let j = 0; j < currentChunk.length; j++) {
         const img = currentChunk[j];
         
-        // Get relevant knowledge chunks for this image
-        const relevantKnowledge = await getRelevantKnowledgeChunks(projectId, img.description || '', img.tag || 'OVERVIEW');
+        // DISABLED: Get relevant knowledge chunks for this image
+        // const relevantKnowledge = await getRelevantKnowledgeChunks(projectId, img.description || '', img.tag || 'OVERVIEW');
+        const relevantKnowledge = ''; // Disabled for testing
         
         // Add image description with knowledge context
         contentParts.push({
           type: 'text',
           text: `New Photo - Description: ${img.description || 'No description provided'}, Group: (${img.group || 'NO GROUP'}), Number: (${img.number || `NO NUMBER: Position ${i + 1}`}), Tag: (${img.tag?.toUpperCase() || 'OVERVIEW'})
 
-${relevantKnowledge ? `The following specifications are relevant to this photo and should be referenced in your observations. Use the exact document name and section title when citing requirements:
-
-${relevantKnowledge}` : 'No relevant specifications found for this photo. Write factual observations without referencing any specifications.'}
+No relevant specifications found for this photo. Write factual observations without referencing any specifications.
 
 IMPORTANT: When referencing this image in your observations, use the EXACT group name "${img.group || 'NO GROUP'}" (not the tag). The correct format is [IMAGE:${img.number || (i + 1)}:${img.group || 'NO GROUP'}].`,
         });

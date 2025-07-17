@@ -354,7 +354,7 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
     }
 
     // Split the images into chunks for better performance
-    const imageChunks = chunk(resizedImages, 5);
+    const imageChunks = chunk(resizedImages, 1); //CHANGING TO BATCH SIZE OF 1 FOR NOW
     const batchResponses: string[] = [];
 
     // Set up the initial conversation with system prompt and instructions

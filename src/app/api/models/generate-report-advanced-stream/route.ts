@@ -231,19 +231,32 @@ async function getRelevantKnowledgeChunks(projectId: string, imageDescription: s
 }
 
 export async function POST(request: Request) {
+  const startTime = Date.now();
+  console.log(`[DEBUG] POST request started at ${new Date().toISOString()}`);
+  
   try {
     // Validate environment variables
     if (!process.env.OPENAI_API_KEY) {
+      console.log('[DEBUG] Missing OPENAI_API_KEY');
       return NextResponse.json(
         { error: 'OPENAI_API_KEY not configured' },
         { status: 500 }
       );
     }
 
+    console.log('[DEBUG] Parsing request body...');
     const body = await request.json();
     const { bulletPoints, contractName, location, reportId, images, projectId } = body;
 
+    console.log('[DEBUG] Request data:', {
+      hasBulletPoints: !!bulletPoints,
+      hasReportId: !!reportId,
+      hasProjectId: !!projectId,
+      imagesCount: images?.length || 0
+    });
+
     if (!bulletPoints || !reportId || !projectId) {
+      console.log('[DEBUG] Missing required fields');
       return NextResponse.json(
         { error: 'Missing required fields: bulletPoints, reportId, or projectId' },
         { status: 400 }
@@ -252,14 +265,14 @@ export async function POST(request: Request) {
 
     // Validate images array
     if (!images || !Array.isArray(images) || images.length === 0) {
+      console.log('[DEBUG] No images provided');
       return NextResponse.json(
         { error: 'No images provided for report generation' },
         { status: 400 }
       );
     }
 
-
-
+    console.log('[DEBUG] Checking existing report...');
     // Check if report already exists and is not already processing
     const { data: existingReport, error: checkError } = await supabase
       .from('reports')
@@ -268,6 +281,7 @@ export async function POST(request: Request) {
       .single();
       
     if (checkError) {
+      console.log('[DEBUG] Report not found:', checkError);
       return NextResponse.json(
         { error: `Report ${reportId} not found in database` },
         { status: 404 }
@@ -276,6 +290,7 @@ export async function POST(request: Request) {
 
     // If report is already being processed, return early
     if (existingReport.generated_content?.includes('[PROCESSING IN PROGRESS...]')) {
+      console.log('[DEBUG] Report already processing, returning early');
       return NextResponse.json({
         success: true,
         message: 'Report generation already in progress',
@@ -283,20 +298,28 @@ export async function POST(request: Request) {
       });
     }
 
+    console.log('[DEBUG] Starting background processing...');
     // Start the async processing with better error handling
     try {
       // Set initial processing status
-      await supabase
+      console.log('[DEBUG] Setting initial processing status...');
+      const { error: initialUpdateError } = await supabase
         .from('reports')
         .update({ 
           generated_content: 'Starting report generation...\n\n[PROCESSING IN PROGRESS...]'
         })
         .eq('id', reportId);
 
+      if (initialUpdateError) {
+        console.log('[DEBUG] Error setting initial status:', initialUpdateError);
+        throw initialUpdateError;
+      }
+
+      console.log('[DEBUG] Starting processReportAsync in background...');
       // Start processing in background (don't await here to prevent timeout)
       processReportAsync(bulletPoints, contractName, location, reportId, images, projectId)
         .catch(async (error: any) => {
-          console.error('Background processing error:', error);
+          console.error('[DEBUG] Background processing error:', error);
           // Update the report with the error
           await supabase
             .from('reports')
@@ -307,7 +330,7 @@ export async function POST(request: Request) {
         });
 
     } catch (error: any) {
-      console.error('Error starting report generation:', error);
+      console.error('[DEBUG] Error starting report generation:', error);
       // Update the report with the error
       await supabase
         .from('reports')
@@ -322,13 +345,16 @@ export async function POST(request: Request) {
       );
     }
 
+    const totalTime = Date.now() - startTime;
+    console.log(`[DEBUG] POST request completed successfully in ${totalTime}ms`);
     return NextResponse.json({
       success: true,
       message: 'Report generation started successfully',
       reportId: reportId
     });
   } catch (error: any) {
-    console.error('POST request error:', error);
+    const totalTime = Date.now() - startTime;
+    console.error(`[DEBUG] POST request error after ${totalTime}ms:`, error);
     return NextResponse.json(
       { error: 'Invalid request format or server error' },
       { status: 500 }
@@ -337,7 +363,11 @@ export async function POST(request: Request) {
 }
 
 async function processReportAsync(bulletPoints: string, contractName: string, location: string, reportId: string, images: any[], projectId: string) {
+  const startTime = Date.now();
+  console.log(`[DEBUG] processReportAsync started at ${new Date().toISOString()} for report ${reportId}`);
+  
   try {
+    console.log('[DEBUG] Verifying report exists in database...');
     // First, verify the report exists in the database
     const { data: existingReport, error: checkError } = await supabase
       .from('reports')
@@ -346,34 +376,49 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       .single();
       
     if (checkError) {
+      console.log('[DEBUG] Report not found in processReportAsync:', checkError);
       throw new Error(`Report ${reportId} not found in database`);
     }
 
+    console.log('[DEBUG] Processing images...');
     // Use images passed in the request body
     let imagesToUse: (ReportImage)[] = [];
     
     if (images && images.length > 0) {
       // Limit images for Vercel serverless environment
       if (images.length > 20) {
-        console.warn(`Too many images (${images.length}) for Vercel serverless. Limiting to 20.`);
+        console.log(`[DEBUG] Too many images (${images.length}) for Vercel serverless. Limiting to 20.`);
         imagesToUse = images.slice(0, 20);
       } else {
         imagesToUse = images;
       }
     } else {
+      console.log('[DEBUG] No images to process');
       return;
     }
+
+    console.log(`[DEBUG] Processing ${imagesToUse.length} images...`);
 
     // Status is already set in the main POST function
 
     // Resize images for AI processing
+    console.log('[DEBUG] Starting image resizing...');
     const resizedImages = await Promise.all(
-      imagesToUse.map(async (img) => {
-        const resizedUrl = await resizeImageForAI(img.url, 1600, 1600, 0.85);
-        return { ...img, url: resizedUrl };
+      imagesToUse.map(async (img, index) => {
+        console.log(`[DEBUG] Resizing image ${index + 1}/${imagesToUse.length}...`);
+        try {
+          const resizedUrl = await resizeImageForAI(img.url, 1600, 1600, 0.85);
+          console.log(`[DEBUG] Image ${index + 1} resized successfully`);
+          return { ...img, url: resizedUrl };
+        } catch (error) {
+          console.error(`[DEBUG] Error resizing image ${index + 1}:`, error);
+          // Fallback to original URL
+          return img;
+        }
       })
     );
 
+    console.log('[DEBUG] All images resized, updating status...');
     // Update status
     const { error: updateError2 } = await supabase
       .from('reports')
@@ -383,12 +428,16 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       .eq('id', reportId);
       
     if (updateError2) {
+      console.log('[DEBUG] Error updating status after image resize:', updateError2);
       throw updateError2;
     }
 
+    console.log('[DEBUG] Splitting images into chunks...');
     // Split the images into smaller chunks for Vercel serverless environment
     const imageChunks = chunk(resizedImages, 2);
     const batchResponses: string[] = [];
+
+    console.log(`[DEBUG] Created ${imageChunks.length} chunks of 2 images each`);
 
     // Set up the initial conversation with system prompt and instructions
     const baseMessages: OpenAI.ChatCompletionMessageParam[] = [
@@ -400,7 +449,10 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
 
     // Process each batch
     for (let i = 0; i < imageChunks.length; i++) {
+      const batchStartTime = Date.now();
       const currentChunk = imageChunks[i];
+      
+      console.log(`[DEBUG] Processing batch ${i + 1}/${imageChunks.length} with ${currentChunk.length} images...`);
       
       // Update status in database with progress percentage and timing info
       const progressPercent = Math.round(((i + 1) / imageChunks.length) * 100);
@@ -413,7 +465,7 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
         .eq('id', reportId);
         
       if (updateErrorBatch) {
-        console.error(`Error updating database before batch ${i + 1}:`, updateErrorBatch);
+        console.error(`[DEBUG] Error updating database before batch ${i + 1}:`, updateErrorBatch);
       }
 
       // Prepare content parts for this batch
@@ -445,6 +497,8 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       // Process each image in the batch
       for (let j = 0; j < currentChunk.length; j++) {
         const img = currentChunk[j];
+        
+        console.log(`[DEBUG] Processing image ${j + 1} in batch ${i + 1}`);
         
         // Get relevant knowledge chunks for this image
         const relevantKnowledge = await getRelevantKnowledgeChunks(projectId, img.description || '', img.tag || 'OVERVIEW');
@@ -479,6 +533,7 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
         },
       ];
 
+      console.log(`[DEBUG] Calling OpenAI API for batch ${i + 1}`);
       let response;
       try {
         response = await openai.chat.completions.create({
@@ -489,8 +544,12 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
         }, {
           timeout: 30000, // 30 second timeout per batch (Vercel serverless limit)
         });
+        
+        const batchTime = Date.now() - batchStartTime;
+        console.log(`[DEBUG] OpenAI API call for batch ${i + 1} completed in ${batchTime}ms`);
       } catch (openaiError: any) {
-        console.error(`OpenAI API error in batch ${i + 1}:`, openaiError);
+        const batchTime = Date.now() - batchStartTime;
+        console.error(`[DEBUG] OpenAI API error in batch ${i + 1} after ${batchTime}ms:`, openaiError);
         
         // Check if it's a timeout or token limit error
         const isTimeout = openaiError.message?.includes('timeout') || 
@@ -508,6 +567,7 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
           errorMessage = `Error processing batch ${i + 1}: ${openaiError.message || 'OpenAI API error'}`;
         }
         
+        console.log(`[DEBUG] Updating database with error for batch ${i + 1}...`);
         // Update database with detailed error and STOP processing
         const finalErrorContent = `${batchResponses.join('\n\n')}\n\n❌ ${errorMessage}\n\n[PROCESSING FAILED - Please try again with fewer images or use a different model]`;
         await supabase
@@ -518,13 +578,14 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
           .eq('id', reportId);
         
         // Stop processing - don't continue with more batches
-        console.error(`Stopping report generation due to error in batch ${i + 1}`);
+        console.error(`[DEBUG] Stopping report generation due to error in batch ${i + 1}`);
         return;
       }
     
       const section = response.choices[0]?.message.content || '';
       batchResponses.push(section);
       
+      console.log(`[DEBUG] Batch ${i + 1} completed, updating database...`);
       // Update database with the current progress
       const combinedSoFar = batchResponses.join('\n\n');
       const { error: updateErrorAfterBatch } = await supabase
@@ -535,10 +596,11 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
         .eq('id', reportId);
         
       if (updateErrorAfterBatch) {
-        console.error(`Error updating database after batch ${i + 1}:`, updateErrorAfterBatch);
+        console.error(`[DEBUG] Error updating database after batch ${i + 1}:`, updateErrorAfterBatch);
       }
     }
     
+    console.log('[DEBUG] All batches completed, starting final review...');
     // Update status
     await supabase
       .from('reports')
@@ -579,6 +641,7 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
       },
     ];
 
+    console.log('[DEBUG] Calling OpenAI API for final review...');
     let FinalReportOutput;
     try {
       FinalReportOutput = await openai.chat.completions.create({
@@ -589,8 +652,10 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
       }, {
         timeout: 45000, // 45 second timeout for final review (Vercel serverless limit)
       });
+      
+      console.log('[DEBUG] Final review OpenAI API call completed successfully');
     } catch (finalError: any) {
-      console.error('Final review OpenAI API error:', finalError);
+      console.error('[DEBUG] Final review OpenAI API error:', finalError);
       
       // Check if it's a timeout or token limit error
       const isTimeout = finalError.message?.includes('timeout') || 
@@ -608,6 +673,7 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
         errorMessage = `Final review failed: ${finalError.message || 'OpenAI API error'}`;
       }
       
+      console.log('[DEBUG] Using combined draft as final result with error note...');
       // Use the combined draft as the final result with error note
       const finalReport = combinedDraft + `\n\n⚠️ ${errorMessage}\n\n[Note: Report content is complete but final formatting failed. You may need to manually format the report.]`;
       
@@ -621,7 +687,7 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
 
     const finalReport = FinalReportOutput.choices[0]?.message.content || '';
 
-    
+    console.log('[DEBUG] Updating database with final content...');
     // Update the database with the final content
     const { error: finalUpdateError } = await supabase
       .from('reports')
@@ -629,11 +695,15 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
       .eq('id', reportId);
       
     if (finalUpdateError) {
-      console.error('Error updating database with final content:', finalUpdateError);
+      console.error('[DEBUG] Error updating database with final content:', finalUpdateError);
     }
 
+    const totalTime = Date.now() - startTime;
+    console.log(`[DEBUG] processReportAsync completed successfully in ${totalTime}ms`);
+
   } catch (error: any) {
-    console.error('Error in async processing:', error);
+    const totalTime = Date.now() - startTime;
+    console.error(`[DEBUG] Error in async processing after ${totalTime}ms:`, error);
     
     // Provide more specific error messages
     let errorMessage = '';
@@ -647,6 +717,7 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
       errorMessage = `Error generating report: ${error.message}\n\nPlease try again with fewer images or use a different model.`;
     }
     
+    console.log('[DEBUG] Updating database with error...');
     // Update database with detailed error
     await supabase
       .from('reports')

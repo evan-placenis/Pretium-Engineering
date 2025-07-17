@@ -215,38 +215,25 @@ async function getRelevantKnowledgeChunks(projectId: string, imageDescription: s
 }
 
 export async function POST(request: Request) {
-  const startTime = Date.now();
-  console.log(`[DEBUG] Grok4 POST request started at ${new Date().toISOString()}`);
-  
   try {
     // Validate environment variables
     if (!process.env.GROK_API_KEY) {
-      console.log('[DEBUG] Missing GROK_API_KEY');
       return NextResponse.json(
         { error: 'GROK_API_KEY not configured' },
         { status: 500 }
       );
     }
 
-    console.log('[DEBUG] Parsing request body...');
     const body = await request.json();
     const { bulletPoints, contractName, location, reportId, images, projectId } = body;
 
-    console.log('[DEBUG] Grok4 request data:', {
-      hasBulletPoints: !!bulletPoints,
-      hasReportId: !!reportId,
-      hasProjectId: !!projectId,
-      imagesCount: images?.length || 0    });
-
     if (!bulletPoints || !reportId || !projectId) {
-      console.log('[DEBUG] Missing required fields');
       return NextResponse.json(
         { error: 'Missing required fields: bulletPoints, reportId, or projectId' },
         { status: 400 }
       );
     }
 
-    console.log('[DEBUG] Checking existing report...');
     // Check if report already exists and is not already processing
     const { data: existingReport, error: checkError } = await supabase
       .from('reports')
@@ -255,7 +242,6 @@ export async function POST(request: Request) {
       .single();
       
     if (checkError) {
-      console.log('[DEBUG] Report not found:', checkError);
       return NextResponse.json(
         { error: `Report ${reportId} not found in database` },
         { status: 404 }
@@ -264,7 +250,6 @@ export async function POST(request: Request) {
 
     // If report is already being processed, return early
     if (existingReport.generated_content?.includes('[PROCESSING IN PROGRESS...]')) {
-      console.log('[DEBUG] Report already processing, returning early');
       return NextResponse.json({
         success: true,
         message: 'Report generation already in progress',
@@ -272,49 +257,51 @@ export async function POST(request: Request) {
       });
     }
 
-    console.log('[DEBUG] Setting initial processing status...');
-    // Set initial processing status
-    const { error: initialUpdateError } = await supabase
-      .from('reports')
-      .update({ 
-        generated_content: 'Starting report generation...\n\n[PROCESSING IN PROGRESS...]'
-      })
-      .eq('id', reportId);
-
-    if (initialUpdateError) {
-      console.log('[DEBUG] Error setting initial status:', initialUpdateError);
-      throw initialUpdateError;
-    }
-
-    console.log('[DEBUG] Starting synchronous Grok4 report processing...');    // Process the report synchronously instead of in background
+    // Start the async processing with better error handling
     try {
-      await processReportAsync(bulletPoints, contractName, location, reportId, images, projectId);
-      console.log('[DEBUG] Grok4 report processing completed successfully');
+      // Set initial processing status
+      await supabase
+        .from('reports')
+        .update({ 
+          generated_content: 'Starting report generation...\n\n[PROCESSING IN PROGRESS...]'
+        })
+        .eq('id', reportId);
+
+      // Start processing in background (don't await here to prevent timeout)
+      processReportAsync(bulletPoints, contractName, location, reportId, images, projectId)
+        .catch(async (error: any) => {
+          console.error('Background processing error:', error);
+          // Update the report with the error
+          await supabase
+            .from('reports')
+            .update({ 
+              generated_content: `Error generating report: ${error.message}\n\nPlease try again or contact support if the issue persists.`
+            })
+            .eq('id', reportId);
+        });
+
     } catch (error: any) {
-      console.error('[DEBUG] Error during Grok4 report processing:', error);
+      console.error('Error starting report generation:', error);
       // Update the report with the error
       await supabase
         .from('reports')
         .update({ 
-          generated_content: `Error generating report: ${error.message}\n\nPlease try again or contact support if the issue persists.`
+          generated_content: `Error starting report generation: ${error.message}\n\nPlease try again or contact support if the issue persists.`
         })
         .eq('id', reportId);
       
       return NextResponse.json(
-        { error: 'Report generation failed' },
+        { error: 'Failed to start report generation' },
         { status: 500 }
       );
     }
 
-    const totalTime = Date.now() - startTime;
-    console.log(`[DEBUG] Grok4 POST request completed successfully in ${totalTime}ms`);
     return NextResponse.json({
       success: true,
-      message: 'Report generation completed successfully',  reportId: reportId
+      message: 'Report generation started',
+      reportId: reportId
     });
   } catch (error: any) {
-    const totalTime = Date.now() - startTime;
-    console.error(`[DEBUG] Grok4 POST request error after ${totalTime}ms:`, error);
     return NextResponse.json(
       { error: error.message || 'An error occurred while starting report generation' },
       { status: 500 }
@@ -366,14 +353,15 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
       throw updateError2;
     }
 
-    // Split the images into chunks for better performance - PROCESSING 1MAGE AT A TIME
-    const imageChunks = chunk(resizedImages, 1);
+    // Split the images into chunks for better performance
+    const imageChunks = chunk(resizedImages, 1); //CHANGING TO BATCH SIZE OF 1 FOR NOW
     const batchResponses: string[] = [];
+
     // Set up the initial conversation with system prompt and instructions
     const baseMessages = [
       {
         role: 'system',
-        content: photoWritingPrompt,
+        content: photoWritingPrompt ,
       },
     ];
 
@@ -390,7 +378,7 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
         .eq('id', reportId);
         
       if (updateErrorBatch) {
-        console.error(`[DEBUG] Error updating database before batch ${i + 1}:`, updateErrorBatch);
+        console.error(`Error updating database before batch ${i + 1}:`, updateErrorBatch);
       }
 
       // Prepare content parts for this batch
@@ -429,13 +417,13 @@ async function processReportAsync(bulletPoints: string, contractName: string, lo
         // Add image description with knowledge context
         contentParts.push({
           type: 'text',
-          text: `New Photo - Description: ${img.description || 'No description provided'}, Group: (${img.group || 'NO GROUP'}), Number: (${img.number || `NO NUMBER: Position ${i + 1}`}), Tag: (${img.tag?.toUpperCase() || 'OVERVIEW'})
+          text: `New Photo - Description: ${img.description || 'No description provided'}, Group: (${img.group || 'NO GROUP'}), Number: (${img.number || `NO NUMBER: Position in batch ${i * 5 + j + 1}`}), Tag: (${img.tag?.toUpperCase() || 'OVERVIEW'})
 
 ${relevantKnowledge ? `The following specifications are relevant to this photo and should be referenced in your observations. Use the exact document name and section title when citing requirements:
 
 ${relevantKnowledge}` : 'No relevant specifications found for this photo. Write factual observations without referencing any specifications.'}
 
-IMPORTANT: When referencing this image in your observations, use the EXACT group name "${img.group || 'NO GROUP'}" (not the tag). The correct format is [IMAGE:${img.number || (i + 1)}:${img.group || 'NO GROUP'}].`,
+IMPORTANT: When referencing this image in your observations, use the EXACT group name "${img.group || 'NO GROUP'}" (not the tag). The correct format is [IMAGE:${img.number || (i * 5 + j + 1)}:${img.group || 'NO GROUP'}].`,
         });
         
         // Add image
@@ -458,18 +446,18 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
 
       let response;
       try {
-        console.log(`[DEBUG] Processing Grok batch ${i + 1}/${imageChunks.length} with ${currentChunk.length} images`);
+        console.log(`Processing Grok batch ${i + 1}/${imageChunks.length} with ${currentChunk.length} images`);
         response = await grokClient.chat.completions.create({
           model: 'grok-4',
           messages: batchMessages as any,
           temperature: 0.7,
           max_tokens: 10000,
         }, {
-          timeout: 30000, // 30 second timeout per batch
+          timeout: 120000, // 2 minute timeout per batch
         });
-        console.log(`[DEBUG] Grok batch ${i + 1} completed successfully`);
+        console.log(`Grok batch ${i + 1} completed successfully`);
       } catch (grokError: any) {
-        console.error(`[DEBUG] Grok API error in batch ${i + 1}:`, grokError);
+        console.error(`Grok API error in batch ${i + 1}:`, grokError);
         
         // Update database with error and continue with next batch
         const errorMessage = `Error processing batch ${i + 1}: ${grokError.message || 'Grok API timeout or error'}`;
@@ -496,7 +484,7 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
         .eq('id', reportId);
         
       if (updateErrorAfterBatch) {
-        console.error(`[DEBUG] Error updating database after batch ${i + 1}:`, updateErrorAfterBatch);
+        console.error(`Error updating database after batch ${i + 1}:`, updateErrorAfterBatch);
       }
     }
     
@@ -541,18 +529,18 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
 
     let FinalReportOutput;
     try {
-      console.log('[DEBUG] Starting Grok final review step');
+      console.log('Starting Grok final review step');
       FinalReportOutput = await grokClient.chat.completions.create({
         model: 'grok-4',
         messages: FinalReportMessage as any,
         temperature: 0.7,
-        max_tokens: 2000,
+        max_tokens: 4000,
       }, {
-        timeout: 45000, // 45 second timeout for final review
+        timeout: 180000, // 3 minute timeout for final review
       });
-      console.log('[DEBUG] Grok final review completed successfully');
+      console.log('Grok final review completed successfully');
     } catch (finalError: any) {
-      console.error('[DEBUG] Final review Grok API error:', finalError);
+      console.error('Final review Grok API error:', finalError);
       
       // If final review fails, use the combined draft as the final result
       const finalReport = combinedDraft + '\n\n[Note: Final formatting step failed due to API timeout. Report content is complete but may need manual formatting.]';
@@ -566,7 +554,7 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
     }
     const finalReport = FinalReportOutput.choices[0]?.message?.content || '';
 
-    console.log('[DEBUG] Updating database with final content...');
+    
     // Update the database with the final content
     const { error: finalUpdateError } = await supabase
       .from('reports')
@@ -574,13 +562,11 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
       .eq('id', reportId);
       
     if (finalUpdateError) {
-      console.error('[DEBUG] Error updating database with final content:', finalUpdateError);
+      console.error('Error updating database with final content:', finalUpdateError);
     }
 
-    console.log('[DEBUG] Grok4 processReportAsync completed successfully');
-
   } catch (error: any) {
-    console.error('[DEBUG] Error in Grok4 sync processing:', error);
+    console.error('Error in async processing:', error);
     // Update database with error
     await supabase
       .from('reports')

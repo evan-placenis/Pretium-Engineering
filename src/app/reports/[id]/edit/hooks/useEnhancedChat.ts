@@ -225,17 +225,31 @@ export const useEnhancedChat = (
 
   // Initialize chat with system prompt
   const initializeChat = useCallback(async (): Promise<void> => {
-    if (!project?.id || isInitialized || hasInitializedRef.current) return;
+    console.log('[DEBUG] initializeChat called', {
+      hasProject: !!project?.id,
+      isInitialized,
+      hasInitializedRef: hasInitializedRef.current,
+      reportId,
+      content,
+      projectName: project?.project_name,
+      bulletPoints: report?.bullet_points
+    });
+    if (!project?.id || isInitialized || hasInitializedRef.current) {
+      console.log('[DEBUG] Skipping initialization - conditions not met', {
+        hasProject: !!project?.id,
+        isInitialized,
+        hasInitializedRef: hasInitializedRef.current
+      });
+      return;
+    }
 
     try {
-      console.log('Initializing enhanced chat...');
+      console.log('[DEBUG] Starting enhanced chat initialization...');
       hasInitializedRef.current = true;
-      
       // Check if there are existing chat messages first
       const existingMessages = chatMessages.length > 0;
       if (existingMessages) {
-        console.log('Chat history exists, skipping welcome message but still initializing agent');
-        
+        console.log('[DEBUG] Chat history exists, skipping welcome message but still initializing agent');
         // Initialize agent without generating a welcome message
         const response = await fetch('/api/enhanced-chat', {
           method: 'POST',
@@ -257,15 +271,12 @@ export const useEnhancedChat = (
             }))
           }),
         });
-        
         if (response.ok) {
-          console.log('Agent initialized silently (no welcome message)');
+          console.log('[DEBUG] Agent initialized silently (no welcome message)');
         }
-        
         setIsInitialized(true);
         return;
       }
-      
       // Send an initialization message to set up the system prompt with welcome message
       const response = await fetch('/api/enhanced-chat', {
         method: 'POST',
@@ -284,14 +295,12 @@ export const useEnhancedChat = (
           conversationHistory: []
         }),
       });
-
       if (response.ok) {
         const data = await response.json();
-        console.log('Initialization response:', data);
-        
+        console.log('[DEBUG] Initialization response:', data);
         // Save the initialization message to database and display it
         if (data.message) {
-          console.log('Saving initialization message:', data.message);
+          console.log('[DEBUG] Saving initialization message:', data.message);
           const { data: savedMessage, error: assistantMsgError } = await supabase
             .from('chat_messages')
             .insert({
@@ -301,27 +310,25 @@ export const useEnhancedChat = (
             })
             .select()
             .single();
-          
           if (assistantMsgError) {
-            console.error('Error saving initialization message:', assistantMsgError);
+            console.error('[DEBUG] Error saving initialization message:', assistantMsgError);
           } else if (savedMessage) {
-            console.log('Initialization message saved successfully');
-            // Add the initialization message to local state
+            console.log('[DEBUG] Initialization message saved successfully');
             setChatMessages(prev => [...prev, savedMessage as ChatMessage]);
           }
         } else {
-          console.warn('No message in initialization response');
+          console.warn('[DEBUG] No message in initialization response');
         }
-        
         setIsInitialized(true);
-        console.log('Enhanced chat initialized successfully');
+        console.log('[DEBUG] Enhanced chat initialized successfully');
       } else {
-        console.error('Initialization failed:', response.status, response.statusText);
+        console.error('[DEBUG] Initialization failed:', response.status, response.statusText);
       }
     } catch (error) {
-      console.error('Error initializing chat:', error);
+      console.error('[DEBUG] Error initializing chat:', error);
     }
-  }, [project?.id, isInitialized, reportId, content, project?.project_name, report?.bullet_points]);
+  // Only depend on project?.id and isInitialized to avoid unnecessary re-creations
+  }, [project?.id, isInitialized]);
 
   // Search embeddings for relevant project knowledge
   const searchEmbeddings = useCallback(async (query: string): Promise<void> => {

@@ -4,9 +4,9 @@ import { enqueueJob } from '@/lib/queue';
 export async function POST(request: Request) {
   try {
     // Validate environment variables
-    if (!process.env.GROK_API_KEY) {
+    if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
-        { error: 'GROK_API_KEY not configured' },
+        { error: 'OPENAI_API_KEY not configured' },
         { status: 500 }
       );
     }
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     }
 
     // Enqueue the job instead of processing directly
-    const enqueueResult = await enqueueJob('generate_report_grok4', {
+    const enqueueResult = await enqueueJob('generate_report_gpt4o', {
       bulletPoints,
       contractName,
       location,

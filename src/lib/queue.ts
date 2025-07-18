@@ -3,7 +3,7 @@ import { createServerSupabaseClient } from './supabase';
 // Job types
 export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed';
 
-export type JobType = 'generate_report' | 'process_images' | 'export_document';
+export type JobType = 'generate_report_grok4' | 'generate_report_gpt4o' | 'process_images' | 'export_document';
 
 export interface Job {
   id: string;

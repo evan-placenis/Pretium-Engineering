@@ -88,8 +88,11 @@ serve(async (req) => {
 
     try {
       switch (job.job_type) {
-        case 'generate_report':
-          result = await processGenerateReportJob(supabase, job)
+        case 'generate_report_grok4':
+          result = await processGenerateReportGrok4(supabase, job)
+          break
+        case 'generate_report_gpt4o':
+          result = await processGenerateReportGPT4oJob(supabase, job)
           break
         case 'process_images':
           error = 'Image processing job type not yet implemented'
@@ -181,15 +184,96 @@ async function resizeImageForAI(imageUrl: string, maxWidth: number = 1024, maxHe
 // Helper function to get relevant knowledge chunks for an image
 async function getRelevantKnowledgeChunks(supabase: any, projectId: string, imageDescription: string, imageTag: string): Promise<string> {
   try {
-    // This is a simplified version - in production you'd want to implement the full embedding search
-    const searchQuery = `${imageDescription}`
+    console.log('🔍 Searching for relevant knowledge:', { imageDescription, imageTag })
     
-    // For now, return empty string - you can implement the full embedding search here
-    return ''
+    // Create a search query based on the image description and tag
+    const searchQuery = `${imageDescription} ${imageTag}`
+    
+    // Generate embedding for the query using OpenAI
+    const openai = new OpenAI({
+      apiKey: Deno.env.get('OPENAI_API_KEY')!,
+    })
+    
+    const embeddingResponse = await openai.embeddings.create({
+      model: 'text-embedding-3-large',
+      input: searchQuery,
+    })
+    
+    const queryEmbedding = embeddingResponse.data[0].embedding
+    
+    // Search in database using cosine similarity
+    const { data, error } = await supabase.rpc('search_embeddings', {
+      query_embedding: queryEmbedding,
+      project_id: projectId,
+      match_threshold: 0.5, // Moderate threshold for relevant specs
+      match_count: 2 // Limit to 2 most relevant chunks
+    })
+    
+    if (error) {
+      console.error('Database search error:', error)
+      return ''
+    }
+    
+    const results = data || []
+    console.log(`Found ${results.length} relevant knowledge chunks`)
+    
+    if (results.length === 0) {
+      return '' // No relevant knowledge found
+    }
+    
+    // Get additional metadata for results
+    const enhancedResults = await Promise.all(
+      results.map(async (result: any) => {
+        try {
+          // Get knowledge document info
+          const { data: knowledgeData } = await supabase
+            .from('project_knowledge')
+            .select('file_name')
+            .eq('id', result.knowledge_id)
+            .single()
+          
+          return {
+            content: result.content_chunk,
+            similarity: result.similarity,
+            fileName: knowledgeData?.file_name || 'Unknown file',
+            documentSource: result.document_source || 'Unknown Document',
+            sectionTitle: result.section_title || 'General Content'
+          }
+        } catch (error) {
+          console.error('Error fetching knowledge metadata:', error)
+          return {
+            content: result.content_chunk,
+            similarity: result.similarity,
+            fileName: 'Unknown file',
+            documentSource: result.document_source || 'Unknown Document',
+            sectionTitle: result.section_title || 'General Content'
+          }
+        }
+      })
+    )
+    
+    // Format the relevant knowledge as context with enhanced citations
+    const relevantKnowledge = enhancedResults.map((result: any, index: number) => {
+      const similarity = (result.similarity * 100).toFixed(1)
+      
+      // Create a clean document name (remove file extension and clean up)
+      const documentName = result.documentSource
+        .replace(/\.[^/.]+$/, '') // Remove file extension
+        .replace(/[-_]/g, ' ') // Replace dashes/underscores with spaces
+        .replace(/\b\w/g, (l: string) => l.toUpperCase()) // Title case
+      
+      // Create citation format that matches the prompt requirements
+      const citation = `${documentName} - ${result.sectionTitle}`
+      
+      return `[Specification ${index + 1} - ${similarity}% relevant from ${citation}]:\n${result.content}`
+    }).join('\n\n')
+    
+    console.log('📋 Relevant knowledge found and formatted')
+    return `\n\nRELEVANT SPECIFICATIONS:\n${relevantKnowledge}\n\nIMPORTANT: When referencing these specifications in your observations, use the exact document name and section title provided in the citations above.`
     
   } catch (error) {
     console.error('Error getting relevant knowledge chunks:', error)
-    return ''
+    return '' // Return empty string if search fails
   }
 }
 
@@ -282,7 +366,7 @@ You are the final editor of a Civil Engineering report for Pretium. Your job is 
 `
 
 // Process generate report job
-async function processGenerateReportJob(supabase: any, job: any): Promise<any> {
+async function processGenerateReportGrok4(supabase: any, job: any): Promise<any> {
   const { bulletPoints, contractName, location, reportId, images, projectId } = job.input_data
 
   try {
@@ -425,7 +509,6 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
 
       let response
       try {
-        console.log(`Processing Grok batch ${i + 1}/${imageChunks.length} with ${currentChunk.length} images`)
         response = await grokClient.chat.completions.create({
           model: 'grok-4',
           messages: batchMessages as any,
@@ -434,7 +517,6 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
         }, {
           timeout: 120000, // 2 minute timeout per batch
         })
-        console.log(`Grok batch ${i + 1} completed successfully`)
       } catch (grokError: any) {
         console.error(`Grok API error in batch ${i + 1}:`, grokError)
         throw new Error(`Error processing batch ${i + 1}: ${grokError.message || 'Grok API timeout or error'}`)
@@ -460,6 +542,8 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
         generated_content: batchResponses.join('\n\n') + '\n\nStarting final review...\n\n[PROCESSING IN PROGRESS...]'
       })
       .eq('id', reportId)
+
+    console.log('🎯 Starting final review agent...')
 
     // Final review step
     const combinedDraft = batchResponses.join('\n\n')
@@ -494,18 +578,35 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
 
     let FinalReportOutput
     try {
-      console.log('Starting Grok final review step')
+      console.log('📏 Draft length:', combinedDraft.length, 'characters')
+      
+      // If the combined draft is too large, skip the final review and use the draft directly
+      if (combinedDraft.length > 15000) {
+        console.log('⚠️ Draft too large, skipping final review')
+        const finalReport = combinedDraft + '\n\n[Note: Report content is complete. Final formatting was skipped due to size.]'
+        
+        await supabase
+          .from('reports')
+          .update({ generated_content: finalReport })
+          .eq('id', reportId)
+        
+        return { success: true, message: 'Report generated successfully (large report, formatting skipped)' }
+      }
+      
+      console.log('🎯 Calling Grok API for final review...')
+      
       FinalReportOutput = await grokClient.chat.completions.create({
         model: 'grok-4',
         messages: FinalReportMessage as any,
         temperature: 0.7,
-        max_tokens: 4000,
+        max_tokens: 8000, // Increased token limit
       }, {
-        timeout: 180000, // 3 minute timeout for final review
+        timeout: 240000, // 4 minute timeout for final review
       })
-      console.log('Grok final review completed successfully')
+      
+      console.log('✅ Final review completed successfully')
     } catch (finalError: any) {
-      console.error('Final review Grok API error:', finalError)
+      console.error('❌ Final review error:', finalError.message)
       
       // If final review fails, use the combined draft as the final result
       const finalReport = combinedDraft + '\n\n[Note: Final formatting step failed due to API timeout. Report content is complete but may need manual formatting.]'
@@ -536,6 +637,263 @@ IMPORTANT: When referencing this image in your observations, use the EXACT group
 
   } catch (error: any) {
     console.error('Error in generate report job processing:', error)
+    throw error
+  }
+} 
+
+// GPT-4o report generation function
+async function processGenerateReportGPT4oJob(supabase: any, job: any): Promise<any> {
+  try {
+    const { bulletPoints, contractName, location, reportId, images, projectId } = job.input_data
+
+    console.log('🚀 Starting GPT-4o report generation for job:', job.id)
+
+    // Initialize OpenAI client
+    const openai = new OpenAI({
+      apiKey: Deno.env.get('OPENAI_API_KEY')!,
+    })
+
+    // Set initial processing status
+    await supabase
+      .from('reports')
+      .update({ 
+        generated_content: 'Starting GPT-4o report generation...\n\n[PROCESSING IN PROGRESS...]'
+      })
+      .eq('id', reportId)
+
+    // Resize images for AI processing
+    const resizedImages = await Promise.all(
+      images.map(async (img: any) => {
+        const resizedUrl = await resizeImageForAI(img.url, 1600, 1600, 0.85)
+        return { ...img, url: resizedUrl }
+      })
+    )
+
+    // Update status
+    await supabase
+      .from('reports')
+      .update({ 
+        generated_content: `Images resized (${resizedImages.length}). Starting batch processing...\n\n[PROCESSING IN PROGRESS...]`
+      })
+      .eq('id', reportId)
+
+    // Split images into chunks (1 image per batch for GPT-4o)
+    const imageChunks = chunk(resizedImages, 1)
+    const batchResponses: string[] = []
+
+    // Set up the initial conversation with system prompt
+    const baseMessages = [
+      {
+        role: 'system',
+        content: photoWritingPrompt,
+      },
+    ]
+
+    // Process each batch
+    for (let i = 0; i < imageChunks.length; i++) {
+      const currentChunk = imageChunks[i]
+      
+      // Update status in database
+      await supabase
+        .from('reports')
+        .update({ 
+          generated_content: `Processing batch ${i + 1}/${imageChunks.length} (${currentChunk.length} images)...\n\n${batchResponses.join('\n\n')}\n\n[PROCESSING IN PROGRESS...]`
+        })
+        .eq('id', reportId)
+
+      // Prepare content parts for this batch
+      const contentParts: any[] = [
+        {
+          type: 'text',
+          text: `You are processing Image Batch #${i + 1} of ${imageChunks.length}.
+      
+                Your task is to write clear, technical, and structured bullet-point observation(s) for each photo provided below. Follow these exact rules:
+                
+                #IMPORTANT:
+                1. Every bullet point **must** reference its image and group using the format [IMAGE:<image_number>:<GROUP_NAME>]. This is the most important rule to follow, without this the output wont display.
+                2. If no number is provided, assign one based on its position in this batch , and add a note that the number is not provided.
+                3. If you write multiple points for a single image, each bullet must include its own [IMAGE:<image_number>:<GROUP_NAME>] reference.
+                4. **CRITICAL**: Use the EXACT group name provided for each image e.g ([IMAGE:<image_number>:<GROUP_NAME>]) , NOT the tag (OVERVIEW/DEFICIENCY). The group name is the actual category the image belongs to.
+                5. **CRITICAL**: The image reference [IMAGE:<image_number>:<GROUP_NAME>] must appear on the SAME LINE as the bullet point text, not on a separate line.
+                
+                # REMEMBER:
+                - Use minimal, factual language in accordance with the project specifications or user description.
+                -You may incorperate your own civil engineering knowledge and reasoning, but do not make up facts.
+                - Only mention compliance or effectiveness if specified.
+                - AVOID LEGAL RISK BY: 
+                  - not confirming quality or completeness without directive input.
+                  - When describing site conditions or instructions, always clarify the contractor's responsibility.
+                `,
+        }
+      ]
+
+      // Process each image in the batch
+      for (let j = 0; j < currentChunk.length; j++) {
+        const img = currentChunk[j]
+        
+        // Get relevant knowledge chunks for this image
+        const relevantKnowledge = await getRelevantKnowledgeChunks(supabase, projectId, img.description || '', img.tag || 'OVERVIEW')
+        
+        // Add image description with knowledge context
+        contentParts.push({
+          type: 'text',
+          text: `New Photo - Description: ${img.description || 'No description provided'}, Group: (${img.group || 'NO GROUP'}), Number: (${img.number || `NO NUMBER: Position in batch ${i * 5 + j + 1}`}), Tag: (${img.tag?.toUpperCase() || 'OVERVIEW'})
+
+${relevantKnowledge ? `The following specifications are relevant to this photo and should be referenced in your observations. Use the exact document name and section title when citing requirements:
+
+${relevantKnowledge}` : 'No relevant specifications found for this photo. Write factual observations without referencing any specifications.'}
+
+IMPORTANT: When referencing this image in your observations, use the EXACT group name "${img.group || 'NO GROUP'}" (not the tag). The correct format is [IMAGE:${img.number || (i * 5 + j + 1)}:${img.group || 'NO GROUP'}].`,
+        })
+        
+        // Add image
+        contentParts.push({
+          type: 'image_url',
+          image_url: {
+            url: img.url,
+            detail: 'auto',
+          },
+        })
+      }
+
+      const batchMessages = [
+        ...baseMessages,
+        {
+          role: 'user',
+          content: contentParts,
+        },
+      ]
+
+      let response
+      try {
+        response = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: batchMessages as any,
+          temperature: 0.7,
+          max_tokens: 10000,
+        }, {
+          timeout: 120000, // 2 minute timeout per batch
+        })
+      } catch (openaiError: any) {
+        console.error(`OpenAI API error in batch ${i + 1}:`, openaiError)
+        throw new Error(`Error processing batch ${i + 1}: ${openaiError.message || 'OpenAI API timeout or error'}`)
+      }
+      
+      const section = response.choices[0]?.message?.content || ''
+      batchResponses.push(section)
+      
+      // Update database with the current progress
+      const combinedSoFar = batchResponses.join('\n\n')
+      await supabase
+        .from('reports')
+        .update({ 
+          generated_content: combinedSoFar + '\n\n[PROCESSING IN PROGRESS...]'
+        })
+        .eq('id', reportId)
+    }
+    
+    // Update status
+    await supabase
+      .from('reports')
+      .update({ 
+        generated_content: batchResponses.join('\n\n') + '\n\nStarting final review...\n\n[PROCESSING IN PROGRESS...]'
+      })
+      .eq('id', reportId)
+
+    console.log('🎯 Starting GPT-4o final review agent...')
+
+    // Final review step
+    const combinedDraft = batchResponses.join('\n\n')
+
+    const FinalReportMessage = [
+      {
+        role: 'system',
+        content: generalAndSummaryPrompt,
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text:`IMPORTANT: You must retype the entire report. Do **not** delete or omit any original text. Every part of the draft must remain visible in your rewritten version.
+
+                  Follow all user instructions exactly: ${bulletPoints}
+
+                  The draft report below is composed of ${batchResponses.length} sections. You must:
+                  1. **Group observations under appropriate section headers based on their group name tag in the reference bullet point- [IMAGE:<image_number>:<GROUP_NAME>].**
+                  2. **Within each group, reorder the observations by their associated image number** (i.e., Photo 2 comes before Photo 4).
+                  4. Maintain the original format - do not duplicate any content
+                  5. - **CRITICAL**: When starting a new subheading, the number in "[IMAGE:<image_number>:<GROUP_NAME>]" must restart from 1, not continue from the previous subheading.
+
+                  Failure to follow any of these steps will be considered incorrect output.
+
+                  Here is the draft report:\n\n${combinedDraft}`
+          },
+        ],
+      },
+    ]
+
+    let FinalReportOutput
+    try {
+      console.log('📏 Draft length:', combinedDraft.length, 'characters')
+      
+      // If the combined draft is too large, skip the final review and use the draft directly
+      if (combinedDraft.length > 15000) {
+        console.log('⚠️ Draft too large, skipping final review')
+        const finalReport = combinedDraft + '\n\n[Note: Report content is complete. Final formatting was skipped due to size.]'
+        
+        await supabase
+          .from('reports')
+          .update({ generated_content: finalReport })
+          .eq('id', reportId)
+        
+        return { success: true, message: 'Report generated successfully (large report, formatting skipped)' }
+      }
+      
+      console.log('🎯 Calling GPT-4o API for final review...')
+      
+      FinalReportOutput = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: FinalReportMessage as any,
+        temperature: 0.7,
+        max_tokens: 8000, // Increased token limit
+      }, {
+        timeout: 240000, // 4 minute timeout for final review
+      })
+      
+      console.log('✅ Final review completed successfully')
+    } catch (finalError: any) {
+      console.error('❌ Final review error:', finalError.message)
+      
+      // If final review fails, use the combined draft as the final result
+      const finalReport = combinedDraft + '\n\n[Note: Final formatting step failed due to API timeout. Report content is complete but may need manual formatting.]'
+      
+      await supabase
+        .from('reports')
+        .update({ generated_content: finalReport })
+        .eq('id', reportId)
+      
+      return { success: true, message: 'Report generated with partial formatting' }
+    }
+    
+    const finalReport = FinalReportOutput.choices[0]?.message?.content || ''
+
+    // Update the database with the final content
+    const { error: finalUpdateError } = await supabase
+      .from('reports')
+      .update({ generated_content: finalReport })
+      .eq('id', reportId)
+      
+    if (finalUpdateError) {
+      console.error('Error updating database with final content:', finalUpdateError)
+      throw new Error(`Failed to save final report: ${finalUpdateError.message}`)
+    }
+
+    console.log('Final report successfully saved to database')
+    return { success: true, message: 'Report generated successfully' }
+
+  } catch (error: any) {
+    console.error('Error in GPT-4o report generation job processing:', error)
     throw error
   }
 } 

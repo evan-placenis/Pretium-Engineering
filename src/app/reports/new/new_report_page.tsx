@@ -21,7 +21,7 @@ interface ExtendedImageItem extends ImageItem {
 
 // Define available models and their corresponding API routes
 const AVAILABLE_MODELS = [
-  { id: 'grok4', name: 'Grok-4 ', route: '/api/models/generate_report_grok4', streamRoute: '/api/models/generate_report_grok4', description: 'Latest xAI model with advanced reasoning capabilities', supportsStreaming: true },
+  { id: 'grok4', name: 'Grok-4 ', route: '/api/models/archive/generate-report-oldGrok', streamRoute: '/api/models/archive/generate-report-oldGrok', description: 'Latest xAI model with advanced reasoning capabilities', supportsStreaming: true },
   { id: 'advanced-streaming', name: 'gpt-4o', route: '/api/models/generate-report-advanced-stream', streamRoute: '/api/models/generate-report-advanced-stream', description: 'Open AI model with strong image understanding', supportsStreaming: true },
   { id: 'advanced', name: 'Advanced Model (Standard)', route: '/api/models/generate-report-advanced', description: 'Higher quality, slower processing', supportsStreaming: false },
   { id: 'lightweight', name: 'Lightweight Model', route: '/api/models/generate-report-lite', description: 'Faster processing, basic quality', supportsStreaming: false },

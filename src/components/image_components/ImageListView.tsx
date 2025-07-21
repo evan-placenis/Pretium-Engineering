@@ -168,10 +168,10 @@ export default function ImageListView({
               gap: '1.5rem'
             }}>
               {/* Description input with autocomplete */}
-              <div>
+              <div style={{ maxWidth: '70%' }}>
                 <label style={{ 
                   display: 'block', 
-                  fontSize: '0.875rem', 
+                  fontSize: '1.125rem', 
                   fontWeight: '600', 
                   marginBottom: '0.5rem', 
                   color: 'var(--color-text)' 
@@ -189,66 +189,70 @@ export default function ImageListView({
                   disabled={readonly || selectionMode}
                   userId={currentUserId}
                   projectId={projectId}
+                  style={{
+                    fontSize: '1.125rem',
+                    lineHeight: '1.5',
+                    padding: '0.75rem'
+                  }}
                 />
               </div>
               
-              {/* Tag selection dropdown */}
-              <div>
-                <label style={{ 
-                  display: 'block', 
-                  fontSize: '0.875rem', 
-                  fontWeight: '600', 
-                  marginBottom: '0.5rem', 
-                  color: 'var(--color-text)' 
-                }}>
-                  Category:
-                </label>
-                <select
-                  value={image.tag || ''}
-                  onChange={async (e) => {
-                    const newTag = e.target.value === '' ? null : e.target.value as TagValue;
-                    onUpdateImage?.(image.id, 'tag', newTag);
-                    
-                    // Auto-save tag change
-                    try {
-                      const { error } = await supabase
-                        .from('project_images')
-                        .update({ tag: newTag })
-                        .eq('id', image.id);
-
-                      if (error) {
-                        onShowSuccessMessage?.('Failed to save tag');
-                        return;
-                      }
+              {/* Category and action buttons on same line */}
+              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <label style={{ 
+                    fontSize: '0.875rem', 
+                    fontWeight: '600', 
+                    color: 'var(--color-text)' 
+                  }}>
+                    Category:
+                  </label>
+                  <select
+                    value={image.tag || ''}
+                    onChange={async (e) => {
+                      const newTag = e.target.value === '' ? null : e.target.value as TagValue;
+                      onUpdateImage?.(image.id, 'tag', newTag);
                       
-                      onShowSuccessMessage?.('Tag auto-saved');
-                    } catch (error: any) {
-                      onShowSuccessMessage?.('Failed to save tag');
-                    }
-                  }}
-                  disabled={readonly || selectionMode}
-                  style={{
-                    width: '100%',
-                    maxWidth: '200px',
-                    padding: '0.75rem',
-                    fontSize: '0.875rem',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '0.5rem',
-                    backgroundColor: 'var(--color-bg)',
-                    color: 'var(--color-text)',
-                    transition: 'border-color 0.2s ease'
-                  }}
-                >
-                  {getAllTagOptions().map(option => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              
-              {/* Action buttons */}
-              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      // Auto-save tag change
+                      try {
+                        const { error } = await supabase
+                          .from('project_images')
+                          .update({ tag: newTag })
+                          .eq('id', image.id);
+
+                        if (error) {
+                          onShowSuccessMessage?.('Failed to save tag');
+                          return;
+                        }
+                        
+                        onShowSuccessMessage?.('Tag auto-saved');
+                      } catch (error: any) {
+                        onShowSuccessMessage?.('Failed to save tag');
+                      }
+                    }}
+                    disabled={readonly || selectionMode}
+                    style={{
+                      width: 'auto',
+                      minWidth: '120px',
+                      padding: '0.25rem 0.5rem',
+                      fontSize: '0.875rem',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: '0.25rem',
+                      backgroundColor: 'var(--color-bg)',
+                      color: 'var(--color-text)',
+                      transition: 'border-color 0.2s ease'
+                    }}
+                  >
+                    {getAllTagOptions().map(option => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                
+                {/* Action buttons */}
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 {!selectionMode && !readonly && (
                   <>
                     {showRotateButton && (
@@ -281,12 +285,12 @@ export default function ImageListView({
                         }}
                         className="btn btn-secondary btn-sm"
                         style={{
-                          padding: '0.5rem 1rem',
-                          borderRadius: '0.5rem',
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '0.25rem',
                           fontSize: '0.875rem'
                         }}
                       >
-                        🔄 Rotate
+                        🔄
                       </button>
                     )}
                     {showRemoveButton && (
@@ -295,28 +299,30 @@ export default function ImageListView({
                         onClick={() => onRemoveImage?.(image.id)}
                         className="btn btn-danger btn-sm"
                         style={{
-                          padding: '0.5rem 1rem',
-                          borderRadius: '0.5rem',
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '0.25rem',
                           fontSize: '0.875rem'
                         }}
                       >
-                        Remove Image
+                        Delete
                       </button>
                     )}
                   </>
                 )}
                 
               </div>
+              </div>
               
               {/* Image metadata */}
               {showUserInfo && (
                 <div style={{ 
-                  fontSize: '0.875rem', 
+                  fontSize: '0.75rem', 
                   color: 'var(--color-text-light)',
                   display: 'flex',
                   flexWrap: 'wrap',
-                  gap: '1rem',
-                  alignItems: 'center'
+                  gap: '0.5rem',
+                  alignItems: 'center',
+                  marginTop: '0.25rem'
                 }}>
                   {image.created_at && (
                     <span style={{ 
@@ -355,23 +361,37 @@ export default function ImageListView({
             
             {/* Image display - on the right side */}
             <div style={{ 
-              flex: '0 0 550px',
+              flex: '0 0 25vw',
+              minWidth: '300px',
+              maxWidth: '500px',
+              height: '250px',
               position: 'relative',
               borderRadius: '0.5rem',
-              overflow: 'hidden'
-            }}>
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: selectionMode ? 'pointer' : 'default'
+            }}
+            onClick={() => {
+              if (selectionMode && onToggleSelection) {
+                onToggleSelection(image.id);
+              } else {
+                handleImageClick(image);
+              }
+            }}
+            >
               <img
                 src={image.url}
                 alt={image.description || 'Project image'}
-                onClick={() => handleImageClick(image)}
                 style={{
                   width: '100%',
-                  height: '425px',
+                  height: '100%',
                   objectFit: 'cover',
                   borderRadius: '0.5rem',
                   transform: `rotate(${image.rotation || 0}deg)`,
-                  cursor: 'pointer',
-                  transition: 'transform 0.3s ease'
+                  transition: 'transform 0.3s ease',
+                  aspectRatio: '1 / 1'
                 }}
               />
               
@@ -389,7 +409,7 @@ export default function ImageListView({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: '0.875rem',
+                  fontSize: '1rem',
                   fontWeight: '600',
                   zIndex: 10,
                   backdropFilter: 'blur(4px)',
@@ -399,25 +419,39 @@ export default function ImageListView({
                 </div>
               )}
               
-              {/* Selection checkbox overlay */}
+              {/* Selection indicator overlay */}
               {selectionMode && (
                 <div style={{
                   position: 'absolute',
                   top: '0.75rem',
                   left: '0.75rem',
-                  zIndex: 10
+                  zIndex: 10,
+                  width: '2rem',
+                  height: '2rem',
+                  borderRadius: '50%',
+                  backgroundColor: selectedImages?.has(image.id) 
+                    ? 'var(--color-primary)' 
+                    : 'rgba(255, 255, 255, 0.9)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backdropFilter: 'blur(4px)',
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+                  border: selectedImages?.has(image.id) 
+                    ? '2px solid white' 
+                    : '2px solid rgba(255, 255, 255, 0.8)',
+                  transition: 'all 0.2s ease'
                 }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedImages?.has(image.id) || false}
-                    onChange={() => onToggleSelection?.(image.id)}
-                    style={{
-                      width: '1.5rem',
-                      height: '1.5rem',
-                      cursor: 'pointer',
-                      accentColor: 'var(--color-primary)'
-                    }}
-                  />
+                  {selectedImages?.has(image.id) && (
+                    <span style={{
+                      color: 'white',
+                      fontSize: '1.2rem',
+                      fontWeight: 'bold',
+                      lineHeight: 1
+                    }}>
+                      ✓
+                    </span>
+                  )}
                 </div>
               )}
             </div>

@@ -4,7 +4,7 @@ import { useState, useRef } from 'react';
 interface UploadPhotoModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onUpload: (files: File[], dateTaken: string, useFilenameAsDescription: boolean, groupName: string) => void;
+  onUpload: (files: File[], dateTaken: string, useFilenameAsDescription: boolean) => void;
   loading?: boolean;
   progress?: string;
 }
@@ -19,7 +19,6 @@ export default function UploadPhotoModal({
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [dateTaken, setDateTaken] = useState<string>('');
   const [useFilenameAsDescription, setUseFilenameAsDescription] = useState<boolean>(false);
-  const [groupName, setGroupName] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -32,8 +31,8 @@ export default function UploadPhotoModal({
   };
 
   const handleUpload = () => {
-    if (selectedFiles.length > 0 && groupName.trim()) {
-      onUpload(selectedFiles, dateTaken, useFilenameAsDescription, groupName.trim());
+    if (selectedFiles.length > 0) {
+      onUpload(selectedFiles, dateTaken, useFilenameAsDescription);
     }
   };
 
@@ -41,7 +40,6 @@ export default function UploadPhotoModal({
     setSelectedFiles([]);
     setDateTaken('');
     setUseFilenameAsDescription(false);
-    setGroupName('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -136,40 +134,6 @@ export default function UploadPhotoModal({
             marginTop: '0.25rem' 
           }}>
             Select the date when these photos were taken. This will be used as the creation date for organizing your photos chronologically.
-          </p>
-        </div>
-
-        <div style={{ marginBottom: '1.5rem' }}>
-          <label style={{ 
-            display: 'block', 
-            marginBottom: '0.5rem', 
-            fontWeight: '500',
-            color: 'var(--color-text)'
-          }}>
-            Group Name <span style={{ color: 'red' }}>*</span>
-          </label>
-          <input
-            type="text"
-            value={groupName}
-            onChange={(e) => setGroupName(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '0.75rem',
-              fontSize: '1rem',
-              border: '1px solid var(--color-border)',
-              borderRadius: '0.25rem',
-              marginBottom: '1rem'
-            }}
-            disabled={loading}
-            required
-            placeholder="Enter a group name for this batch (e.g. 'Roof Photos')"
-          />
-          <p style={{ 
-            fontSize: '0.75rem', 
-            color: 'var(--color-text-secondary)', 
-            marginTop: '0.25rem' 
-          }}>
-            This name will be used to group these photos. You can edit it later.
           </p>
         </div>
 
@@ -316,7 +280,7 @@ export default function UploadPhotoModal({
           <button
             onClick={handleUpload}
             className="btn btn-primary"
-            disabled={loading || selectedFiles.length === 0 || !groupName.trim()}
+            disabled={loading || selectedFiles.length === 0}
           >
             {loading ? 'Uploading...' : `Upload ${selectedFiles.length} Photo${selectedFiles.length !== 1 ? 's' : ''}`}
           </button>

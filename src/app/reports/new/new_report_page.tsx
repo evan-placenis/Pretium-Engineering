@@ -5,18 +5,23 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase, Project } from '@/lib/supabase';
 import Link from 'next/link';
 import { Document, Packer, Paragraph, ImageRun, HeadingLevel, AlignmentType } from 'docx';
-import { ImageListView, GroupedImageListView, type ImageItem } from '@/components/image_components';
-import { TagValue } from '@/lib/tagConfig';
-import { useImageManagement } from '@/hooks/useImageManagement';
+import { type ImageItem } from '@/components/image_components';
+
 import { Toast } from '@/components/feedback';
+import CollapsibleGroup from '@/components/CollapsibleGroup';
+import { NumberingMode, NumberedImageCard } from './components';
+import { useNumberingMode } from './hooks/useNumberingMode';
 
 
-// Extended interface to track original values
+// Extended interface for report images
 interface ExtendedImageItem extends ImageItem {
-  originalDescription?: string;
-  originalTag?: TagValue;
   group?: string[]; // Add group information
   number?: number | null; // Add number information for ordering
+}
+
+interface GroupOrder {
+  groupName: string;
+  order: number;
 }
 
 // Define available models and their corresponding API routes
@@ -36,54 +41,120 @@ export default function NewReport() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
-  const [allImages, setAllImages] = useState<ExtendedImageItem[]>([]);
+  const [selectedImages, setSelectedImages] = useState<ExtendedImageItem[]>([]);
   const [selectedModel, setSelectedModel] = useState('advanced-streaming');
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [debugInfo, setDebugInfo] = useState<any>(null);
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [hasManuallySelectedModel, setHasManuallySelectedModel] = useState(false);
+  const [groupNumberingStates, setGroupNumberingStates] = useState<{ [groupName: string]: boolean }>({});
+  const [groupOrder, setGroupOrder] = useState<GroupOrder[]>([]);
+  const [isGroupOrderingMode, setIsGroupOrderingMode] = useState(false);
   const hasRestoredFormData = useRef(false);
+  
+  // Use the numbering mode hook
+  const {
+    numberingMode,
+    numberingSelection,
+    startNumberingMode,
+    handleNumberingSelection,
+    completeNumbering,
+    cancelNumbering,
+    autoNumberImages,
+    isInNumberingMode,
+    isNumberingSelected,
+    getNumberingIndex
+  } = useNumberingMode({
+    selectedImages,
+    setSelectedImages,
+    groupNumberingStates,
+    setGroupNumberingStates
+  });
+  
   const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get('project_id');
   const reportId = searchParams.get('reportId');
   const selectedImageIds = searchParams.get('selected_images');
+  const groupsData = searchParams.get('groups_data');
   
 
 
   // Load form data from localStorage on component mount (only once)
   useEffect(() => {
-    if (projectId && !hasRestoredFormData.current) {
-      hasRestoredFormData.current = true;
-      const savedData = localStorage.getItem(`report-form-${projectId}`);
-      if (savedData) {
-        try {
-          const parsed = JSON.parse(savedData);
-          let restored = false;
-          if (parsed.reportTitle) {
-            setReportTitle(parsed.reportTitle);
-            restored = true;
+    const restoreFormData = async () => {
+      if (projectId && !hasRestoredFormData.current) {
+        hasRestoredFormData.current = true;
+        const savedData = localStorage.getItem(`report-form-${projectId}`);
+        if (savedData) {
+          try {
+            const parsed = JSON.parse(savedData);
+            let restored = false;
+            if (parsed.reportTitle) {
+              setReportTitle(parsed.reportTitle);
+              restored = true;
+            }
+            if (parsed.bulletPoints) {
+              setBulletPoints(parsed.bulletPoints);
+              restored = true;
+            }
+            // Restore selected images from localStorage if no URL params are present
+            if (parsed.selectedImages && Array.isArray(parsed.selectedImages) && !selectedImageIds) {
+              // Load the saved images from the database
+              const savedImageIds = parsed.selectedImages.map((img: any) => img.id);
+              const savedGroupsMapping: { [imageId: string]: string[] } = {};
+              parsed.selectedImages.forEach((img: any) => {
+                if (img.id && img.group) {
+                  savedGroupsMapping[img.id] = img.group;
+                }
+              });
+              
+              // Load images from database and restore their groups and numbers
+              const { data: savedImages, error: loadError } = await supabase
+                .from('project_images')
+                .select('*')
+                .in('id', savedImageIds);
+                
+              if (!loadError && savedImages) {
+                const restoredImages = savedImages.map(img => {
+                  const savedData = parsed.selectedImages.find((saved: any) => saved.id === img.id);
+                  return {
+                    ...img,
+                    group: savedData?.group || [],
+                    number: savedData?.number || null
+                  };
+                });
+                setSelectedImages(restoredImages);
+                restored = true;
+              }
+            }
+            // Only restore selectedModel if we're still on the default and haven't manually selected a model
+            if (parsed.selectedModel && selectedModel === 'advanced-streaming' && !hasManuallySelectedModel) {
+              setSelectedModel(parsed.selectedModel);
+              restored = true;
+            }
+            if (parsed.groupNumberingStates && typeof parsed.groupNumberingStates === 'object') {
+              setGroupNumberingStates(parsed.groupNumberingStates);
+              restored = true;
+            }
+            if (parsed.groupOrder && Array.isArray(parsed.groupOrder)) {
+              setGroupOrder(parsed.groupOrder);
+              restored = true;
+            }
+            if (restored) {
+              setSuccessMessage('Your previous form data has been restored');
+              setTimeout(() => setSuccessMessage(null), 3000);
+            }
+          } catch (error) {
+            console.warn('Failed to parse saved form data:', error);
           }
-          if (parsed.bulletPoints) {
-            setBulletPoints(parsed.bulletPoints);
-            restored = true;
-          }
-          // Only restore selectedModel if we're still on the default and haven't manually selected a model
-          if (parsed.selectedModel && selectedModel === 'advanced-streaming' && !hasManuallySelectedModel) {
-            setSelectedModel(parsed.selectedModel);
-            restored = true;
-          }
-          if (restored) {
-            setSuccessMessage('Your previous form data has been restored');
-            setTimeout(() => setSuccessMessage(null), 3000);
-          }
-        } catch (error) {
-          console.warn('Failed to parse saved form data:', error);
         }
       }
-    }
-  }, [projectId]); // Only depend on projectId
+    };
+    
+    restoreFormData();
+  }, [projectId, selectedImageIds]); // Add selectedImageIds to dependencies
 
   // Save form data to localStorage whenever it changes
   useEffect(() => {
@@ -92,26 +163,138 @@ export default function NewReport() {
         reportTitle,
         bulletPoints,
         selectedModel,
+        selectedImages: selectedImages.map(img => ({
+          id: img.id,
+          group: img.group,
+          number: img.number
+        })), // Save selected image data with groups and numbers
+        groupNumberingStates, // Save numbering states
+        groupOrder, // Save group order
         timestamp: Date.now()
       };
       localStorage.setItem(`report-form-${projectId}`, JSON.stringify(formData));
+      
+      // Clear URL parameters after data has been saved to localStorage
+      // This prevents URL from getting too long with multiple groups
+      if (selectedImageIds || groupsData) {
+        const newUrl = new URL(window.location.href);
+        newUrl.searchParams.delete('selected_images');
+        newUrl.searchParams.delete('groups_data');
+        window.history.replaceState({}, '', newUrl.toString());
+      }
     }
-  }, [reportTitle, bulletPoints, selectedModel, projectId]);
+  }, [reportTitle, bulletPoints, selectedModel, projectId, groupNumberingStates, selectedImages, selectedImageIds, groupsData]);
 
   // Clear saved form data when report is successfully generated
+  // Initialize group order when groups are loaded
+  const initializeGroupOrder = (groups: string[]) => {
+    const existingOrder = groupOrder.map(go => go.groupName);
+    const newGroups = groups.filter(group => !existingOrder.includes(group));
+    
+    if (newGroups.length > 0) {
+      const newOrder = newGroups.map((group, index) => ({
+        groupName: group,
+        order: groupOrder.length + index + 1
+      }));
+      setGroupOrder(prev => [...prev, ...newOrder]);
+    }
+  };
+
+  // Update group order
+  const updateGroupOrder = (groupName: string, newOrder: number) => {
+    setGroupOrder(prev => {
+      const updated = prev.map(go => 
+        go.groupName === groupName ? { ...go, order: newOrder } : go
+      );
+      return updated.sort((a, b) => a.order - b.order);
+    });
+  };
+
+  // Move group up in order
+  const moveGroupUp = (groupName: string) => {
+    const currentGroup = groupOrder.find(go => go.groupName === groupName);
+    if (currentGroup && currentGroup.order > 1) {
+      const targetGroup = groupOrder.find(go => go.order === currentGroup.order - 1);
+      if (targetGroup) {
+        updateGroupOrder(groupName, currentGroup.order - 1);
+        updateGroupOrder(targetGroup.groupName, currentGroup.order);
+      }
+    }
+  };
+
+  // Move group down in order
+  const moveGroupDown = (groupName: string) => {
+    const currentGroup = groupOrder.find(go => go.groupName === groupName);
+    const maxOrder = Math.max(...groupOrder.map(go => go.order));
+    if (currentGroup && currentGroup.order < maxOrder) {
+      const targetGroup = groupOrder.find(go => go.order === currentGroup.order + 1);
+      if (targetGroup) {
+        updateGroupOrder(groupName, currentGroup.order + 1);
+        updateGroupOrder(targetGroup.groupName, currentGroup.order);
+      }
+    }
+  };
+
+  // Get group order number
+  const getGroupOrder = (groupName: string) => {
+    const group = groupOrder.find(go => go.groupName === groupName);
+    return group ? group.order : 0;
+  };
+
   const clearSavedFormData = () => {
     if (projectId) {
       localStorage.removeItem(`report-form-${projectId}`);
+      localStorage.removeItem(`report-groups-${projectId}`); // Clear groups data too
       setHasManuallySelectedModel(false); // Reset the manual selection flag
       hasRestoredFormData.current = false; // Reset the restoration flag
     }
   };
 
-  // Use the shared image management hook
-  const { updateImageFromAutoSave, handleImageUpdate, handleShowSuccessMessage } = useImageManagement({
-    projectId: projectId ?? undefined,
-    onSuccessMessage: (message) => setSuccessMessage(message)
+
+
+  // Group images by their group name and sort by number within each group
+  const groupedImages = selectedImages.reduce((groups, image) => {
+    const groupName = image.group && image.group.length > 0 ? image.group[0] : 'Ungrouped';
+    if (!groups[groupName]) {
+      groups[groupName] = [];
+    }
+    groups[groupName].push(image);
+    return groups;
+  }, {} as { [groupName: string]: ExtendedImageItem[] });
+
+  // Sort images within each group by number (lowest to highest)
+  Object.keys(groupedImages).forEach(groupName => {
+    groupedImages[groupName].sort((a, b) => {
+      // If both have numbers, sort by number
+      if (a.number && b.number) {
+        return a.number - b.number;
+      }
+      // If only one has a number, put numbered ones first
+      if (a.number && !b.number) return -1;
+      if (!a.number && b.number) return 1;
+      // If neither has a number, sort by creation date
+      const aDate = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const bDate = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return aDate - bDate;
+    });
   });
+
+  // Initialize group order when groups change
+  useEffect(() => {
+    const groupNames = Object.keys(groupedImages);
+    initializeGroupOrder(groupNames);
+  }, [Object.keys(groupedImages).join(',')]);
+
+  // Sort groups by their order
+  const sortedGroupEntries = Object.entries(groupedImages).sort(([a], [b]) => {
+    const orderA = getGroupOrder(a);
+    const orderB = getGroupOrder(b);
+    return orderA - orderB;
+  });
+
+
+
+
 
   useEffect(() => {
     const getUser = async () => {
@@ -183,25 +366,57 @@ export default function NewReport() {
           
         if (error) throw error;
         
-        setAllImages(prev => {
-          // Avoid duplicates by id and initialize original values
+        // Parse groups data if available (from URL or localStorage)
+        let groupsMapping: { [imageId: string]: string[] } = {};
+        
+        if (groupsData) {
+          // Use URL groups data if available
+          try {
+            const parsedGroupsData = JSON.parse(decodeURIComponent(groupsData));
+            parsedGroupsData.forEach((item: any) => {
+              if (item.id && item.group) {
+                groupsMapping[item.id] = item.group;
+              }
+            });
+          } catch (error) {
+            console.warn('Failed to parse URL groups data:', error);
+          }
+        } else {
+          // Fall back to localStorage groups data
+          const savedGroupsData = localStorage.getItem(`report-groups-${projectId}`);
+          if (savedGroupsData) {
+            try {
+              const parsedGroupsData = JSON.parse(savedGroupsData);
+              parsedGroupsData.forEach((item: any) => {
+                if (item.id && item.group) {
+                  groupsMapping[item.id] = item.group;
+                }
+              });
+            } catch (error) {
+              console.warn('Failed to parse localStorage groups data:', error);
+            }
+          }
+        }
+
+        setSelectedImages(prev => {
+          // Avoid duplicates by id
           const newImages = (data || [])
             .filter(img => !prev.some(existing => existing.id === img.id))
-            .map(img => ({
-              ...img,
-              originalDescription: img.description,
-              originalTag: img.tag,
-              hasChanges: false,
-              group: img.group || [], // Preserve group information
-              number: img.number // Preserve number information
-            }));
-          return [...prev, ...newImages];
+            .map(img => ({ ...img }));
+          
+          const updatedImages = [...prev, ...newImages];
+          
+          // Use the hook to automatically number images and set group states
+          const { numberedImages, newGroupStates } = autoNumberImages(updatedImages, groupsMapping);
+          
+          // Merge the new group states with existing ones (don't overwrite)
+          setGroupNumberingStates(prevStates => ({ ...prevStates, ...newGroupStates }));
+          
+          return numberedImages;
         });
         
-        // Clear the URL parameter after loading
-        const newUrl = new URL(window.location.href);
-        newUrl.searchParams.delete('selected_images');
-        window.history.replaceState({}, '', newUrl.toString());
+        // Don't clear URL parameters immediately - let localStorage handle persistence
+        // This allows multiple groups to be loaded properly
         
       } catch (error: any) {
         setError('Failed to load selected images: ' + error.message);
@@ -215,39 +430,7 @@ export default function NewReport() {
 
 
 
-  const handleImportProjectImages = async () => {
-    if (!projectId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const { data, error } = await supabase
-        .from('project_images')
-        .select('*')
-        .eq('project_id', projectId)
-        .order('number', { ascending: true, nullsFirst: false }) // Order by number first, then by created_at
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-              // Avoid duplicates by id and initialize original values
-        setAllImages(prev => ([
-          ...prev,
-          ...((data || [])
-            .filter(img => !prev.some(existing => existing.id === img.id))
-            .map(img => ({
-              ...img,
-              originalDescription: img.description,
-              originalTag: img.tag,
-              hasChanges: false,
-              group: img.group || [], // Preserve group information
-              number: img.number, // Preserve number information
-              rotation: img.rotation || 0 // Preserve rotation information
-            })))
-        ]));
-    } catch (error: any) {
-      setError('Failed to load project images: ' + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+
 
   const generateReport = async () => {
     if (!bulletPoints.trim()) {
@@ -255,7 +438,7 @@ export default function NewReport() {
       return;
     }
 
-    if (allImages.length === 0) {
+    if (selectedImages.length === 0) {
       setError('Please add at least one image to the report');
       return;
     }
@@ -264,34 +447,56 @@ export default function NewReport() {
     setError(null);
 
     try {
-      // Sort images by group and number before sending to AI
-      const sortedImages = [...allImages].sort((a, b) => {
-        // First sort by group name (alphabetically)
-        const aGroup = (a.group && a.group.length > 0) ? a.group[0] : '';
-        const bGroup = (b.group && b.group.length > 0) ? b.group[0] : '';
+      // Sort images by group order and then by image number within each group
+      const sortedImages = [...selectedImages].sort((a, b) => {
+        const aGroup = (a.group && a.group.length > 0) ? a.group[0] : 'Ungrouped';
+        const bGroup = (b.group && b.group.length > 0) ? b.group[0] : 'Ungrouped';
         
-        if (aGroup !== bGroup) {
-          return aGroup.localeCompare(bGroup);
+        // First sort by group order
+        const aGroupOrder = getGroupOrder(aGroup);
+        const bGroupOrder = getGroupOrder(bGroup);
+        
+        if (aGroupOrder !== bGroupOrder) {
+          return aGroupOrder - bGroupOrder;
         }
         
-        // Within the same group, sort by number
+        // Then sort by image number within the group
         if (a.number && b.number) {
           return a.number - b.number;
-        } else if (a.number && !b.number) {
-          return -1; // Numbered images first
-        } else if (!a.number && b.number) {
-          return 1; // Numbered images first
+        }
+        if (a.number && !b.number) return -1;
+        if (!a.number && b.number) return 1;
+        
+        // Finally sort by creation date
+        const aDate = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const bDate = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return aDate - bDate;
+      });
+
+      // Apply numbering to images based on groupNumberingStates and manual numbering
+      const imagesWithNumbering = sortedImages.map((image, globalIndex) => {
+        const groupName = image.group && image.group.length > 0 ? image.group[0] : 'Ungrouped';
+        const isNumberingEnabled = groupNumberingStates[groupName];
+        
+        if (isNumberingEnabled && image.number) {
+          // Use the manually assigned number from numbering mode
+          return {
+            ...image,
+            number: image.number
+          };
         }
         
-        // If neither has a number, maintain original order
-        return 0;
+        return {
+          ...image,
+          number: null // No numbering for this image
+        };
       });
 
       console.log('Starting report generation with:', {
         bulletPoints,
         projectName: project?.project_name,
-        uploadedImagesCount: sortedImages.length,
-        sortedImages: sortedImages.map((img, index) => ({
+        uploadedImagesCount: imagesWithNumbering.length,
+        sortedImages: imagesWithNumbering.map((img, index) => ({
           index: index + 1,
           group: img.group?.[0] || 'ungrouped',
           number: img.number,
@@ -318,13 +523,13 @@ export default function NewReport() {
 
       // Insert all images into report_images with report_id first
       console.log('Attempting to insert report images...');
-      console.log('Images with rotation data:', sortedImages.map(img => ({
+      console.log('Images with rotation data:', imagesWithNumbering.map(img => ({
         id: img.id,
         description: img.description,
         rotation: img.rotation,
         number: img.number
       })));
-      const { error: imagesError } = await supabase.from('report_images').insert(sortedImages.map(img => ({
+      const { error: imagesError } = await supabase.from('report_images').insert(imagesWithNumbering.map(img => ({
         report_id: reportData.id,
         url: img.url,
         tag: img.tag,
@@ -357,6 +562,7 @@ export default function NewReport() {
             location: project?.location,
             reportId: reportData.id,
             images: sortedImages,
+            groupOrder: groupOrder, // Include group ordering information
             modelType: selectedModel
           }),
         }).then(response => {
@@ -385,6 +591,7 @@ export default function NewReport() {
           location: project?.location,
           reportId: reportData.id,
           images: sortedImages,
+          groupOrder: groupOrder, // Include group ordering information
           modelType: selectedModel
         }),
       });
@@ -464,13 +671,7 @@ export default function NewReport() {
           )}
         </div>
       </header>
-      
-      <div style={{ marginBottom: "1.5rem" }}>
-        <h1 style={{ marginTop: "1.5rem", marginBottom: "0.5rem" }}>New Report for {project.name}</h1>
-        <p className="text-secondary">
-          Location: {project.location}
-        </p>
-      </div>
+    
 
       {error && (
         <Toast message={error} type="error" />
@@ -610,8 +811,8 @@ export default function NewReport() {
             </p>
           </div>
 
-          <h4 style={{ marginBottom: "1rem" }}>Report Images</h4>
-          <div style={{ marginBottom: "1rem", display: 'flex', gap: '1rem' }}>
+          <h4 style={{ marginBottom: "1rem" }}>Project Images</h4>
+          <div style={{ marginBottom: "1rem", display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
             <button 
               type="button"
               onClick={() => router.push(`/projects/${projectId}/images?mode=select&returnTo=reports`)}
@@ -620,35 +821,156 @@ export default function NewReport() {
             >
               Select Photos
             </button>
+            {selectedImages.length > 0 && (
+              <>
+                <button 
+                  type="button"
+                  onClick={() => setIsGroupOrderingMode(!isGroupOrderingMode)}
+                  className="btn btn-outline"
+                  disabled={loading}
+                  style={{ 
+                    color: isGroupOrderingMode ? '#fff' : '#0d6efd', 
+                    backgroundColor: isGroupOrderingMode ? '#0d6efd' : 'transparent',
+                    borderColor: '#0d6efd'
+                  }}
+                >
+                  {isGroupOrderingMode ? 'Done Ordering' : 'Order Sections'}
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setSelectedImages([]);
+                    setGroupNumberingStates({});
+                    setGroupOrder([]);
+                    localStorage.removeItem(`report-groups-${projectId}`);
+                  }}
+                  className="btn btn-outline"
+                  disabled={loading}
+                  style={{ color: '#dc3545', borderColor: '#dc3545' }}
+                >
+                  Clear All Groups
+                </button>
+              </>
+            )}
           </div>
-          {/* Image List View */}
-          {allImages.length > 0 && (
+          {/* Selected Images Display - Grouped */}
+          {selectedImages.length > 0 && (
             <div style={{ marginBottom: "2rem" }}>
-              <h4 style={{ marginBottom: "1rem" }}>Project Images</h4>
-              <GroupedImageListView
-                images={allImages}
-                onUpdateImage={(imageId, field, value) => {
-                  const update = handleImageUpdate(imageId, field, value);
-                  setAllImages(prev => prev.map(img => {
-                    if (img.id === update.imageId) {
-                      const updated = { ...img, [update.field]: update.value };
+              <h2 style={{ marginBottom: "1rem" }}>Report Images ({selectedImages.length})</h2>
+              <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                {sortedGroupEntries.map(([groupName, images]) => (
+                  <div key={groupName} style={{ marginBottom: "1rem" }}>
+                    {/* Group Header with Ordering Controls */}
+                    <div style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "1rem",
+                      marginBottom: "0.5rem"
+                    }}>
+                      {/* Ordering Controls */}
+                      {isGroupOrderingMode && (
+                        <div style={{ display: "flex", gap: "0.25rem" }}>
+                          <button
+                            onClick={() => moveGroupUp(groupName)}
+                            className="btn btn-outline btn-sm"
+                            disabled={getGroupOrder(groupName) <= 1}
+                            style={{ 
+                              fontSize: "0.75rem", 
+                              padding: "0.25rem 0.5rem",
+                              opacity: getGroupOrder(groupName) > 1 ? 1 : 0.5,
+                              cursor: getGroupOrder(groupName) > 1 ? 'pointer' : 'not-allowed'
+                            }}
+                            title="Move section up"
+                          >
+                            ↑
+                          </button>
+                          <button
+                            onClick={() => moveGroupDown(groupName)}
+                            className="btn btn-outline btn-sm"
+                            disabled={getGroupOrder(groupName) >= Math.max(...groupOrder.map(go => go.order))}
+                            style={{ 
+                              fontSize: "0.75rem", 
+                              padding: "0.25rem 0.5rem",
+                              opacity: getGroupOrder(groupName) < Math.max(...groupOrder.map(go => go.order)) ? 1 : 0.5,
+                              cursor: getGroupOrder(groupName) < Math.max(...groupOrder.map(go => go.order)) ? 'pointer' : 'not-allowed'
+                            }}
+                            title="Move section down"
+                          >
+                            ↓
+                          </button>
+                        </div>
+                      )}
                       
-                      return updated;
-                    }
-                    return img;
-                  }));
-                }}
-                onAutoSaveUpdate={updateImageFromAutoSave}
-                onShowSuccessMessage={handleShowSuccessMessage}
-                onRemoveImage={(imageId) => {
-                  setAllImages(prev => prev.filter(img => img.id !== imageId));
-                }}
-                showRotateButton={true}
-                currentUserId={user?.id}
-                projectId={searchParams.get('project_id') ?? undefined}
-                collapsible={true}
-                defaultCollapsed={false}
-              />
+                      {/* Group Component */}
+                      <div style={{ flex: 1 }}>
+                        <CollapsibleGroup
+                          groupName={`${getGroupOrder(groupName) > 0 ? `Section ${getGroupOrder(groupName)}: ` : ''}${groupName}`}
+                          itemCount={images.length}
+                          showSelectionControls={false}
+                          isFullySelected={false}
+                          isPartiallySelected={false}
+                          onGroupSelectionToggle={() => {}}
+                          defaultOpen={false}
+                        >
+                          {/* Numbering Controls */}
+                          <div style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            marginBottom: "1rem",
+                            padding: "0.5rem",
+                            background: "var(--color-bg-secondary)",
+                            borderRadius: "0.25rem"
+                          }}>
+                            <span style={{ fontSize: "0.875rem", fontWeight: "500" }}>
+                              {groupNumberingStates[groupName] ? "Numbering Enabled" : "Numbering Disabled"}
+                            </span>
+                            <button
+                              onClick={() => startNumberingMode(groupName)}
+                              className="btn btn-outline btn-sm"
+                              style={{ fontSize: "0.75rem" }}
+                            >
+                              {groupNumberingStates[groupName] ? "Re-number Photos" : "Number Photos"}
+                            </button>
+                          </div>
+                      
+                      {/* Numbering Mode UI */}
+                      {isInNumberingMode(groupName) && (
+                        <NumberingMode
+                          groupName={groupName}
+                          selectedCount={numberingSelection.length}
+                          onComplete={() => completeNumbering(groupName)}
+                          onCancel={cancelNumbering}
+                        />
+                      )}
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                        gap: "1rem",
+                        padding: "1rem",
+                        border: "1px solid var(--color-border)",
+                        borderRadius: "0.5rem",
+                        backgroundColor: "var(--color-bg-card)"
+                      }}>
+                        {images.map((image, index) => (
+                          <NumberedImageCard
+                            key={image.id}
+                            image={image}
+                            groupName={groupName}
+                            isNumbering={isInNumberingMode(groupName)}
+                            isNumberingSelected={isNumberingSelected(image.id)}
+                            numberingIndex={getNumberingIndex(image.id)}
+                            isNumberingEnabled={groupNumberingStates[groupName]}
+                            onNumberingSelection={handleNumberingSelection}
+                          />
+                        ))}
+                      </div>
+                        </CollapsibleGroup>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

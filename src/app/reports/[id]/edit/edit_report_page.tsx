@@ -177,7 +177,7 @@ const processContentWithImages = (rawContent: string, images: ReportImage[]): st
             img = undefined; // Reset if group doesn't match
           }
         }
-        
+        //
         // If not found with exact match, try fuzzy matching (only for grouped images)
         if (!img && groupName !== 'Ungrouped') {
           const fuzzyImg = images.find(img => {

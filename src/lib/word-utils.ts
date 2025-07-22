@@ -932,12 +932,16 @@ const createImageCell = async (image: ReportImage, imageIndex: number) => {
         new Paragraph({
           children: [
             new TextRun({
-              text: `Photo ${imageIndex + 1} \n ${image.description || 'No description available'}`,//
+              text: "",
               font: "Segoe UI",
               size: 18,
             }),
           ],
-          alignment: AlignmentType.LEFT,
+          numbering: {
+            reference: 'photo-numbering',
+            level: 0,
+          },
+          alignment: AlignmentType.CENTER,
         }),
       ],
     });
@@ -948,11 +952,16 @@ const createImageCell = async (image: ReportImage, imageIndex: number) => {
         new Paragraph({
           children: [
             new TextRun({
-              text: `[Image ${imageIndex + 1}: ${image.description || 'Image not available'}]`,
+              text: "",
               font: "Segoe UI",
               size: 20,
             }),
           ],
+          numbering: {
+            reference: 'photo-numbering',
+            level: 0,
+          },
+          alignment: AlignmentType.CENTER,
         }),
       ],
     });
@@ -992,7 +1001,8 @@ function parseReportSectionsAndImages(content: string) {
   let currentSection = 'General Observations';
   const sectionRegex = /^\d+\.\s*(.+)$/;
   const bulletRegex = /^(\d+\.\d+)\s+(.*)$/;
-  const imageRegex = /\[IMAGE:(\d+):([^\]]+)\]/gi;
+  // Updated regex to handle both grouped [IMAGE:number:group] and ungrouped [IMAGE:number] formats
+  const imageRegex = /\[IMAGE:(\d+)(?::([^\]]+))?\]/gi;
 
   const grouped: Record<string, Record<string, { number: string, text: string, groupName: string }[]>> = {};
 
@@ -1012,7 +1022,7 @@ function parseReportSectionsAndImages(content: string) {
     if (!grouped[currentSection]) grouped[currentSection] = {};
     for (const match of imageMatches) {
       const imageId = match[1];
-      const groupName = match[2];
+      const groupName = match[2] || 'Ungrouped'; // Default to 'Ungrouped' if no group name
       if (!grouped[currentSection][imageId]) grouped[currentSection][imageId] = [];
       let cleanText = bulletText.replace(imageRegex, '').trim();
       // Remove extra spaces before punctuation and collapse multiple spaces
@@ -1117,7 +1127,7 @@ export const createWordDocumentWithImages = async (
     
     
 
-    // Define numbering config for numbered paragraphs
+    // Define numbering config for numbered paragraphs and photos
     const numbering = {
       config: [
         {
@@ -1143,6 +1153,18 @@ export const createWordDocumentWithImages = async (
               text: '%1.%2.%3.',
               alignment: AlignmentType.LEFT,
               style: { paragraph: { indent: { left: 1080, hanging: 360 } } },
+            },
+          ],
+        },
+        {
+          reference: 'photo-numbering',
+          levels: [
+            {
+              level: 0,
+              format: LevelFormat.DECIMAL,
+              text: 'Photo %1',
+              alignment: AlignmentType.LEFT,
+              style: { paragraph: { indent: { left: 0, hanging: 0 } } },
             },
           ],
         },
@@ -1183,11 +1205,19 @@ export const createWordDocumentWithImages = async (
         const imageNum = parseInt(imageId);
         const groupName = bullets[0]?.groupName || '';
         
-        // Find the image by group and number
+        // Find the image by number, with fallback for ungrouped images
         const img = images.find(img => {
+          const numberMatches = img.number === imageNum;
+          
+          // If groupName is 'Ungrouped', look for images with no group or empty group
+          if (groupName === 'Ungrouped') {
+            const hasNoGroup = !img.group || img.group.length === 0;
+            return numberMatches && hasNoGroup;
+          }
+          
+          // For grouped images, check both group and number
           const hasGroup = img.group && img.group.length > 0;
           const groupMatches = hasGroup && img.group!.some(g => g === groupName);
-          const numberMatches = img.number === imageNum;
           return groupMatches && numberMatches;
         });
         

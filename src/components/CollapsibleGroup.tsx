@@ -156,7 +156,7 @@ export default function CollapsibleGroup({
   return (
     <div 
       style={{ 
-        marginBottom: '2rem', 
+        marginBottom: '0.5rem', 
         border: '1px solid var(--color-border)', 
         borderRadius: '0.5rem', 
         background: 'var(--color-bg-card)',
@@ -169,7 +169,7 @@ export default function CollapsibleGroup({
           display: 'flex', 
           alignItems: 'center', 
           justifyContent: 'space-between', 
-          padding: '1rem', 
+          padding: '0.75rem', 
           cursor: 'pointer', 
           background: 'var(--color-bg)', 
           borderTopLeftRadius: '0.5rem', 
@@ -310,7 +310,7 @@ export default function CollapsibleGroup({
       
       {/* Collapsible content area */}
       {isOpen && (
-        <div style={{ padding: '1.5rem' }}>
+        <div style={{ padding: '1rem' }}>
           {children}
         </div>
       )}

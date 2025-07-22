@@ -80,12 +80,70 @@ export default function ProjectPage({ id }: { id: string }) {
 
     try {
       setLoading(true);
+      
+      // 1. Delete project images from storage (project-images/{projectId}/)
+      const { data: projectImages } = await supabase
+        .from('project_images')
+        .select('url')
+        .eq('project_id', id);
+
+      if (projectImages && projectImages.length > 0) {
+        // Extract the correct file paths from URLs
+        const projectImagePaths = projectImages.map(img => {
+          const url = new URL(img.url);
+          const pathParts = url.pathname.split('/');
+          // Find the index of 'project-images' and get everything after it
+          const projectImagesIndex = pathParts.findIndex(part => part === 'project-images');
+          if (projectImagesIndex !== -1) {
+            return pathParts.slice(projectImagesIndex + 1).join('/');
+          }
+          // Fallback: try to extract from the end if the above doesn't work
+          return pathParts.slice(-2).join('/');
+        });
+
+        // Delete from storage
+        const { error: projectStorageError } = await supabase.storage
+          .from('project-images')
+          .remove(projectImagePaths);
+
+        if (projectStorageError) {
+          console.warn('Failed to delete some project images from storage:', projectStorageError);
+        }
+      }
+
+      // Note: Report images reference the same files in project-images bucket,
+      // so no separate cleanup of reports-images bucket is needed
+
+      // 3. Delete knowledge documents from storage (project-knowledge/{projectId}/)
+      const { data: knowledgeDocs } = await supabase
+        .from('project_knowledge')
+        .select('file_path')
+        .eq('project_id', id);
+
+      if (knowledgeDocs && knowledgeDocs.length > 0) {
+        // Extract file paths for storage deletion
+        const knowledgePaths = knowledgeDocs.map(doc => 
+          doc.file_path.replace(/^project-knowledge\//, '')
+        );
+
+        // Delete from storage
+        const { error: knowledgeStorageError } = await supabase.storage
+          .from('project-knowledge')
+          .remove(knowledgePaths);
+
+        if (knowledgeStorageError) {
+          console.warn('Failed to delete some knowledge documents from storage:', knowledgeStorageError);
+        }
+      }
+
+      // 4. Finally, delete the project (this will cascade delete all related records)
       const { error: deleteError } = await supabase
         .from('projects')
         .delete()
         .eq('id', id);
 
       if (deleteError) throw deleteError;
+      
       router.push('/dashboard');
     } catch (err: any) {
       console.error('Error deleting project:', err);

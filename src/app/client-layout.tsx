@@ -72,12 +72,7 @@ export default function ClientLayout({
             >
               Dashboard
             </Link>
-            <Link 
-              href="/settings" 
-              className={`navbar-link ${isActive('/settings') ? 'active' : ''}`}
-            >
-              Upload
-            </Link>
+
             {user && (
               <button onClick={handleSignOut} className="btn btn-secondary">
                 Sign Out

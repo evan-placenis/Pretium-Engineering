@@ -64,7 +64,8 @@ function renderSpecialSection(paragraph: string): string | null {
  */
 function groupBulletsByImageAndText(rawContent: string) {
   const lines = rawContent.split(/\n/).map(l => l.trim()).filter(Boolean);
-  const imageRegex = /\[IMAGE:(\d+):([^\]]+)\]/g;
+  // Updated regex to handle both grouped [IMAGE:number:group] and ungrouped [IMAGE:number] formats
+  const imageRegex = /\[IMAGE:(\d+)(?::([^\]]+))?\]/g;
   const groups: Record<string, string[]> = {};
   const noImageParagraphs: string[] = [];
 
@@ -73,7 +74,7 @@ function groupBulletsByImageAndText(rawContent: string) {
     if (imageMatches.length > 0) {
       imageMatches.forEach(match => {
         const imageId = match[1];
-        const groupName = match[2];
+        const groupName = match[2] || 'Ungrouped'; // Default to 'Ungrouped' if no group name
         if (!groups[imageId]) groups[imageId] = [];
         // Remove the image tag and clean up spaces
         let cleanText = line.replace(imageRegex, '').replace(/\s+([.,;:])/g, '$1').replace(/\s{2,}/g, ' ').trim();
@@ -107,7 +108,8 @@ const processContentWithImages = (rawContent: string, images: ReportImage[]): st
 
   // --- Single-pass, in-order rendering ---
   const lines = rawContent.split(/\n/).map(l => l.trim());
-  const imageRegex = /\[IMAGE:(\d+):([^\]]+)\]/g;
+  // Updated regex to handle both grouped [IMAGE:number:group] and ungrouped [IMAGE:number] formats
+  const imageRegex = /\[IMAGE:(\d+)(?::([^\]]+))?\]/g;
   const imageBullets: Record<string, string[]> = {};
   const renderedImages = new Set<string>();
 
@@ -117,7 +119,7 @@ const processContentWithImages = (rawContent: string, images: ReportImage[]): st
     const imageMatches = [...line.matchAll(imageRegex)];
     if (imageMatches.length > 0) {
       let imageId = imageMatches[0][1];
-      let groupName = imageMatches[0][2];
+      let groupName = imageMatches[0][2] || 'Ungrouped'; // Default to 'Ungrouped' if no group name
       let bullet = '';
       if (line.replace(imageRegex, '').trim() === '') {
         // Look back for previous non-empty line
@@ -158,23 +160,31 @@ const processContentWithImages = (rawContent: string, images: ReportImage[]): st
     const imageMatches = [...line.matchAll(imageRegex)];
     if (imageMatches.length > 0) {
       let imageId = imageMatches[0][1];
-      let groupName = imageMatches[0][2];
+      let groupName = imageMatches[0][2] || 'Ungrouped'; // Ensure groupName is never undefined
       const key = `${imageId}|||${groupName}`;
       if (!renderedImages.has(key)) {
         renderedImages.add(key);
         const bullets = imageBullets[key] || [];
         const imageNum = parseInt(imageId);
-        let img = images.find(img => {
+        // First try to find by number only (for ungrouped images)
+        let img = images.find(img => img.number === imageNum);
+        
+        // If groupName is not 'Ungrouped', try to find by group and number
+        if (groupName !== 'Ungrouped' && img) {
           const hasGroup = img.group && img.group.length > 0;
           const groupMatches = hasGroup && img.group!.some(g => g === groupName);
-          const numberMatches = img.number === imageNum;
-          return groupMatches && numberMatches;
-        });
-        // If not found with exact match, try fuzzy matching
-        if (!img) {
+          if (!groupMatches) {
+            img = undefined; // Reset if group doesn't match
+          }
+        }
+        
+        // If not found with exact match, try fuzzy matching (only for grouped images)
+        if (!img && groupName !== 'Ungrouped') {
           const fuzzyImg = images.find(img => {
+            if (img.number !== imageNum) return false;
             const hasGroup = img.group && img.group.length > 0;
-            if (!hasGroup || img.number !== imageNum) return false;
+            if (!hasGroup) return false;
+            
             const exactMatch = img.group!.some(g => g === groupName);
             const normalizedMatch = img.group!.some(g =>
               g.toLowerCase().replace(/[^a-z0-9]/g, '') === groupName.toLowerCase().replace(/[^a-z0-9]/g, '')
@@ -197,11 +207,11 @@ const processContentWithImages = (rawContent: string, images: ReportImage[]): st
               ${img ? `
                 <img src="${img.url}" alt="${img.description || 'Report image'}" class="report-image" />
                 <p class="report-image-caption">
-                  <strong>Photo ${imageNum} (${groupName}):</strong> ${img.description || 'No description available'}
+                  <strong>Photo ${imageNum}${groupName !== 'Ungrouped' ? ` (${groupName})` : ''}:</strong> ${img.description || 'No description available'}
                 </p>
               ` : `
                 <p class="report-image-caption" style="color: red;">
-                  <strong>Image not found:</strong> Photo ${imageNum} from group "${groupName}"
+                  <strong>Image not found:</strong> Photo ${imageNum}${groupName !== 'Ungrouped' ? ` from group "${groupName}"` : ''}
                 </p>
               `}
             </div>

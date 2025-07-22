@@ -51,6 +51,7 @@ export default function NewReport() {
   const [groupNumberingStates, setGroupNumberingStates] = useState<{ [groupName: string]: boolean }>({});
   const [groupOrder, setGroupOrder] = useState<GroupOrder[]>([]);
   const [isGroupOrderingMode, setIsGroupOrderingMode] = useState(false);
+  const [isUngroupedMode, setIsUngroupedMode] = useState(false);
   const hasRestoredFormData = useRef(false);
   
   // Use the numbering mode hook
@@ -78,14 +79,100 @@ export default function NewReport() {
   const reportId = searchParams.get('reportId');
   const selectedImageIds = searchParams.get('selected_images');
   const groupsData = searchParams.get('groups_data');
+  const useTemplate = searchParams.get('useTemplate');
+  const ungroupedMode = searchParams.get('ungrouped');
   
 
+
+  // Set ungrouped mode if URL parameter is present or if loaded images are ungrouped
+  useEffect(() => {
+    if (ungroupedMode === 'true') {
+      setIsUngroupedMode(true);
+      
+      // Clear any existing group data from selected images when entering ungrouped mode
+      setSelectedImages(prev => prev.map(img => ({
+        ...img,
+        group: [],
+        number: null
+      })));
+    }
+  }, [ungroupedMode]);
+
+  // Detect ungrouped mode from loaded images (only if not already set by URL parameter)
+  useEffect(() => {
+    if (selectedImages.length > 0 && ungroupedMode !== 'true') {
+      // Check if all images have no groups or empty groups
+      const allUngrouped = selectedImages.every(img => 
+        !img.group || img.group.length === 0
+      );
+      
+      if (allUngrouped) {
+        setIsUngroupedMode(true);
+      } else {
+        setIsUngroupedMode(false);
+      }
+    }
+  }, [selectedImages, ungroupedMode]);
+
+  // Clear group data when entering ungrouped mode
+  useEffect(() => {
+    if (isUngroupedMode) {
+      setSelectedImages(prev => prev.map(img => ({
+        ...img,
+        group: [],
+        number: null
+      })));
+      setGroupNumberingStates({});
+      setGroupOrder([]);
+    }
+  }, [isUngroupedMode]);
 
   // Load form data from localStorage on component mount (only once)
   useEffect(() => {
     const restoreFormData = async () => {
       if (projectId && !hasRestoredFormData.current) {
         hasRestoredFormData.current = true;
+        
+        // Check if we should load a template
+        if (useTemplate === 'true') {
+          const templateData = localStorage.getItem(`report-template-${projectId}`);
+          if (templateData) {
+            try {
+              const parsed = JSON.parse(templateData);
+              
+              // Load the template images from the database
+              const templateImageIds = parsed.selectedImages.map((img: any) => img.id);
+              const { data: templateImages, error: loadError } = await supabase
+                .from('project_images')
+                .select('*')
+                .in('id', templateImageIds);
+                
+              if (!loadError && templateImages) {
+                const restoredImages = templateImages.map(img => {
+                  const templateData = parsed.selectedImages.find((template: any) => template.id === img.id);
+                  return {
+                    ...img,
+                    group: templateData?.group || [],
+                    number: templateData?.number || null
+                  };
+                });
+                setSelectedImages(restoredImages);
+                setGroupNumberingStates(parsed.groupNumberingStates || {});
+                setGroupOrder(parsed.groupOrder || []);
+                setSuccessMessage('Template loaded successfully!');
+                setTimeout(() => setSuccessMessage(null), 3000);
+                
+                // Clear the template from localStorage after loading
+                localStorage.removeItem(`report-template-${projectId}`);
+                return;
+              }
+            } catch (error) {
+              console.warn('Failed to load template:', error);
+            }
+          }
+        }
+        
+        // Fall back to normal form data restoration
         const savedData = localStorage.getItem(`report-form-${projectId}`);
         if (savedData) {
           try {
@@ -154,7 +241,7 @@ export default function NewReport() {
     };
     
     restoreFormData();
-  }, [projectId, selectedImageIds]); // Add selectedImageIds to dependencies
+  }, [projectId, selectedImageIds, useTemplate]); // Add useTemplate to dependencies
 
   // Save form data to localStorage whenever it changes
   useEffect(() => {
@@ -447,49 +534,70 @@ export default function NewReport() {
     setError(null);
 
     try {
-      // Sort images by group order and then by image number within each group
-      const sortedImages = [...selectedImages].sort((a, b) => {
-        const aGroup = (a.group && a.group.length > 0) ? a.group[0] : 'Ungrouped';
-        const bGroup = (b.group && b.group.length > 0) ? b.group[0] : 'Ungrouped';
-        
-        // First sort by group order
-        const aGroupOrder = getGroupOrder(aGroup);
-        const bGroupOrder = getGroupOrder(bGroup);
-        
-        if (aGroupOrder !== bGroupOrder) {
-          return aGroupOrder - bGroupOrder;
-        }
-        
-        // Then sort by image number within the group
-        if (a.number && b.number) {
-          return a.number - b.number;
-        }
-        if (a.number && !b.number) return -1;
-        if (!a.number && b.number) return 1;
-        
-        // Finally sort by creation date
-        const aDate = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const bDate = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return aDate - bDate;
-      });
+      // Sort images based on mode
+      let sortedImages;
+      if (isUngroupedMode) {
+        // For ungrouped mode, just sort by creation date
+        sortedImages = [...selectedImages].sort((a, b) => {
+          const aDate = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const bDate = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return aDate - bDate;
+        });
+      } else {
+        // For grouped mode, sort by group order and then by image number within each group
+        sortedImages = [...selectedImages].sort((a, b) => {
+          const aGroup = (a.group && a.group.length > 0) ? a.group[0] : 'Ungrouped';
+          const bGroup = (b.group && b.group.length > 0) ? b.group[0] : 'Ungrouped';
+          
+          // First sort by group order
+          const aGroupOrder = getGroupOrder(aGroup);
+          const bGroupOrder = getGroupOrder(bGroup);
+          
+          if (aGroupOrder !== bGroupOrder) {
+            return aGroupOrder - bGroupOrder;
+          }
+          
+          // Then sort by image number within the group
+          if (a.number && b.number) {
+            return a.number - b.number;
+          }
+          if (a.number && !b.number) return -1;
+          if (!a.number && b.number) return 1;
+          
+          // Finally sort by creation date
+          const aDate = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const bDate = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return aDate - bDate;
+        });
+      }
 
-      // Apply numbering to images based on groupNumberingStates and manual numbering
+      // Apply numbering to images based on mode
       const imagesWithNumbering = sortedImages.map((image, globalIndex) => {
-        const groupName = image.group && image.group.length > 0 ? image.group[0] : 'Ungrouped';
-        const isNumberingEnabled = groupNumberingStates[groupName];
-        
-        if (isNumberingEnabled && image.number) {
-          // Use the manually assigned number from numbering mode
+        if (isUngroupedMode) {
+          // For ungrouped mode, assign sequential numbers
           return {
             ...image,
-            number: image.number
+            number: globalIndex + 1,
+            group: [] // Ensure no groups for ungrouped mode
+          };
+        } else {
+          // For grouped mode, use existing numbering logic
+          const groupName = image.group && image.group.length > 0 ? image.group[0] : 'Ungrouped';
+          const isNumberingEnabled = groupNumberingStates[groupName];
+          
+          if (isNumberingEnabled && image.number) {
+            // Use the manually assigned number from numbering mode
+            return {
+              ...image,
+              number: image.number
+            };
+          }
+          
+          return {
+            ...image,
+            number: null // No numbering for this image
           };
         }
-        
-        return {
-          ...image,
-          number: null // No numbering for this image
-        };
       });
 
       console.log('Starting report generation with:', {
@@ -555,16 +663,16 @@ export default function NewReport() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            bulletPoints,
-            projectId: project?.id,
-            contractName: project?.["Client Name"],
-            location: project?.location,
-            reportId: reportData.id,
-            images: sortedImages,
-            groupOrder: groupOrder, // Include group ordering information
-            modelType: selectedModel
-          }),
+                  body: JSON.stringify({
+          bulletPoints,
+          projectId: project?.id,
+          contractName: project?.["Client Name"],
+          location: project?.location,
+          reportId: reportData.id,
+          images: imagesWithNumbering,
+          groupOrder: groupOrder, // Include group ordering information
+          modelType: selectedModel
+        }),
         }).then(response => {
           console.log('Streaming API response:', response.status);
           return response.json();
@@ -590,7 +698,7 @@ export default function NewReport() {
           projectId: project?.id,
           location: project?.location,
           reportId: reportData.id,
-          images: sortedImages,
+          images: imagesWithNumbering,
           groupOrder: groupOrder, // Include group ordering information
           modelType: selectedModel
         }),
@@ -815,33 +923,69 @@ export default function NewReport() {
           <div style={{ marginBottom: "1rem", display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
             <button 
               type="button"
-              onClick={() => router.push(`/projects/${projectId}/images?mode=select&returnTo=reports`)}
+              onClick={() => {
+                let url = `/projects/${projectId}/images?mode=select&returnTo=reports`;
+                
+                if (selectedImages.length > 0) {
+                  // Only add mode parameters if there are already images loaded
+                  if (isUngroupedMode) {
+                    url += '&ungrouped=true';
+                  } else {
+                    url += '&grouped=true';
+                  }
+                }
+                
+                router.push(url);
+              }}
               className="btn btn-secondary"
               disabled={loading}
+              title="Select photos for your report"
             >
               Select Photos
             </button>
-            {selectedImages.length > 0 && (
-              <>
-                <button 
-                  type="button"
-                  onClick={() => setIsGroupOrderingMode(!isGroupOrderingMode)}
-                  className="btn btn-outline"
-                  disabled={loading}
-                  style={{ 
-                    color: isGroupOrderingMode ? '#fff' : '#0d6efd', 
-                    backgroundColor: isGroupOrderingMode ? '#0d6efd' : 'transparent',
-                    borderColor: '#0d6efd'
-                  }}
-                >
-                  {isGroupOrderingMode ? 'Done Ordering' : 'Order Sections'}
-                </button>
-                <button 
+            <button
+              type="button"
+              onClick={() => router.push(`/reports/new/use-previous?project_id=${projectId}&returnTo=reports`)}
+              className="btn btn-outline"
+              disabled={loading || isUngroupedMode}
+              title={isUngroupedMode ? "Cannot use previous grouped reports when using ungrouped photos" : "Use previous report as template"}
+            >
+              Use Previous
+            </button>
+          </div>
+          {/* Selected Images Display */}
+          {selectedImages.length > 0 && (
+            <div style={{ marginBottom: "2rem" }}>
+              <h2 style={{ marginBottom: "1rem" }}>
+                {isUngroupedMode ? 'Ungrouped Report Images' : 'Report Images'} ({selectedImages.length})
+              </h2>
+              {!isUngroupedMode && (
+                <div style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center',
+                  marginBottom: "1rem"
+                }}>
+                  <button 
+                    type="button"
+                    onClick={() => setIsGroupOrderingMode(!isGroupOrderingMode)}
+                    className="btn btn-outline"
+                    disabled={loading}
+                    style={{ 
+                      color: isGroupOrderingMode ? '#fff' : '#0d6efd', 
+                      backgroundColor: isGroupOrderingMode ? '#0d6efd' : 'transparent',
+                      borderColor: '#0d6efd'
+                    }}
+                  >
+                    {isGroupOrderingMode ? 'Done Ordering' : 'Order Sections'}
+                  </button>
+                                  <button 
                   type="button"
                   onClick={() => {
                     setSelectedImages([]);
                     setGroupNumberingStates({});
                     setGroupOrder([]);
+                    setIsUngroupedMode(false);
                     localStorage.removeItem(`report-groups-${projectId}`);
                   }}
                   className="btn btn-outline"
@@ -850,127 +994,190 @@ export default function NewReport() {
                 >
                   Clear All Groups
                 </button>
-              </>
-            )}
-          </div>
-          {/* Selected Images Display - Grouped */}
-          {selectedImages.length > 0 && (
-            <div style={{ marginBottom: "2rem" }}>
-              <h2 style={{ marginBottom: "1rem" }}>Report Images ({selectedImages.length})</h2>
-              <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                {sortedGroupEntries.map(([groupName, images]) => (
-                  <div key={groupName} style={{ marginBottom: "1rem" }}>
-                    {/* Group Header with Ordering Controls */}
-                    <div style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "1rem",
-                      marginBottom: "0.5rem"
-                    }}>
-                      {/* Ordering Controls */}
-                      {isGroupOrderingMode && (
-                        <div style={{ display: "flex", gap: "0.25rem" }}>
-                          <button
-                            onClick={() => moveGroupUp(groupName)}
-                            className="btn btn-outline btn-sm"
-                            disabled={getGroupOrder(groupName) <= 1}
-                            style={{ 
-                              fontSize: "0.75rem", 
-                              padding: "0.25rem 0.5rem",
-                              opacity: getGroupOrder(groupName) > 1 ? 1 : 0.5,
-                              cursor: getGroupOrder(groupName) > 1 ? 'pointer' : 'not-allowed'
-                            }}
-                            title="Move section up"
-                          >
-                            ↑
-                          </button>
-                          <button
-                            onClick={() => moveGroupDown(groupName)}
-                            className="btn btn-outline btn-sm"
-                            disabled={getGroupOrder(groupName) >= Math.max(...groupOrder.map(go => go.order))}
-                            style={{ 
-                              fontSize: "0.75rem", 
-                              padding: "0.25rem 0.5rem",
-                              opacity: getGroupOrder(groupName) < Math.max(...groupOrder.map(go => go.order)) ? 1 : 0.5,
-                              cursor: getGroupOrder(groupName) < Math.max(...groupOrder.map(go => go.order)) ? 'pointer' : 'not-allowed'
-                            }}
-                            title="Move section down"
-                          >
-                            ↓
-                          </button>
-                        </div>
-                      )}
-                      
-                      {/* Group Component */}
-                      <div style={{ flex: 1 }}>
-                        <CollapsibleGroup
-                          groupName={`${getGroupOrder(groupName) > 0 ? `Section ${getGroupOrder(groupName)}: ` : ''}${groupName}`}
-                          itemCount={images.length}
-                          showSelectionControls={false}
-                          isFullySelected={false}
-                          isPartiallySelected={false}
-                          onGroupSelectionToggle={() => {}}
-                          defaultOpen={false}
-                        >
-                          {/* Numbering Controls */}
-                          <div style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            marginBottom: "1rem",
-                            padding: "0.5rem",
-                            background: "var(--color-bg-secondary)",
-                            borderRadius: "0.25rem"
-                          }}>
-                            <span style={{ fontSize: "0.875rem", fontWeight: "500" }}>
-                              {groupNumberingStates[groupName] ? "Numbering Enabled" : "Numbering Disabled"}
-                            </span>
+                </div>
+              )}
+              {isUngroupedMode && (
+                <div style={{ 
+                  display: 'flex', 
+                  justifyContent: 'flex-end', 
+                  alignItems: 'center',
+                  marginBottom: "1rem"
+                }}>
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setSelectedImages([]);
+                      setIsUngroupedMode(false);
+                      setGroupNumberingStates({});
+                      setGroupOrder([]);
+                      localStorage.removeItem(`report-groups-${projectId}`);
+                    }}
+                    className="btn btn-outline"
+                    disabled={loading}
+                    style={{ color: '#dc3545', borderColor: '#dc3545' }}
+                  >
+                    Clear All Images
+                  </button>
+                </div>
+              )}
+              {/* Display logic based on mode */}
+              {!isUngroupedMode ? (
+                // Grouped mode display
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                  {sortedGroupEntries.map(([groupName, images]) => (
+                    <div key={groupName} style={{ marginBottom: "1rem" }}>
+                      {/* Group Header with Ordering Controls */}
+                      <div style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "1rem",
+                        marginBottom: "0.5rem"
+                      }}>
+                        {/* Ordering Controls */}
+                        {isGroupOrderingMode && (
+                          <div style={{ display: "flex", gap: "0.25rem" }}>
                             <button
-                              onClick={() => startNumberingMode(groupName)}
+                              onClick={() => moveGroupUp(groupName)}
                               className="btn btn-outline btn-sm"
-                              style={{ fontSize: "0.75rem" }}
+                              disabled={getGroupOrder(groupName) <= 1}
+                              style={{ 
+                                fontSize: "0.75rem", 
+                                padding: "0.25rem 0.5rem",
+                                opacity: getGroupOrder(groupName) > 1 ? 1 : 0.5,
+                                cursor: getGroupOrder(groupName) > 1 ? 'pointer' : 'not-allowed'
+                              }}
+                              title="Move section up"
                             >
-                              {groupNumberingStates[groupName] ? "Re-number Photos" : "Number Photos"}
+                              ↑
+                            </button>
+                            <button
+                              onClick={() => moveGroupDown(groupName)}
+                              className="btn btn-outline btn-sm"
+                              disabled={getGroupOrder(groupName) >= Math.max(...groupOrder.map(go => go.order))}
+                              style={{ 
+                                fontSize: "0.75rem", 
+                                padding: "0.25rem 0.5rem",
+                                opacity: getGroupOrder(groupName) < Math.max(...groupOrder.map(go => go.order)) ? 1 : 0.5,
+                                cursor: getGroupOrder(groupName) < Math.max(...groupOrder.map(go => go.order)) ? 'pointer' : 'not-allowed'
+                              }}
+                              title="Move section down"
+                            >
+                              ↓
                             </button>
                           </div>
-                      
-                      {/* Numbering Mode UI */}
-                      {isInNumberingMode(groupName) && (
-                        <NumberingMode
-                          groupName={groupName}
-                          selectedCount={numberingSelection.length}
-                          onComplete={() => completeNumbering(groupName)}
-                          onCancel={cancelNumbering}
-                        />
-                      )}
-                      <div style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-                        gap: "1rem",
-                        padding: "1rem",
-                        border: "1px solid var(--color-border)",
-                        borderRadius: "0.5rem",
-                        backgroundColor: "var(--color-bg-card)"
-                      }}>
-                        {images.map((image, index) => (
-                          <NumberedImageCard
-                            key={image.id}
-                            image={image}
+                        )}
+                        
+                        {/* Group Component */}
+                        <div style={{ flex: 1 }}>
+                          <CollapsibleGroup
+                            groupName={`${getGroupOrder(groupName) > 0 ? `Section ${getGroupOrder(groupName)}: ` : ''}${groupName}`}
+                            itemCount={images.length}
+                            showSelectionControls={false}
+                            isFullySelected={false}
+                            isPartiallySelected={false}
+                            onGroupSelectionToggle={() => {}}
+                            defaultOpen={false}
+                          >
+                            {/* Numbering Controls */}
+                            <div style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              marginBottom: "1rem",
+                              padding: "0.5rem",
+                              background: "var(--color-bg-secondary)",
+                              borderRadius: "0.25rem"
+                            }}>
+                              <span style={{ fontSize: "0.875rem", fontWeight: "500" }}>
+                                {groupNumberingStates[groupName] ? "Numbering Enabled" : "Numbering Disabled"}
+                              </span>
+                              <button
+                                onClick={() => startNumberingMode(groupName)}
+                                className="btn btn-outline btn-sm"
+                                style={{ fontSize: "0.75rem" }}
+                              >
+                                {groupNumberingStates[groupName] ? "Re-number Photos" : "Number Photos"}
+                              </button>
+                            </div>
+                        
+                        {/* Numbering Mode UI */}
+                        {isInNumberingMode(groupName) && (
+                          <NumberingMode
                             groupName={groupName}
-                            isNumbering={isInNumberingMode(groupName)}
-                            isNumberingSelected={isNumberingSelected(image.id)}
-                            numberingIndex={getNumberingIndex(image.id)}
-                            isNumberingEnabled={groupNumberingStates[groupName]}
-                            onNumberingSelection={handleNumberingSelection}
+                            selectedCount={numberingSelection.length}
+                            onComplete={() => completeNumbering(groupName)}
+                            onCancel={cancelNumbering}
                           />
-                        ))}
-                      </div>
-                        </CollapsibleGroup>
+                        )}
+                        <div style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                          gap: "1rem",
+                          padding: "1rem",
+                          border: "1px solid var(--color-border)",
+                          borderRadius: "0.5rem",
+                          backgroundColor: "var(--color-bg-card)"
+                        }}>
+                          {images.map((image, index) => (
+                            <NumberedImageCard
+                              key={image.id}
+                              image={image}
+                              groupName={groupName}
+                              isNumbering={isInNumberingMode(groupName)}
+                              isNumberingSelected={isNumberingSelected(image.id)}
+                              numberingIndex={getNumberingIndex(image.id)}
+                              isNumberingEnabled={groupNumberingStates[groupName]}
+                              onNumberingSelection={handleNumberingSelection}
+                            />
+                          ))}
+                        </div>
+                          </CollapsibleGroup>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                // Ungrouped mode display - direct grid without collapsible headers
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                  gap: "1rem",
+                  padding: "1rem",
+                  border: "1px solid var(--color-border)",
+                  borderRadius: "0.5rem",
+                  backgroundColor: "var(--color-bg-card)"
+                }}>
+                  {selectedImages.map((image, index) => (
+                    <div key={image.id} style={{
+                      border: "1px solid var(--color-border)",
+                      borderRadius: "0.5rem",
+                      overflow: "hidden",
+                      backgroundColor: "var(--color-bg)"
+                    }}>
+                      <img
+                        src={image.url}
+                        alt={image.description || `Image ${index + 1}`}
+                        style={{
+                          width: "100%",
+                          height: "150px",
+                          objectFit: "cover"
+                        }}
+                      />
+                      <div style={{ padding: "0.5rem" }}>
+                        <p style={{ 
+                          fontSize: "0.875rem", 
+                          fontWeight: "500",
+                          margin: "0",
+                          textAlign: "center"
+                        }}>
+                          Photo {index + 1}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

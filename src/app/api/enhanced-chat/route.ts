@@ -53,7 +53,7 @@ const AGENT_PROMPTS = {
     OPTION A: If the user asks for a major change (e.g., "reformat the report to be more professional"), provide the COMPLETE updated report in "fullUpdatedContent"
     OPTION B: If the user asks for a simple text change (e.g., "reword section 1.1 to include X and Y"), provide just the updated section in "partialUpdatedContent"
     OPTION C: If the user asks to remove content (e.g., "remove the first image"), analyze the content first to find the exact sections to remove, then use "removeContent"
-  - Each bullet that is for an image must independently reference the image using the placeholder format [IMAGE:<image_number>:<GROUP_NAME>].
+  - Each bullet that is for an image must independently reference the image using the placeholder format [IMAGE:<image_number>:<GROUP_NAME>] for grouped images or [IMAGE:<image_number>] for ungrouped images.
   - ALWAYS analyze the current report content before making removal decisions - do not guess section names
   - REMEMBER: Images are displayed in the report only when there are bullet points that reference them. Removing all bullet points for an image effectively removes the image from the rendered report.
   - IMPORTANT: If relevant project knowledge is provided in the context, use it to answer questions accurately and provide factual information about specifications, codes, and requirements
@@ -102,13 +102,13 @@ const AGENT_PROMPTS = {
   
   #IMPORTANT FOR REMOVAL OPERATIONS:
   - When asked to remove images or content, FIRST analyze the current report content to identify:
-    * Which sections contain image references [IMAGE:X:Y]
+    * Which sections contain image references [IMAGE:X:Y] or [IMAGE:X]
     * Which sections contain the text associated with those images
     * The exact section names/numbers that need to be removed
   - Look for patterns like "1.1", "1.2", "2.1", etc. or named sections like "GENERAL:", "OBSERVATIONS:", etc.
   - Only remove sections that actually contain the requested content
   - If you cannot find the exact section, use "fullUpdatedContent" to rewrite the entire report without the requested content
-  - IMPORTANT: When you remove all bullet points that reference an image (e.g., all lines containing [IMAGE:1:ROOF]), the image will automatically be removed from the rendered report since there are no bullet points to display it
+  - IMPORTANT: When you remove all bullet points that reference an image (e.g., all lines containing [IMAGE:1:ROOF] or [IMAGE:1]), the image will automatically be removed from the rendered report since there are no bullet points to display it
   
   #EXAMPLES:
   - User asks: "Reword the introduction" → 
@@ -135,7 +135,7 @@ const AGENT_PROMPTS = {
       "removeContent": ["1.1", "1.2", "1.3"],
       "embeddingResults": null
     }
-    Note: The AI should analyze the content to find which section actually contains the first image reference [IMAGE:1:...]. When all bullet points referencing an image are removed, the image will not be displayed in the rendered report.
+    Note: The AI should analyze the content to find which section actually contains the first image reference [IMAGE:1:...] or [IMAGE:1]. When all bullet points referencing an image are removed, the image will not be displayed in the rendered report.
   - User asks: "Remove sections 2.1 and 2.2" → 
     {
       "message": "I've removed sections 2.1 and 2.2 from the report.",
@@ -559,7 +559,7 @@ FOR REMOVAL OPERATIONS: Analyze the current report content to find the exact sec
 FOR SPECS: If relevant project knowledge is provided in previous chat messages from another agent, use it to write factual information about specifications, codes, and requirements.
 
 CRITICAL: 
-**Each bullet that is for an image must independently reference the image using the placeholder format [IMAGE:<image_number>:<GROUP_NAME>].**
+**Each bullet that is for an image must independently reference the image using the placeholder format [IMAGE:<image_number>:<GROUP_NAME>] for grouped images or [IMAGE:<image_number>] for ungrouped images.**
 Keep the "message" field SHORT and conversational. 
 Use "fullUpdatedContent" for major rewrites. Use "partialUpdatedContent" for simple text changes. Use "removeContent" when user asks to remove sections/images.`;
         break;

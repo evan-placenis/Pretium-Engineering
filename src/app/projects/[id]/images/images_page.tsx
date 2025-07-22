@@ -77,6 +77,8 @@ export default function ProjectImagesPage() {
   /** Whether we're in selection mode for reports */
   const isSelectionMode = searchParams.get('mode') === 'select';
   const returnTo = searchParams.get('returnTo');
+  const ungroupedMode = searchParams.get('ungrouped');
+  const groupedMode = searchParams.get('grouped');
   
   // ===== SELECTION STATE =====
   /** Selected image IDs for report creation */
@@ -87,6 +89,21 @@ export default function ProjectImagesPage() {
   const [imagesWithGroups, setImagesWithGroups] = useState<{ [imageId: string]: string }>({});
   /** Current selection mode for group creation */
   const [selectionMode, setSelectionMode] = useState<'disabled' | 'group' | 'ungrouped'>('disabled');
+
+  // ===== SELECTION MODE INITIALIZATION =====
+  
+  /**
+   * Initialize selection mode based on URL parameters
+   */
+  useEffect(() => {
+    if (isSelectionMode && ungroupedMode === 'true') {
+      setSelectionMode('ungrouped');
+    } else if (isSelectionMode && groupedMode === 'true') {
+      setSelectionMode('group');
+    } else if (isSelectionMode) {
+      setSelectionMode('disabled'); // Default to disabled, user will choose
+    }
+  }, [isSelectionMode, ungroupedMode, groupedMode]);
 
   // ===== DATA LOADING =====
 
@@ -294,7 +311,15 @@ export default function ProjectImagesPage() {
       // Extract the file path from the URL
       const url = new URL(imageData.url);
       const pathParts = url.pathname.split('/');
-      const storagePath = pathParts.slice(-2).join('/'); // Get the last two parts (project-images/filename)
+      // Find the index of 'project-images' and get everything after it
+      const projectImagesIndex = pathParts.findIndex(part => part === 'project-images');
+      let storagePath;
+      if (projectImagesIndex !== -1) {
+        storagePath = pathParts.slice(projectImagesIndex + 1).join('/');
+      } else {
+        // Fallback: try to extract from the end if the above doesn't work
+        storagePath = pathParts.slice(-2).join('/');
+      }
       
       // Delete the file from Supabase Storage
       const { error: storageError } = await supabase.storage
@@ -453,7 +478,7 @@ export default function ProjectImagesPage() {
   const toggleImageSelection = (imageId: string) => {
     // Only allow selection if we're in a selection mode
     if (selectionMode === 'disabled') {
-      setError('Please choose "Create Group" or "Upload Ungrouped Photos" before selecting images');
+      setError('Please choose "Create Group" or "Select Ungrouped Photos" before selecting images');
       return;
     }
     
@@ -474,7 +499,7 @@ export default function ProjectImagesPage() {
   const toggleGroupSelection = (groupName: string) => {
     // Only allow selection if we're in a selection mode
     if (selectionMode === 'disabled') {
-      setError('Please choose "Create Group" or "Upload Ungrouped Photos" before selecting images');
+      setError('Please choose "Create Group" or "Select Ungrouped Photos" before selecting images');
       return;
     }
     
@@ -527,13 +552,14 @@ export default function ProjectImagesPage() {
   }
 
   return (
-    <div className="page-content" style={{ background: 'var(--color-bg)', minHeight: '100vh', padding: '2rem 2rem' }}>
+    <div className="page-content" style={{ background: 'var(--color-bg)', minHeight: '100vh', padding: '4rem 2rem' }}>
       {/* Navigation header */}
-      <header style={{ marginBottom: "2rem" }}>
-        <div style={{ marginBottom: "0.5rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
+      <header style={{ marginBottom: "1rem" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          {/* Back button - always show */}
           <div style={{ display: "flex" }}>
             <Link
-              href={isSelectionMode && returnTo === 'reports' ? `/reports/new?project_id=${projectId}` : `/projects/${project.id}`}
+              href={isSelectionMode ? `/reports/new?project_id=${projectId}` : `/projects/${project.id}`}
               className="text-accent"
               style={{ marginRight: "0.5rem", fontSize: "0.875rem" }}
             >
@@ -542,23 +568,23 @@ export default function ProjectImagesPage() {
           </div>
 
           {/* Page title and project info */}
-        <div style={{ marginBottom: "1.5rem" }}>
-            <h1 style={{ marginTop: "1.5rem", marginBottom: "0.5rem" }}>
-            {isSelectionMode ? 'Organize Images for Report' : `${project.project_name ? project.project_name : 'Project'} Images`}
+          <div style={{ marginBottom: "0.5rem" }}>
+            <h1 style={{ marginBottom: "0.25rem" }}>
+              {isSelectionMode ? 'Organize Images for Report' : `${project.project_name ? project.project_name : 'Project'} Images`}
             </h1>
             {isSelectionMode && (
-            <p style={{ color: "var(--color-text-secondary)", fontSize: "1rem" }}>
-                Create groups or upload ungrouped photos to start selecting images
-            </p>
+              <p style={{ color: "var(--color-text-secondary)", fontSize: "0.875rem", marginBottom: "0.5rem" }}>
+                Create groups or select ungrouped photos to start selecting images
+              </p>
             )}
-        </div>
+          </div>
           
           {/* Selection mode controls */}
           {isSelectionMode && (
             <div style={{ 
               display: "flex", 
               flexDirection: "column", 
-              gap: "0.75rem"
+              gap: "0.5rem"
             }}>
               {/* Group Creation Panel */}
               <GroupCreationPanel
@@ -570,9 +596,9 @@ export default function ProjectImagesPage() {
                 projectId={projectId || ''}
                 returnTo={returnTo || ''}
                 onError={setError}
+                isUngroupedMode={ungroupedMode === 'true'}
+                isGroupedMode={groupedMode === 'true'}
               />
-              
-              
             </div>
           )}
         </div>
@@ -590,7 +616,7 @@ export default function ProjectImagesPage() {
       )}
 
       {/* Main content card */}
-      <div className="card" style={{ marginBottom: "1.5rem" }}>
+      <div className="card" style={{ marginBottom: "1rem" }}>
         <div className="card-body">
           {/* Header with upload button */}
           {!isSelectionMode && (
@@ -598,7 +624,7 @@ export default function ProjectImagesPage() {
               display: 'flex', 
               justifyContent: 'space-between', 
               alignItems: 'center', 
-              marginBottom: '1.5rem' 
+              marginBottom: '1rem' 
             }}>
               <button
                 onClick={() => setShowUploadModal(true)}

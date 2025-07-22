@@ -23,6 +23,10 @@ interface GroupCreationPanelProps {
   returnTo: string;
   /** Callback to show error message */
   onError: (message: string) => void;
+  /** Whether we're in ungrouped mode (from URL parameter) */
+  isUngroupedMode?: boolean;
+  /** Whether we're in grouped mode (from URL parameter) */
+  isGroupedMode?: boolean;
 }
 
 /**
@@ -45,7 +49,9 @@ export default function GroupCreationPanel({
   selectionMode,
   projectId,
   returnTo,
-  onError
+  onError,
+  isUngroupedMode = false,
+  isGroupedMode = false
 }: GroupCreationPanelProps) {
   // State for group management
   const [currentGroupName, setCurrentGroupName] = useState<string>('');
@@ -71,8 +77,9 @@ export default function GroupCreationPanel({
     if (selectedImageIds.size === 0) {
       setImagesWithGroups({});
       setCreatedGroups([]);
-      setCurrentGroupName('');
-      setShowGroupInput(false);
+      // Don't clear the group name when deselecting images
+      // setCurrentGroupName('');
+      // setShowGroupInput(false);
     }
   }, [selectedImageIds]);
 
@@ -161,16 +168,28 @@ export default function GroupCreationPanel({
             <button
               onClick={() => onSelectionModeChange('group')}
               className="btn btn-primary"
-              style={{ fontSize: "0.875rem", padding: "0.75rem 1rem" }}
+              style={{ 
+                fontSize: "0.875rem", 
+                padding: "0.75rem 1rem",
+                opacity: isUngroupedMode ? 0.6 : 1,
+                cursor: isUngroupedMode ? 'not-allowed' : 'pointer'
+              }}
+              disabled={isUngroupedMode}
+              title={isUngroupedMode ? "Cannot create groups when using ungrouped photos" : "Create groups and organize photos"}
             >
               📁 Create Group
             </button>
             <button
               onClick={() => onSelectionModeChange('ungrouped')}
               className="btn btn-secondary"
-              style={{ fontSize: "0.875rem", padding: "0.75rem 1rem" }}
-              disabled={true}
-              title="Coming soon"
+              style={{ 
+                fontSize: "0.875rem", 
+                padding: "0.75rem 1rem",
+                opacity: (isGroupedMode || (!isUngroupedMode && selectedImageIds.size > 0)) ? 0.6 : 1,
+                cursor: (isGroupedMode || (!isUngroupedMode && selectedImageIds.size > 0)) ? 'not-allowed' : 'pointer'
+              }}
+              disabled={isGroupedMode || (!isUngroupedMode && selectedImageIds.size > 0)}
+              title={isGroupedMode ? "Cannot use ungrouped photos when using grouped photos" : (!isUngroupedMode && selectedImageIds.size > 0 ? "Cannot switch to ungrouped mode when grouped photos are selected" : "Select photos without grouping or numbering")}
             >
               📤 Upload Ungrouped Photos
             </button>
@@ -298,13 +317,64 @@ export default function GroupCreationPanel({
               Cancel
             </button>
           </div>
-          <p style={{ 
-            fontSize: "0.875rem", 
-            color: "var(--color-text-secondary)",
-            fontStyle: "italic"
-          }}>
-            This feature is coming soon. For now, please use the "Create Group" option.
-          </p>
+          
+          {/* Selection Summary */}
+          {selectedImageIds.size > 0 && (
+            <div style={{
+              padding: "0.75rem",
+              background: "var(--color-bg)",
+              borderRadius: "0.25rem",
+              border: "1px solid var(--color-border)",
+              marginBottom: "1rem"
+            }}>
+              <span style={{ fontSize: "0.875rem", color: "var(--color-text)" }}>
+                📸 {selectedImageIds.size} image{selectedImageIds.size !== 1 ? 's' : ''} selected for ungrouped report
+              </span>
+            </div>
+          )}
+          
+          {/* Help text when no images selected */}
+          {selectedImageIds.size === 0 && (
+            <div style={{
+              padding: "0.75rem",
+              background: "var(--color-bg-secondary)",
+              borderRadius: "0.25rem",
+              border: "1px solid var(--color-border)",
+              marginBottom: "1rem"
+            }}>
+              <span style={{ fontSize: "0.875rem", color: "var(--color-text-secondary)" }}>
+                💡 Select images to add to your report without grouping or numbering
+              </span>
+            </div>
+          )}
+          
+          {/* Done button for ungrouped mode */}
+          {selectedImageIds.size > 0 && (
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <button
+                onClick={() => {
+                  // Get all unique image IDs
+                  const allImageIds = Array.from(selectedImageIds);
+                  const selectedIds = allImageIds.join(',');
+                  
+                  // Navigate back to report page with ungrouped flag
+                  const returnUrl = returnTo === 'reports' 
+                    ? `/reports/new?project_id=${projectId}&selected_images=${selectedIds}&ungrouped=true`
+                    : `/projects/${projectId}`;
+                  
+                  router.push(returnUrl);
+                }}
+                className="btn btn-primary"
+                style={{ 
+                  fontSize: "1rem", 
+                  padding: "0.75rem 2rem",
+                  fontWeight: "600"
+                }}
+              >
+                ✅ Done - Use {selectedImageIds.size} Ungrouped Image{selectedImageIds.size !== 1 ? 's' : ''}
+              </button>
+            </div>
+          )}
         </div>
       )}
 

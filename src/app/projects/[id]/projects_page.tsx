@@ -528,6 +528,11 @@ export default function ProjectPage({ id }: { id: string }) {
           uploadError={error}
           uploadSuccess={knowledgeUploadSuccess}
           projectId={id}
+          // Multiple file upload props
+          handleMultipleFileUpload={knowledgeUpload.handleMultipleFileUpload}
+          multipleUploadProgress={knowledgeUpload.multipleUploadProgress}
+          showMultipleUploadModal={knowledgeUpload.showMultipleUploadModal}
+          setShowMultipleUploadModal={knowledgeUpload.setShowMultipleUploadModal}
         />
 
         <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', marginBottom: '2rem' }}>

@@ -31,6 +31,17 @@ export default function KnowledgeUpload({ projectId, onUploadComplete, onError }
   const [parsedChunks, setParsedChunks] = useState<ParsedChunk[]>([]);
   const [showChunks, setShowChunks] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Multiple file upload state
+  const [multipleFiles, setMultipleFiles] = useState<File[]>([]);
+  const [uploadType, setUploadType] = useState<'spec' | 'building_code'>('spec');
+  const [showMultipleUploadModal, setShowMultipleUploadModal] = useState(false);
+  const [multipleUploadProgress, setMultipleUploadProgress] = useState<{
+    current: number;
+    total: number;
+    currentFileName: string;
+    isProcessing: boolean;
+  } | null>(null);
 
   // Load documents on component mount
   useEffect(() => {
@@ -241,22 +252,169 @@ export default function KnowledgeUpload({ projectId, onUploadComplete, onError }
     return new Date(dateString).toLocaleDateString() + ' ' + new Date(dateString).toLocaleTimeString();
   };
 
-  const handleSpecUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSpecUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      handleFileUpload(file, 'spec');
+      await handleFileUpload(file, 'spec');
     }
     // Reset input
     event.target.value = '';
   };
 
-  const handleBuildingCodeUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBuildingCodeUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      handleFileUpload(file, 'building_code');
+      await handleFileUpload(file, 'building_code');
     }
     // Reset input
     event.target.value = '';
+  };
+
+  // Handle multiple file upload from modal
+  const handleMultipleFileUpload = async (files: File[], uploadType: 'spec' | 'building_code') => {
+    if (files.length === 0) return;
+
+    // Close modal and show progress immediately
+    setShowMultipleUploadModal(false);
+    
+    // Set uploading state to true for the entire batch
+    setUploading(true);
+    
+    // Initialize progress state
+    setMultipleUploadProgress({
+      current: 0,
+      total: files.length,
+      currentFileName: '',
+      isProcessing: false
+    });
+    
+    // Small delay to ensure modal closes and progress shows
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      
+      // Update progress to show current file
+      setMultipleUploadProgress(prev => prev ? {
+        ...prev,
+        current: i + 1,
+        currentFileName: file.name,
+        isProcessing: true
+      } : null);
+      
+      try {
+        console.log(`Starting upload ${i + 1}/${files.length}: ${file.name}`);
+        
+        // Use the existing upload handler but don't let it manage the uploading state
+        // since we're managing it at the batch level
+        await handleFileUploadInternal(file, uploadType);
+        
+        console.log(`Completed upload ${i + 1}/${files.length}: ${file.name}`);
+      } catch (error) {
+        console.error(`Error uploading ${file.name}:`, error);
+        // Continue with next file even if one fails
+      }
+
+      // Small delay between uploads to prevent overwhelming the server
+      if (i < files.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
+    // Clear progress and uploading state after completion
+    setTimeout(() => {
+      setMultipleUploadProgress(null);
+      setUploading(false);
+    }, 2000);
+
+    // Reload documents list
+    await loadDocuments();
+
+    // Call success callback
+    if (onUploadComplete) {
+      onUploadComplete();
+    }
+  };
+
+
+
+  // Internal upload handler that doesn't manage the uploading state
+  const handleFileUploadInternal = async (file: File, fileType: 'spec' | 'building_code') => {
+    if (!projectId) return;
+    
+    try {
+      // 1. Upload file to Supabase storage
+      const filePath = `${projectId}/${Date.now()}-${file.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from('project-knowledge')
+        .upload(filePath, file);
+
+      if (uploadError) {
+        throw new Error(`Upload failed: ${uploadError.message}`);
+      }
+
+      // 2. Insert record into project_knowledge table
+      const { data: insertData, error: dbError } = await supabase
+        .from('project_knowledge')
+        .insert({
+          project_id: projectId,
+          file_name: file.name,
+          file_path: `project-knowledge/${filePath}`,
+          file_type: fileType,
+          file_size: file.size,
+          uploaded_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (dbError) {
+        // If database insert fails, clean up the uploaded file
+        await supabase.storage
+          .from('project-knowledge')
+          .remove([filePath]);
+        throw new Error(`Database insert failed: ${dbError.message}`);
+      }
+
+      const knowledgeId = insertData.id;
+      console.log(`Knowledge record created with ID: ${knowledgeId}`);
+
+      // 3. Process document and generate embeddings if it's a supported file type
+      const fileExtension = file.name.split('.').pop()?.toLowerCase();
+      
+      if (fileExtension === 'docx') {
+        console.log(`Processing ${fileExtension} document and generating embeddings...`);
+        
+        try {
+          // Call the parse-document API directly for embedding processing
+          const response = await fetch('/api/parse-document', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              filePath,
+              fileName: file.name,
+              projectId,
+              knowledgeId,
+              skipEmbeddings: false
+            }),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Document processing failed');
+          }
+
+          console.log(`${fileExtension} processing and embedding generation completed successfully`);
+        } catch (parseError) {
+          console.error(`${fileExtension} processing and embedding generation failed:`, parseError);
+        }
+      }
+
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      throw error; // Re-throw so the calling function can handle it
+    }
   };
 
   const handleShowChunks = (document: KnowledgeDocument) => {
@@ -269,8 +427,10 @@ export default function KnowledgeUpload({ projectId, onUploadComplete, onError }
   return {
     handleSpecUpload,
     handleBuildingCodeUpload,
+    handleMultipleFileUpload,
     uploading,
     uploadProgress,
+    multipleUploadProgress,
     documents,
     selectedDocument,
     parsedChunks,
@@ -279,6 +439,9 @@ export default function KnowledgeUpload({ projectId, onUploadComplete, onError }
     formatFileSize,
     formatDate,
     deleteDocument,
-    handleShowChunks
+    handleShowChunks,
+    // Multiple file upload state
+    showMultipleUploadModal,
+    setShowMultipleUploadModal
   };
 } 

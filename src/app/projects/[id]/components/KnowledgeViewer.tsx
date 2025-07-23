@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import MultipleFileUploadModal from './MultipleFileUploadModal';
 
 interface KnowledgeDocument {
   id: string;
@@ -36,6 +37,16 @@ interface KnowledgeViewerProps {
   uploadError: string | null;
   uploadSuccess: string | null;
   projectId: string;
+  // Multiple file upload props
+  handleMultipleFileUpload?: (files: File[], uploadType: 'spec' | 'building_code') => Promise<void>;
+  multipleUploadProgress?: {
+    current: number;
+    total: number;
+    currentFileName: string;
+    isProcessing: boolean;
+  } | null;
+  showMultipleUploadModal?: boolean;
+  setShowMultipleUploadModal?: (show: boolean) => void;
 }
 
 export default function KnowledgeViewer({
@@ -53,65 +64,24 @@ export default function KnowledgeViewer({
   uploading,
   uploadError,
   uploadSuccess,
-  projectId
+  projectId,
+  // Multiple file upload props
+  handleMultipleFileUpload,
+  multipleUploadProgress,
+  showMultipleUploadModal = false,
+  setShowMultipleUploadModal
 }: KnowledgeViewerProps) {
   const [selectedChunk, setSelectedChunk] = useState<number | null>(null);
-  const [showTestModal, setShowTestModal] = useState(false);
-  const [testQuery, setTestQuery] = useState('');
-  const [testResults, setTestResults] = useState<any[]>([]);
-  const [testing, setTesting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
 
-  const handleTestSearch = async () => {
-    if (!testQuery.trim()) return;
-    setTesting(true);
-    try {
-      const res = await fetch('/api/test-embedding-search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, query: testQuery, limit: 5 }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setTestResults(data.results || []);
-    } catch (error) {
-      console.error('Test search failed:', error);
-      setTestResults([]);
-    } finally {
-      setTesting(false);
-    }
-  };
 
-  const runDefaultTests = async () => {
-    setTesting(true);
-    try {
-      const res = await fetch('/api/test-embedding-search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, runDefaultTests: true }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      
-      // Log results to console for debugging
-      console.log('=== DEFAULT TESTS COMPLETED ===');
-      data.testResults.forEach((testResult: any) => {
-        if (testResult.success) {
-          console.log(`✅ "${testResult.query}": ${testResult.results.length} results`);
-        } else {
-          console.error(`❌ "${testResult.query}": ${testResult.error}`);
-        }
-      });
-    } catch (error) {
-      console.error('Default tests failed:', error);
-    } finally {
-      setTesting(false);
-    }
-  };
+
+
 
   if (documents.length === 0) {
     return (
-      <div className="card" style={{ marginBottom: "2rem" }}>
+      <>
+        <div className="card" style={{ marginBottom: "2rem" }}>
         <div className="card-body">
           <div style={{ textAlign: "center", padding: "2rem" }}>
             <div style={{ width: '80px', height: '80px', margin: '0 auto 1.5rem', opacity: 0.6 }}>
@@ -138,7 +108,7 @@ export default function KnowledgeViewer({
                 </div>
               )}
               
-              <div>
+              {/* <div> TO BE TAKEDN OUT LATER !!!
                 <input
                   type="file"
                   accept=".docx"
@@ -171,6 +141,39 @@ export default function KnowledgeViewer({
                 >
                   {uploading ? 'Uploading...' : '🏗️ Upload Building Codes'}
                 </label>
+              </div> */}
+              
+              {/* Multiple file upload option */}
+              <div>
+                <button
+                  onClick={() => setShowMultipleUploadModal?.(true)}
+                  className={`btn btn-primary ${uploading ? 'disabled' : ''}`} 
+                  style={{ 
+                    width: '100%',
+                    position: 'relative'
+                  }}
+                  disabled={uploading}
+                >
+                  {uploading ? (
+                    <>
+                      <span style={{ opacity: 0.7 }}>📁 Processing Multiple Files...</span>
+                      <div style={{
+                        position: 'absolute',
+                        top: '50%',
+                        right: '1rem',
+                        transform: 'translateY(-50%)',
+                        width: '16px',
+                        height: '16px',
+                        border: '2px solid transparent',
+                        borderTop: '2px solid currentColor',
+                        borderRadius: '50%',
+                        animation: 'spin 1s linear infinite'
+                      }} />
+                    </>
+                  ) : (
+                    '📁 Upload Files To AI Knowledge'
+                  )}
+                </button>
               </div>
             </div>
             
@@ -180,6 +183,137 @@ export default function KnowledgeViewer({
           </div>
         </div>
       </div>
+
+      {/* Multiple File Upload Progress Overlay */}
+      {multipleUploadProgress && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '8px',
+            padding: '2rem',
+            maxWidth: '500px',
+            width: '90%',
+            textAlign: 'center',
+            boxShadow: '0 10px 25px rgba(0, 0, 0, 0.3)'
+          }}>
+            {/* Animated Loading Icon */}
+            <div style={{
+              width: '60px',
+              height: '60px',
+              margin: '0 auto 1.5rem',
+              position: 'relative'
+            }}>
+              <div style={{
+                width: '100%',
+                height: '100%',
+                border: '4px solid #f3f3f3',
+                borderTop: '4px solid #2b579a',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite'
+              }} />
+              <div style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                fontSize: '1.5rem'
+              }}>
+                📁
+              </div>
+            </div>
+            
+            <h3 style={{ 
+              marginBottom: '1rem', 
+              fontSize: '1.2rem',
+              color: 'var(--color-text)'
+            }}>
+              Uploading Multiple Files
+            </h3>
+            
+            {/* Progress Bar */}
+            <div style={{
+              width: '100%',
+              height: '8px',
+              backgroundColor: '#f3f3f3',
+              borderRadius: '4px',
+              marginBottom: '1rem',
+              overflow: 'hidden'
+            }}>
+              <div style={{
+                width: `${(multipleUploadProgress.current / multipleUploadProgress.total) * 100}%`,
+                height: '100%',
+                backgroundColor: '#2b579a',
+                borderRadius: '4px',
+                transition: 'width 0.3s ease'
+              }} />
+            </div>
+            
+            {/* Progress Text */}
+            <div style={{ marginBottom: '0.5rem' }}>
+              <span style={{ 
+                fontSize: '1rem', 
+                fontWeight: '600',
+                color: 'var(--color-primary)'
+              }}>
+                {multipleUploadProgress.current}
+              </span>
+              <span style={{ fontSize: '1rem', color: 'var(--color-text-lighter)' }}>
+                {' '}of {multipleUploadProgress.total} files
+              </span>
+            </div>
+            
+            {/* Current File Name */}
+            {multipleUploadProgress.currentFileName && (
+              <div style={{
+                fontSize: '0.875rem',
+                color: 'var(--color-text-lighter)',
+                marginBottom: '1rem',
+                padding: '0.5rem',
+                backgroundColor: 'var(--color-background-hover)',
+                borderRadius: '4px',
+                border: '1px solid var(--color-border)'
+              }}>
+                📄 Currently uploading: <strong>{multipleUploadProgress.currentFileName}</strong>
+              </div>
+            )}
+            
+            {/* Status Message */}
+            <div style={{
+              fontSize: '0.875rem',
+              color: 'var(--color-text-lighter)',
+              fontStyle: 'italic'
+            }}>
+              {multipleUploadProgress.isProcessing ? 'Processing and generating embeddings...' : 'Preparing upload...'}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Multiple file upload modal */}
+      {showMultipleUploadModal && setShowMultipleUploadModal && handleMultipleFileUpload && (
+        <MultipleFileUploadModal
+          isOpen={showMultipleUploadModal}
+          onClose={() => setShowMultipleUploadModal(false)}
+          onUpload={handleMultipleFileUpload}
+          loading={uploading}
+          progress={multipleUploadProgress ? 
+            `Processing ${multipleUploadProgress.current}/${multipleUploadProgress.total}: ${multipleUploadProgress.currentFileName}` : 
+            ''
+          }
+        />
+      )}
+      </>
     );
   }
 
@@ -239,14 +373,14 @@ export default function KnowledgeViewer({
                   onChange={onSpecUpload}
                   disabled={uploading}
                 />
-                <label 
+                {/* <label TO BE TAKEN OUT LATER !!!  - ALONG WITH ITS CORRESPONDING CODE
                   htmlFor="spec-upload-header" 
                   className={`btn btn-secondary btn-sm ${uploading ? 'disabled' : ''}`}
                   style={{ fontSize: '0.75rem', padding: '0.5rem 0.75rem' }}
                 >
                   {uploading ? '⏳' : '📋 Spec'}
-                </label>
-                <input
+                </label> */}
+                {/* <input
                   type="file"
                   accept=".docx"
                   style={{ display: 'none' }}
@@ -260,16 +394,41 @@ export default function KnowledgeViewer({
                   style={{ fontSize: '0.75rem', padding: '0.5rem 0.75rem' }}
                 >
                   {uploading ? '⏳' : '🏗️ Codes'}
-                </label>
-                {/* Test Search Button */}
+                </label> */}
+                
+                {/* Multiple file upload button */}
                 <button
-                  onClick={() => setShowTestModal(true)}
-                  className="btn btn-primary btn-sm"
-                  style={{ fontSize: '0.75rem', padding: '0.5rem 0.75rem' }}
-                  disabled={testing}
+                  onClick={() => setShowMultipleUploadModal?.(true)}
+                  className={`btn btn-primary btn-sm ${uploading ? 'disabled' : ''}`}
+                  style={{ 
+                    fontSize: '0.75rem', 
+                    padding: '0.5rem 0.75rem',
+                    position: 'relative'
+                  }}
+                  disabled={uploading}
                 >
-                  {testing ? '⏳' : '🧪 Test Search'}
+                  {uploading ? (
+                    <>
+                      <span style={{ opacity: 0.7 }}>📁</span>
+                      <div style={{
+                        position: 'absolute',
+                        top: '50%',
+                        right: '0.25rem',
+                        transform: 'translateY(-50%)',
+                        width: '12px',
+                        height: '12px',
+                        border: '2px solid transparent',
+                        borderTop: '2px solid currentColor',
+                        borderRadius: '50%',
+                        animation: 'spin 1s linear infinite'
+                      }} />
+                    </>
+                  ) : (
+                    'Upload'
+                  )}
                 </button>
+                
+
               </div>
             </div>
           </div>
@@ -600,146 +759,140 @@ export default function KnowledgeViewer({
         </div>
       </div>
 
-      {/* Test Search Modal */}
-      {showTestModal && (
-        <div className="modal" style={{ display: 'block' }}>
-          <div className="modal-content" style={{ maxWidth: '800px', margin: '2rem auto' }}>
-            <div className="modal-header">
-              <h2>🧪 Test Similarity Search</h2>
-              <button
-                onClick={() => {
-                  setShowTestModal(false);
-                  setTestQuery('');
-                  setTestResults([]);
-                }}
-                className="btn btn-close"
-              >
-                ×
-              </button>
-            </div>
-            <div className="modal-body">
-              <div className="card">
-                <div className="card-body">
-                  <h3 style={{ marginBottom: "1rem" }}>Test Your Knowledge Base</h3>
-                  <p style={{ marginBottom: "1rem" }} className="text-secondary">
-                    Test how well your documents can answer specific queries using semantic search.
-                  </p>
-                  
-                  {/* Quick Test Buttons */}
-                  <div style={{ marginBottom: "1.5rem" }}>
-                    <h4 style={{ marginBottom: "0.5rem" }}>Quick Tests:</h4>
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      {[
-                        "roof installation requirements",
-                        "safety procedures",
-                        "material specifications",
-                        "quality control standards",
-                        "ASTM standards",
-                        "building codes"
-                      ].map((query) => (
-                        <button
-                          key={query}
-                          onClick={() => setTestQuery(query)}
-                          className="btn btn-secondary btn-sm"
-                          style={{ fontSize: '0.75rem' }}
-                        >
-                          {query}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
 
-                  {/* Custom Query Input */}
-                  <div style={{ marginBottom: "1rem" }}>
-                    <label className="form-label">Custom Query:</label>
-                    <input
-                      type="text"
-                      value={testQuery}
-                      onChange={(e) => setTestQuery(e.target.value)}
-                      placeholder="Enter your test query here..."
-                      className="form-control"
-                      style={{ marginBottom: "0.5rem" }}
-                      onKeyPress={(e) => e.key === 'Enter' && handleTestSearch()}
-                    />
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <button
-                        onClick={handleTestSearch}
-                        disabled={!testQuery.trim() || testing}
-                        className="btn btn-primary"
-                      >
-                        {testing ? '⏳ Testing...' : '🔍 Test Query'}
-                      </button>
-                      <button
-                        onClick={runDefaultTests}
-                        disabled={testing}
-                        className="btn btn-secondary"
-                      >
-                        {testing ? '⏳ Running...' : '🧪 Run Default Tests'}
-                      </button>
-                    </div>
-                  </div>
 
-                  {/* Test Results */}
-                  {testResults.length > 0 && (
-                    <div style={{ marginTop: "1.5rem" }}>
-                      <h4 style={{ marginBottom: "1rem" }}>Test Results:</h4>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                        {testResults.map((result: any, index: number) => (
-                          <div
-                            key={index}
-                            style={{
-                              border: '1px solid var(--color-border)',
-                              borderRadius: '8px',
-                              padding: '1rem',
-                              backgroundColor: 'var(--color-background)'
-                            }}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                              <span style={{ fontWeight: 600, color: 'var(--color-primary)' }}>
-                                Result {index + 1}
-                              </span>
-                              <span style={{ fontSize: '0.875rem', color: 'var(--color-text-lighter)' }}>
-                                {(result.similarity * 100).toFixed(2)}% similar
-                              </span>
-                            </div>
-                            <div style={{ fontSize: '0.875rem', color: 'var(--color-text)' }}>
-                              {result.content_chunk.substring(0, 300)}
-                              {result.content_chunk.length > 300 && '...'}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Instructions */}
-                  <div style={{ marginTop: "1.5rem", padding: "1rem", backgroundColor: 'var(--color-background-hover)', borderRadius: '6px' }}>
-                    <h4 style={{ marginBottom: "0.5rem" }}>💡 How to Test:</h4>
-                    <ul style={{ margin: 0, paddingLeft: '1.5rem', fontSize: '0.875rem' }}>
-                      <li>Click a quick test button or enter your own query</li>
-                      <li>Check the browser console for detailed logs</li>
-                      <li>Try technical terms from your documents</li>
-                      <li>Use synonyms or related concepts</li>
-                    </ul>
-                  </div>
-                </div>
+      {/* Multiple File Upload Progress Overlay */}
+      {multipleUploadProgress && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '8px',
+            padding: '2rem',
+            maxWidth: '500px',
+            width: '90%',
+            textAlign: 'center',
+            boxShadow: '0 10px 25px rgba(0, 0, 0, 0.3)'
+          }}>
+            {/* Animated Loading Icon */}
+            <div style={{
+              width: '60px',
+              height: '60px',
+              margin: '0 auto 1.5rem',
+              position: 'relative'
+            }}>
+              <div style={{
+                width: '100%',
+                height: '100%',
+                border: '4px solid #f3f3f3',
+                borderTop: '4px solid #2b579a',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite'
+              }} />
+              <div style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                fontSize: '1.5rem'
+              }}>
+                📁
               </div>
             </div>
-            <div className="modal-footer">
-              <button
-                onClick={() => {
-                  setShowTestModal(false);
-                  setTestQuery('');
-                  setTestResults([]);
-                }}
-                className="btn btn-secondary"
-              >
-                Close
-              </button>
+            
+            <h3 style={{ 
+              marginBottom: '1rem', 
+              fontSize: '1.2rem',
+              color: 'var(--color-text)'
+            }}>
+              Uploading Multiple Files
+            </h3>
+            
+            {/* Progress Bar */}
+            <div style={{
+              width: '100%',
+              height: '8px',
+              backgroundColor: '#f3f3f3',
+              borderRadius: '4px',
+              marginBottom: '1rem',
+              overflow: 'hidden'
+            }}>
+              <div style={{
+                width: `${(multipleUploadProgress.current / multipleUploadProgress.total) * 100}%`,
+                height: '100%',
+                backgroundColor: '#2b579a',
+                borderRadius: '4px',
+                transition: 'width 0.3s ease'
+              }} />
+            </div>
+            
+            {/* Progress Text */}
+            <div style={{ marginBottom: '0.5rem' }}>
+              <span style={{ 
+                fontSize: '1rem', 
+                fontWeight: '600',
+                color: 'var(--color-primary)'
+              }}>
+                {multipleUploadProgress.current}
+              </span>
+              <span style={{ fontSize: '1rem', color: 'var(--color-text-lighter)' }}>
+                {' '}of {multipleUploadProgress.total} files
+              </span>
+            </div>
+            
+            {/* Current File Name */}
+            {multipleUploadProgress.currentFileName && (
+              <div style={{
+                fontSize: '0.875rem',
+                color: 'var(--color-text-lighter)',
+                marginBottom: '1rem',
+                padding: '0.5rem',
+                backgroundColor: 'var(--color-background-hover)',
+                borderRadius: '4px',
+                border: '1px solid var(--color-border)'
+              }}>
+                📄 Currently uploading: <strong>{multipleUploadProgress.currentFileName}</strong>
+              </div>
+            )}
+            
+            {/* Status Message */}
+            <div style={{
+              fontSize: '0.875rem',
+              color: 'var(--color-text-lighter)',
+              fontStyle: 'italic'
+            }}>
+              {multipleUploadProgress.isProcessing ? 'Processing and generating embeddings...' : 'Preparing upload...'}
             </div>
           </div>
         </div>
       )}
+
+
+
+      {/* Multiple file upload modal */}
+      {showMultipleUploadModal && setShowMultipleUploadModal && handleMultipleFileUpload && (
+        <MultipleFileUploadModal
+          isOpen={showMultipleUploadModal}
+          onClose={() => setShowMultipleUploadModal(false)}
+          onUpload={handleMultipleFileUpload}
+          loading={uploading}
+          progress={multipleUploadProgress ? 
+            `Processing ${multipleUploadProgress.current}/${multipleUploadProgress.total}: ${multipleUploadProgress.currentFileName}` : 
+            ''
+          }
+        />
+      )}
+
     </>
   );
 } 

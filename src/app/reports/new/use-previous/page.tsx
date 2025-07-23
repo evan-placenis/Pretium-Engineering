@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
@@ -29,7 +29,7 @@ interface ReportImage {
   rotation: number;
 }
 
-export default function UsePreviousPage() {
+function UsePreviousPageContent() {
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -410,5 +410,40 @@ export default function UsePreviousPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// Loading fallback component
+function UsePreviousPageLoading() {
+  return (
+    <div className="container page-content">
+      <div style={{ textAlign: 'center', padding: '2rem' }}>
+        <div style={{
+          width: '40px',
+          height: '40px',
+          border: '4px solid #f3f3f3',
+          borderTop: '4px solid #2b579a',
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite',
+          margin: '0 auto 1rem auto'
+        }} />
+        <style jsx>{`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}</style>
+        <p>Loading...</p>
+      </div>
+    </div>
+  );
+}
+
+// Main component with Suspense boundary
+export default function UsePreviousPage() {
+  return (
+    <Suspense fallback={<UsePreviousPageLoading />}>
+      <UsePreviousPageContent />
+    </Suspense>
   );
 } 

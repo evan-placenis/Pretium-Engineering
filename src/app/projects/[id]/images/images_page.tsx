@@ -43,6 +43,8 @@ export default function ProjectImagesPage() {
   const [loading, setLoading] = useState(true);
   /** Loading state for image uploads */
   const [uploadLoading, setUploadLoading] = useState(false);
+  /** Upload progress tracking */
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; batch: number; totalBatches: number } | null>(null);
   /** Error message to display */
   const [error, setError] = useState<string | null>(null);
   /** Success message to display */
@@ -187,8 +189,56 @@ export default function ProjectImagesPage() {
    * @param groupName - Required group name for this batch
    */
   /**
+   * Upload a single file to Supabase Storage and database
+   */
+  const uploadSingleFile = async (file: File, dateTaken: string, useFilenameAsDescription: boolean, groupName: string) => {
+    // Generate unique filename to prevent conflicts
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+    const filePath = `project-images/${projectId}/${fileName}`;
+    
+    // Upload file to Supabase Storage
+    const { error: uploadError } = await supabase.storage
+      .from('project-images')
+      .upload(filePath, file);
+      
+    if (uploadError) throw uploadError;
+    
+    // Get the public URL for the uploaded file
+    const { data: { publicUrl } } = supabase.storage
+      .from('project-images')
+      .getPublicUrl(filePath);
+    
+    // Prepare description (use filename if requested)
+    let description = '';
+    if (useFilenameAsDescription) {
+      description = file.name.replace(/\.[^/.]+$/, '');
+    }
+    
+    // Insert image record into database
+    const { data: imageData, error: insertError } = await supabase
+      .from('project_images')
+      .insert({
+        project_id: projectId,
+        url: publicUrl,
+        description: description,
+        tag: null,
+        user_id: user.id,
+        created_at: dateTaken ? new Date(dateTaken).toISOString() : new Date().toISOString(),
+        group: [groupName] // Store group name as array for consistency
+      })
+      .select()
+      .single();
+      
+    if (insertError) throw insertError;
+    
+    return imageData;
+  };
+
+  /**
    * Shared function to upload files to Supabase Storage and database
    * Handles the common upload logic for both new uploads and adding to groups
+   * Processes files in batches of 10 to avoid server overload
    */
   const uploadFilesToProject = async (
     files: File[], 
@@ -201,54 +251,41 @@ export default function ProjectImagesPage() {
     setUploadLoading(true);
     setError(null);
     
+    const BATCH_SIZE = 10;
+    const totalFiles = files.length;
+    const totalBatches = Math.ceil(totalFiles / BATCH_SIZE);
+    let uploadedCount = 0;
+    
     try {
-      // Process all files in parallel for faster uploads
-      const uploadPromises = files.map(async (file) => {
-        // Generate unique filename to prevent conflicts
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
-        const filePath = `project-images/${projectId}/${fileName}`;
+      // Process files in batches
+      for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+        const startIndex = batchIndex * BATCH_SIZE;
+        const endIndex = Math.min(startIndex + BATCH_SIZE, totalFiles);
+        const batchFiles = files.slice(startIndex, endIndex);
         
-        // Upload file to Supabase Storage
-        const { error: uploadError } = await supabase.storage
-          .from('project-images')
-          .upload(filePath, file);
-          
-        if (uploadError) throw uploadError;
+        // Update progress
+        setUploadProgress({
+          current: uploadedCount,
+          total: totalFiles,
+          batch: batchIndex + 1,
+          totalBatches
+        });
         
-        // Get the public URL for the uploaded file
-        const { data: { publicUrl } } = supabase.storage
-          .from('project-images')
-          .getPublicUrl(filePath);
+        // Process this batch in parallel
+        const batchPromises = batchFiles.map(async (file) => {
+          const result = await uploadSingleFile(file, dateTaken, useFilenameAsDescription, groupName);
+          uploadedCount++;
+          return result;
+        });
         
-        // Prepare description (use filename if requested)
-        let description = '';
-        if (useFilenameAsDescription) {
-          description = file.name.replace(/\.[^/.]+$/, '');
+        // Wait for this batch to complete
+        await Promise.all(batchPromises);
+        
+        // Small delay between batches to prevent server overload
+        if (batchIndex < totalBatches - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
-        
-        // Insert image record into database
-        const { data: imageData, error: insertError } = await supabase
-          .from('project_images')
-          .insert({
-            project_id: projectId,
-            url: publicUrl,
-            description: description,
-            tag: null,
-            user_id: user.id,
-            created_at: dateTaken ? new Date(dateTaken).toISOString() : new Date().toISOString(),
-            group: [groupName] // Store group name as array for consistency
-          })
-          .select()
-          .single();
-          
-        if (insertError) throw insertError;
-        
-        return imageData;
-      });
-      
-      // Wait for all uploads to complete
-      const uploadedImages = await Promise.all(uploadPromises);
+      }
       
       // Refresh the image list to show new uploads
       await loadImages();
@@ -267,6 +304,7 @@ export default function ProjectImagesPage() {
       throw error; // Re-throw so calling functions can handle cleanup
     } finally {
       setUploadLoading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -631,7 +669,11 @@ export default function ProjectImagesPage() {
                 className="btn btn-primary"
                 disabled={uploadLoading}
               >
-                Upload Photos{uploadLoading ? '...' : ''}
+                {uploadLoading && uploadProgress ? (
+                  `Uploading ${uploadProgress.current}/${uploadProgress.total} (Batch ${uploadProgress.batch}/${uploadProgress.totalBatches})`
+                ) : (
+                  `Upload Photos${uploadLoading ? '...' : ''}`
+                )}
               </button>
             </div>
           )}
@@ -824,7 +866,7 @@ export default function ProjectImagesPage() {
         onClose={() => setShowUploadModal(false)}
         onUpload={handleUpload}
         loading={uploadLoading}
-        progress={uploadLoading ? 'Uploading images...' : ''}
+        progress={uploadProgress ? `Uploading ${uploadProgress.current}/${uploadProgress.total} photos (Batch ${uploadProgress.batch}/${uploadProgress.totalBatches})` : ''}
       />
 
       {/* Add Photos modal */}
@@ -837,6 +879,7 @@ export default function ProjectImagesPage() {
         onUpload={handleAddPhotosToGroup}
         groupName={selectedGroupForAdd}
         loading={uploadLoading}
+        progress={uploadProgress ? `Uploading ${uploadProgress.current}/${uploadProgress.total} photos (Batch ${uploadProgress.batch}/${uploadProgress.totalBatches})` : ''}
       />
     </div>
   );

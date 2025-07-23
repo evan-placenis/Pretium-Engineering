@@ -8,6 +8,7 @@ interface AddPhotosModalProps {
   onUpload: (files: File[], dateTaken: string, useFilenameAsDescription: boolean) => void;
   groupName: string;
   loading?: boolean;
+  progress?: string;
 }
 
 export default function AddPhotosModal({ 
@@ -15,7 +16,8 @@ export default function AddPhotosModal({
   onClose, 
   onUpload, 
   groupName,
-  loading = false 
+  loading = false,
+  progress = ''
 }: AddPhotosModalProps) {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [dateTaken, setDateTaken] = useState('');
@@ -167,6 +169,36 @@ export default function AddPhotosModal({
               </span>
             </label>
           </div>
+
+          {/* Progress Display */}
+          {loading && (
+            <div style={{
+              marginBottom: '1.5rem',
+              padding: '1rem',
+              backgroundColor: '#f8f9fa',
+              borderRadius: '0.25rem',
+              textAlign: 'center'
+            }}>
+              <div style={{
+                width: '40px',
+                height: '40px',
+                border: '4px solid #f3f3f3',
+                borderTop: '4px solid #2b579a',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+                margin: '0 auto 1rem auto'
+              }} />
+              <style jsx>{`
+                @keyframes spin {
+                  0% { transform: rotate(0deg); }
+                  100% { transform: rotate(360deg); }
+                }
+              `}</style>
+              <p style={{ margin: 0, color: 'var(--color-text)' }}>
+                {progress || 'Uploading photos...'}
+              </p>
+            </div>
+          )}
 
           {/* Action Buttons */}
           <div style={{

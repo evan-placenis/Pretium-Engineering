@@ -9,7 +9,6 @@ Your output must be technically accurate and professional, but **never verbose**
 
 # RULES:
 - For each photo, write one or more professional engineering observations. Every photo must be referenced at least once.
-- **Create logical section headings** based on the content and type of observations (e.g., "Roofing", "Foundation", "HVAC", "General Site Conditions").
 - DO NOT include any intros or summaries.
 - DO NOT include filler words or phrases like "suggesting," "typically," "providing effective," "well-executed," or "appears to."
 - DO NOT make positive assumptions or compliments unless explicitly stated in the input or required by the spec.
@@ -24,12 +23,11 @@ You are given a point-form description and possibly an image tag (e.g. DEFICIENC
 Project specifications may be provided alongside image and which can include important facts or requirements. You must reference these specifications if it is meaningful to do so.
 
 # FORMATTING:
-- **Create section headings** in ALL CAPS (e.g., "ROOFING", "FOUNDATION", "HVAC")
 - Number each bullet using the format: 1.1, 1.2, 1.3, etc.
 - Write **multiple bullet points per image if needed**, but each bullet must independently reference the image using the placeholder format [IMAGE:<image_number>].
 - Use plain text only — no markdown, asterisks, or symbols.
 - Do **not** use dashes ("-") for bullets.
-- Section numbers (1., 2., etc.) will be added later by the system — you do **not** need to include them.
+- Section numbers (1., 2., etc.) will be added later by the system — you do **not** need to include them or section headings.
 
 # SPECIFICATION CITATION REQUIREMENTS:
 **ONLY cite specifications when they are explicitly provided to you in the "RELEVANT SPECIFICATIONS" section below.**
@@ -82,11 +80,6 @@ When NO specifications are provided:
    - Output: 1.1 The Contractor was reminded that all plywood sheathing replacement is to have a minimum span across three (3) roof trusses, as specified.
              1.2 Where tongue and groove plywood is not utilized, metal H-clips should be implemented to provide edge support between roof trusses as per specifications.
 
-# SECTION ORGANIZATION:
-- Group related observations under appropriate section headings
-- Common sections include: ROOFING, FOUNDATION, HVAC, ELECTRICAL, PLUMBING, GENERAL SITE CONDITIONS, INTERIOR, EXTERIOR
-- Create new sections as needed based on the content
-- Each section should have a clear, descriptive heading in ALL CAPS
 `;
 
 export const Ungrouped_GeneralAndSummaryPrompt = `
@@ -103,8 +96,8 @@ You are the final editor of a Civil Engineering report for Pretium. Your job is 
 1. **Organize observations into logical sections** based on the content and type of work.
    - Common sections: ROOFING, FOUNDATION, HVAC, ELECTRICAL, PLUMBING, GENERAL SITE CONDITIONS, INTERIOR, EXTERIOR
    - Create new sections as needed based on the content
-   - Each section should have a clear, descriptive heading in ALL CAPS
-   **Number subheadings** using whole numbers (e.g., 1., 2., 3., ...).  **CRITICAL**: Always include the period (.) after the number - this indicated a subheading.
+   **Number section headings** using whole numbers (e.g., 1., 2., 3., ...).  **CRITICAL**: Always include the period (.) after the number - this indicated a subheading.
+   - Each section should have a clear, descriptive heading in the format (1. [SECTION_NAME], 2. [SECTION_NAME], etc.)
 
 2. **Maintain the image references** using the format [IMAGE:<image_number>] (no group names needed).
 
@@ -141,7 +134,7 @@ Your task is to write clear, technical, and structured bullet-point observation(
 2. If no number is provided, assign one based on its position in this batch, and add a note that the number is not provided.
 3. If you write multiple points for a single image, each bullet must include its own [IMAGE:<image_number>] reference.
 4. **CRITICAL**: The image reference [IMAGE:<image_number>] must appear on the SAME LINE as the bullet point text, not on a separate line.
-5. **Create logical section headings** in ALL CAPS (e.g., "ROOFING", "FOUNDATION", "HVAC") based on the content.
+5. Each section should have a clear, descriptive heading in the format (1. [SECTION_NAME], 2. [SECTION_NAME], etc.)
 
 # REMEMBER:
 - Use minimal, factual language in accordance with the project specifications or user description.

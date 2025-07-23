@@ -84,37 +84,25 @@ export default function NewReport() {
   
 
 
-  // Set ungrouped mode if URL parameter is present or if loaded images are ungrouped
+  // Set mode based on URL parameter - this is the primary source of truth
   useEffect(() => {
     if (ungroupedMode === 'true') {
       setIsUngroupedMode(true);
-      
-      // Clear any existing group data from selected images when entering ungrouped mode
+      // Clear any existing group data when explicitly entering ungrouped mode
       setSelectedImages(prev => prev.map(img => ({
         ...img,
         group: [],
         number: null
       })));
+      setGroupNumberingStates({});
+      setGroupOrder([]);
+    } else {
+      // If not explicitly ungrouped, default to grouped mode
+      setIsUngroupedMode(false);
     }
   }, [ungroupedMode]);
 
-  // Detect ungrouped mode from loaded images (only if not already set by URL parameter)
-  useEffect(() => {
-    if (selectedImages.length > 0 && ungroupedMode !== 'true') {
-      // Check if all images have no groups or empty groups
-      const allUngrouped = selectedImages.every(img => 
-        !img.group || img.group.length === 0
-      );
-      
-      if (allUngrouped) {
-        setIsUngroupedMode(true);
-      } else {
-        setIsUngroupedMode(false);
-      }
-    }
-  }, [selectedImages, ungroupedMode]);
-
-  // Clear group data when entering ungrouped mode
+  // Clear group data when entering ungrouped mode (additional safety)
   useEffect(() => {
     if (isUngroupedMode) {
       setSelectedImages(prev => prev.map(img => ({
@@ -340,7 +328,8 @@ export default function NewReport() {
 
 
   // Group images by their group name and sort by number within each group
-  const groupedImages = selectedImages.reduce((groups, image) => {
+  // Only group if we're not in ungrouped mode
+  const groupedImages = isUngroupedMode ? {} : selectedImages.reduce((groups, image) => {
     const groupName = image.group && image.group.length > 0 ? image.group[0] : 'Ungrouped';
     if (!groups[groupName]) {
       groups[groupName] = [];
@@ -493,13 +482,23 @@ export default function NewReport() {
           
           const updatedImages = [...prev, ...newImages];
           
-          // Use the hook to automatically number images and set group states
-          const { numberedImages, newGroupStates } = autoNumberImages(updatedImages, groupsMapping);
-          
-          // Merge the new group states with existing ones (don't overwrite)
-          setGroupNumberingStates(prevStates => ({ ...prevStates, ...newGroupStates }));
-          
-          return numberedImages;
+          // Only apply grouping logic if we're not in ungrouped mode
+          if (!isUngroupedMode) {
+            // Use the hook to automatically number images and set group states
+            const { numberedImages, newGroupStates } = autoNumberImages(updatedImages, groupsMapping);
+            
+            // Merge the new group states with existing ones (don't overwrite)
+            setGroupNumberingStates(prevStates => ({ ...prevStates, ...newGroupStates }));
+            
+            return numberedImages;
+          } else {
+            // For ungrouped mode, just return the images without grouping
+            return updatedImages.map(img => ({
+              ...img,
+              group: [],
+              number: null
+            }));
+          }
         });
         
         // Don't clear URL parameters immediately - let localStorage handle persistence

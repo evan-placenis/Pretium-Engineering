@@ -147,7 +147,24 @@ export default function NewReport() {
                 setSelectedImages(restoredImages);
                 setGroupNumberingStates(parsed.groupNumberingStates || {});
                 setGroupOrder(parsed.groupOrder || []);
-                setSuccessMessage('Template loaded successfully!');
+                
+                // Load bullet points and generated content from template
+                if (parsed.bulletPoints) {
+                  setBulletPoints(parsed.bulletPoints);
+                }
+                
+                // Also check for separate localStorage items as fallback
+                const savedBulletPoints = localStorage.getItem(`report-bullet-points-${projectId}`);
+                
+                if (savedBulletPoints && !parsed.bulletPoints) {
+                  setBulletPoints(savedBulletPoints);
+                }
+                
+                // Clear the separate localStorage items after loading
+                localStorage.removeItem(`report-bullet-points-${projectId}`);
+                localStorage.removeItem(`report-generated-content-${projectId}`);
+                
+                setSuccessMessage('Template loaded successfully! Photo structure, bullet points, and content restored.');
                 setTimeout(() => setSuccessMessage(null), 3000);
                 
                 // Clear the template from localStorage after loading

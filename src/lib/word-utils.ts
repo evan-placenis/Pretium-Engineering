@@ -1,6 +1,133 @@
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, PageBreak, AlignmentType, Table, TableRow, TableCell, WidthType, ImageRun, Header, Numbering, LevelFormat } from 'docx';
 import { Project, ReportImage } from '@/lib/supabase';
 
+/**
+ * Compresses an image buffer using canvas to reduce file size
+ * @param imageBuffer - The original image buffer
+ * @param maxWidth - Maximum width for the compressed image
+ * @param maxHeight - Maximum height for the compressed image
+ * @param quality - JPEG quality (0.1 to 1.0)
+ * @param format - Output format ('jpeg' or 'png')
+ * @param targetDPI - Target DPI for the image (default 150 for Word docs)
+ * @returns Compressed image buffer
+ */
+export const compressImage = async (
+  imageBuffer: ArrayBuffer,
+  maxWidth: number = 800,
+  maxHeight: number = 600,
+  quality: number = 0.7,
+  format: 'jpeg' | 'png' = 'jpeg',
+  targetDPI: number = 150
+): Promise<ArrayBuffer> => {
+  return new Promise((resolve, reject) => {
+    try {
+      // Create blob from buffer
+      const blob = new Blob([imageBuffer]);
+      const url = URL.createObjectURL(blob);
+      
+      // Create image element
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        
+        // Calculate new dimensions while maintaining aspect ratio
+        const { width, height } = calculateAspectRatioFit(
+          img.width,
+          img.height,
+          maxWidth,
+          maxHeight
+        );
+        
+        // Calculate DPI-adjusted dimensions
+        // Standard screen DPI is 96, so we scale based on target DPI
+        const dpiScale = targetDPI / 96;
+        const dpiAdjustedWidth = Math.round(width * dpiScale);
+        const dpiAdjustedHeight = Math.round(height * dpiScale);
+        
+        // Create canvas for compression
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        if (!ctx) {
+          reject(new Error('Could not get canvas context'));
+          return;
+        }
+        
+        // Set canvas dimensions with DPI adjustment
+        canvas.width = dpiAdjustedWidth;
+        canvas.height = dpiAdjustedHeight;
+        
+        // Draw image on canvas with new dimensions
+        ctx.drawImage(img, 0, 0, dpiAdjustedWidth, dpiAdjustedHeight);
+        
+        // Convert to blob with compression
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              // Convert blob to array buffer
+              const reader = new FileReader();
+              reader.onload = () => {
+                if (reader.result instanceof ArrayBuffer) {
+                  resolve(reader.result);
+                } else {
+                  reject(new Error('Failed to convert blob to array buffer'));
+                }
+              };
+              reader.readAsArrayBuffer(blob);
+            } else {
+              reject(new Error('Failed to compress image'));
+            }
+          },
+          `image/${format}`,
+          quality
+        );
+      };
+      
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Failed to load image'));
+      };
+      
+      img.src = url;
+    } catch (error) {
+      reject(error);
+    }
+  });
+};
+
+/**
+ * Calculates new dimensions while maintaining aspect ratio
+ */
+const calculateAspectRatioFit = (
+  srcWidth: number,
+  srcHeight: number,
+  maxWidth: number,
+  maxHeight: number
+): { width: number; height: number } => {
+  const ratio = Math.min(maxWidth / srcWidth, maxHeight / srcHeight);
+  return {
+    width: srcWidth * ratio,
+    height: srcHeight * ratio
+  };
+};
+
+/**
+ * Compresses multiple images in parallel
+ */
+export const compressImages = async (
+  images: ArrayBuffer[],
+  maxWidth: number = 800,
+  maxHeight: number = 600,
+  quality: number = 0.7,
+  targetDPI: number = 150
+): Promise<ArrayBuffer[]> => {
+  const compressionPromises = images.map(imageBuffer =>
+    compressImage(imageBuffer, maxWidth, maxHeight, quality, 'jpeg', targetDPI)
+  );
+  
+  return Promise.all(compressionPromises);
+};
+
 
 /**
  * Generate the report header with logo, company info, observation report, and project details
@@ -41,7 +168,7 @@ export const generate_report_header = async (project: Project | null, pretiumLog
                     new ImageRun({
                       data: logoUint8Array,
                       transformation: { width: 200, height: 60 },
-                      type: "png",
+                      type: "jpg",
                     }),
                   ],
                   alignment: AlignmentType.CENTER,
@@ -462,7 +589,18 @@ const createLocationPlanSection = async (): Promise<Paragraph[]> => {
   try {
     const locationImageResponse = await fetch('/placeholder.png');
     const locationImageBuffer = await locationImageResponse.arrayBuffer();
-    const locationImageUint8Array = new Uint8Array(locationImageBuffer);
+    
+    // Compress the location plan image
+    const compressedBuffer = await compressImage(
+      locationImageBuffer,
+      500,  // maxWidth
+      400,  // maxHeight
+      0.6,  // quality
+      'jpeg',
+      150   // DPI - optimal for Word documents
+    );
+    
+    const locationImageUint8Array = new Uint8Array(compressedBuffer);
     
     return [
       // Section heading
@@ -643,7 +781,18 @@ export const createPlaceholderImageRow = async (
   try {
     const response = await fetch(placeholderUrl);
     const buffer = await response.arrayBuffer();
-    const imageUint8Array = new Uint8Array(buffer);
+    
+          // Compress the placeholder image
+      const compressedBuffer = await compressImage(
+        buffer,
+        400,  // maxWidth - smaller for placeholder
+        300,  // maxHeight - smaller for placeholder
+        0.5,  // quality - lower quality for placeholder
+        'jpeg',
+        150   // DPI - optimal for Word documents
+      );
+    
+    const imageUint8Array = new Uint8Array(compressedBuffer);
 
     // Left Cell: boilerplate text
     const textCell = new TableCell({
@@ -689,7 +838,7 @@ export const createPlaceholderImageRow = async (
                 width: 300,
                 height: 250,
               },
-              type: "png",
+              type: "jpg",
             }),
           ],
           alignment: AlignmentType.LEFT,
@@ -907,7 +1056,18 @@ const createImageCell = async (image: ReportImage, imageIndex: number) => {
   try {
     const imageResponse = await fetch(image.url);
     const imageBuffer = await imageResponse.arrayBuffer();
-    const imageUint8Array = new Uint8Array(imageBuffer);
+    
+    // Compress the image before using it
+    const compressedBuffer = await compressImage(
+      imageBuffer,
+      600,  // maxWidth - reduced from original
+      500,  // maxHeight - reduced from original
+      0.6,  // quality - reduced for smaller file size
+      'jpeg', // format - JPEG is smaller than PNG
+      150   // DPI - optimal for Word documents (150 DPI instead of 300 DPI)
+    );
+    
+    const imageUint8Array = new Uint8Array(compressedBuffer);
 
     return new TableCell({
       width: {
@@ -1104,11 +1264,21 @@ export const createWordDocumentWithImages = async (
   sectionSelection?: SectionSelection
 ) => {
   try {
-    // Load Pretium logo
+    // Load and compress Pretium logo
     let pretiumLogoBuffer: ArrayBuffer | null = null;
     try {
       const logoResponse = await fetch('/pretium.png');
-      pretiumLogoBuffer = await logoResponse.arrayBuffer();
+      const logoBuffer = await logoResponse.arrayBuffer();
+      
+      // Compress the logo for smaller file size
+      pretiumLogoBuffer = await compressImage(
+        logoBuffer,
+        200,  // maxWidth - logo doesn't need to be large
+        60,   // maxHeight - maintain aspect ratio
+        0.8,  // quality - keep good quality for logo
+        'jpeg',
+        150   // DPI - optimal for Word documents
+      );
     } catch (error) {
       console.error('Could not load Pretium logo:', error);
     }

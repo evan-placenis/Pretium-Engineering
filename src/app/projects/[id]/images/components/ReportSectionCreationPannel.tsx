@@ -4,9 +4,9 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 /**
- * Props for the GroupCreationPanel component
+ * Props for the ReportSectionCreationPannel component
  */
-interface GroupCreationPanelProps {
+interface ReportSectionCreationPannelProps {
   /** Selected image IDs */
   selectedImageIds: Set<string>;
   /** Callback when images with groups change */
@@ -30,7 +30,7 @@ interface GroupCreationPanelProps {
 }
 
 /**
- * GroupCreationPanel Component
+ * ReportSectionCreationPannel Component
  * 
  * A component that allows users to create groups and assign selected images to them
  * during the image selection process for reports.
@@ -41,7 +41,7 @@ interface GroupCreationPanelProps {
  * - Visual feedback for group assignments
  * - Simple one-group-at-a-time workflow
  */
-export default function GroupCreationPanel({
+export default function ReportSectionCreationPannel({
   selectedImageIds,
   onImagesWithGroupsChange,
   isVisible,
@@ -52,7 +52,7 @@ export default function GroupCreationPanel({
   onError,
   isUngroupedMode = false,
   isGroupedMode = false
-}: GroupCreationPanelProps) {
+}: ReportSectionCreationPannelProps) {
   // State for group management
   const [currentGroupName, setCurrentGroupName] = useState<string>('');
   const [showGroupInput, setShowGroupInput] = useState<boolean>(false);
@@ -175,9 +175,9 @@ export default function GroupCreationPanel({
                 cursor: isUngroupedMode ? 'not-allowed' : 'pointer'
               }}
               disabled={isUngroupedMode}
-              title={isUngroupedMode ? "Cannot create groups when using ungrouped photos" : "Create groups and organize photos"}
+              title={isUngroupedMode ? "Cannot create report sections when using AI-generated sections" : "Create report sections and organize photos"}
             >
-              📁 Create Group
+              Create Report Sections
             </button>
             <button
               onClick={() => onSelectionModeChange('ungrouped')}
@@ -189,9 +189,9 @@ export default function GroupCreationPanel({
                 cursor: (isGroupedMode || (!isUngroupedMode && selectedImageIds.size > 0)) ? 'not-allowed' : 'pointer'
               }}
               disabled={isGroupedMode || (!isUngroupedMode && selectedImageIds.size > 0)}
-              title={isGroupedMode ? "Cannot use ungrouped photos when using grouped photos" : (!isUngroupedMode && selectedImageIds.size > 0 ? "Cannot switch to ungrouped mode when grouped photos are selected" : "Select photos without grouping or numbering")}
+              title={isGroupedMode ? "Cannot use AI-generated sections when using grouped photos" : (!isUngroupedMode && selectedImageIds.size > 0 ? "Cannot switch to AI-generated mode when grouped photos are selected" : "Select photos for AI-generated sections")}
             >
-              📤 Upload Ungrouped Photos
+               AI-Generated Sections
             </button>
           </div>
         </div>
@@ -211,7 +211,7 @@ export default function GroupCreationPanel({
                 type="text"
                 value={currentGroupName}
                 onChange={(e) => setCurrentGroupName(e.target.value)}
-                placeholder="Enter group name..."
+                placeholder="Enter report section name..."
                 style={{
                   flex: 1,
                   padding: "0.5rem",
@@ -232,11 +232,11 @@ export default function GroupCreationPanel({
               <button
                 onClick={() => {
                   if (!currentGroupName.trim()) {
-                    onError('Please enter a group name');
+                    onError('Please enter a report section name');
                     return;
                   }
                   if (selectedImageIds.size === 0) {
-                    onError('Please select at least one image before creating a group');
+                    onError('Please select at least one image before creating a report section');
                     return;
                   }
                   createGroup();
@@ -251,7 +251,7 @@ export default function GroupCreationPanel({
                   cursor: (!currentGroupName.trim() || selectedImageIds.size === 0) ? 'not-allowed' : 'pointer'
                 }}
               >
-                Create Group with {selectedImageIds.size} Image{selectedImageIds.size !== 1 ? 's' : ''}
+                Create Report Section with {selectedImageIds.size} Image{selectedImageIds.size !== 1 ? 's' : ''}
               </button>
             </div>
             <button
@@ -286,7 +286,7 @@ export default function GroupCreationPanel({
               border: "1px solid var(--color-border)"
             }}>
               <span style={{ fontSize: "0.875rem", color: "var(--color-text-secondary)" }}>
-                💡 Select images to add to this group
+                💡 Select images to add to this report section
               </span>
             </div>
           )}
@@ -307,7 +307,7 @@ export default function GroupCreationPanel({
               color: "var(--color-secondary)",
               fontWeight: "500"
             }}>
-              📤 Ungrouped Mode - Select images to add without grouping
+              📤 AI-Generated Mode - Select images for AI-generated sections
             </span>
             <button
               onClick={() => onSelectionModeChange('disabled')}
@@ -328,7 +328,7 @@ export default function GroupCreationPanel({
               marginBottom: "1rem"
             }}>
               <span style={{ fontSize: "0.875rem", color: "var(--color-text)" }}>
-                📸 {selectedImageIds.size} image{selectedImageIds.size !== 1 ? 's' : ''} selected for ungrouped report
+                📸 {selectedImageIds.size} image{selectedImageIds.size !== 1 ? 's' : ''} selected for AI-generated report
               </span>
             </div>
           )}
@@ -371,7 +371,7 @@ export default function GroupCreationPanel({
                   fontWeight: "600"
                 }}
               >
-                ✅ Done - Use {selectedImageIds.size} Ungrouped Image{selectedImageIds.size !== 1 ? 's' : ''}
+                ✅ Done - Use {selectedImageIds.size} AI-Generated Image{selectedImageIds.size !== 1 ? 's' : ''}
               </button>
             </div>
           )}

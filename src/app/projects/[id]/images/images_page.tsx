@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { ImageListView, type ImageItem as BaseImageItem } from '@/components/image_components';
 import { ImageGridView } from '@/components/image_components';
 import { Toast } from '@/components/feedback';
-import GroupCreationPanel from './components/GroupCreationPanel';
+import ReportSectionCreationPannel from './components/ReportSectionCreationPannel';
 import ImageFilter, { type FilterableImage } from '@/components/ImageFilter';
 import UploadPhotoModal from './components/UploadPhotoModal';
 import AddPhotosModal from './components/AddPhotosModal';
@@ -195,7 +195,7 @@ export default function ProjectImagesPage() {
     // Generate unique filename to prevent conflicts
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
-    const filePath = `project-images/${projectId}/${fileName}`;
+    const filePath = `${projectId}/${fileName}`;//project-images/${projectId}/${fileName}`;
     
     // Upload file to Supabase Storage
     const { error: uploadError } = await supabase.storage
@@ -516,7 +516,7 @@ export default function ProjectImagesPage() {
   const toggleImageSelection = (imageId: string) => {
     // Only allow selection if we're in a selection mode
     if (selectionMode === 'disabled') {
-      setError('Please choose "Create Group" or "Select Ungrouped Photos" before selecting images');
+      setError('Please choose "Create Report Sections" or "AI-Generated Sections" before selecting images');
       return;
     }
     
@@ -537,7 +537,7 @@ export default function ProjectImagesPage() {
   const toggleGroupSelection = (groupName: string) => {
     // Only allow selection if we're in a selection mode
     if (selectionMode === 'disabled') {
-      setError('Please choose "Create Group" or "Select Ungrouped Photos" before selecting images');
+      setError('Please choose "Create Report Sections" or "AI-Generated Sections" before selecting images');
       return;
     }
     
@@ -612,7 +612,7 @@ export default function ProjectImagesPage() {
             </h1>
             {isSelectionMode && (
               <p style={{ color: "var(--color-text-secondary)", fontSize: "0.875rem", marginBottom: "0.5rem" }}>
-                Create groups or select ungrouped photos to start selecting images
+                Create report sections or select AI-generated sections to start selecting images and give complete control to AI with the report generation.
               </p>
             )}
           </div>
@@ -625,7 +625,7 @@ export default function ProjectImagesPage() {
               gap: "0.5rem"
             }}>
               {/* Group Creation Panel */}
-              <GroupCreationPanel
+              <ReportSectionCreationPannel
                 selectedImageIds={selectedImageIds}
                 onImagesWithGroupsChange={setImagesWithGroups}
                 isVisible={true}

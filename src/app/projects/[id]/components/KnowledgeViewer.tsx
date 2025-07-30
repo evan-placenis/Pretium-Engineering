@@ -455,12 +455,12 @@ export default function KnowledgeViewer({
               )}
               
               {/* Documents List */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: showChunks ? '2rem' : '0' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: showChunks ? '2rem' : '0' }}>
             {documents.map((doc) => (
               <div key={doc.id} style={{ 
                 border: '1px solid var(--color-border)', 
-                borderRadius: '8px', 
-                padding: '1rem',
+                borderRadius: '6px', 
+                padding: '0.75rem',
                 backgroundColor: 'var(--color-background)',
                 transition: 'all 0.2s ease',
                 cursor: 'pointer'
@@ -473,40 +473,47 @@ export default function KnowledgeViewer({
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                    {/* Single line with all info */}
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '0.5rem',
+                      fontSize: "0.75rem",
+                      color: "var(--color-text-lighter)"
+                    }}>
                       <span style={{
-                        padding: '0.25rem 0.75rem',
-                        fontSize: '0.75rem',
+                        padding: '0.125rem 0.5rem',
+                        fontSize: '0.7rem',
                         fontWeight: 600,
-                        borderRadius: '12px',
+                        borderRadius: '8px',
                         backgroundColor: doc.file_type === 'spec' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(34, 197, 94, 0.1)',
                         color: doc.file_type === 'spec' ? 'rgb(59, 130, 246)' : 'rgb(34, 197, 94)',
-                        border: `1px solid ${doc.file_type === 'spec' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(34, 197, 94, 0.2)'}`
+                        border: `1px solid ${doc.file_type === 'spec' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(34, 197, 94, 0.2)'}`,
+                        whiteSpace: 'nowrap'
                       }}>
-                        {doc.file_type === 'spec' ? '📋 Specification' : '🏗️ Building Code'}
+                        {doc.file_type === 'spec' ? '📋 Spec' : '🏗️ Code'}
                       </span>
-                      <h4 style={{ 
-                        margin: 0, 
+                      
+                      <span style={{ 
                         fontWeight: 600, 
                         color: "var(--color-text)",
-                        fontSize: '1rem'
+                        fontSize: '0.8rem',
+                        flex: 1,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
                       }}>
                         {doc.file_name}
-                      </h4>
-                    </div>
-                    <div style={{ 
-                      fontSize: "0.875rem", 
-                      color: "var(--color-text-lighter)",
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '1rem'
-                    }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                      </span>
+                      
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }}>
                         📏 {formatFileSize(doc.file_size)}
                       </span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                      
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', whiteSpace: 'nowrap' }}>
                         📅 {formatDate(doc.uploaded_at)}
                       </span>
+                      
                       {/* Processing Status */}
                       {doc.processed === true && (
                         <span style={{ 
@@ -514,15 +521,11 @@ export default function KnowledgeViewer({
                           alignItems: 'center', 
                           gap: '0.25rem',
                           color: 'var(--color-success)',
-                          fontSize: '0.75rem',
-                          fontWeight: 500
+                          fontSize: '0.7rem',
+                          fontWeight: 500,
+                          whiteSpace: 'nowrap'
                         }}>
-                          ✅ Processed
-                          {doc.chunks_count && (
-                            <span style={{ opacity: 0.7 }}>
-                              ({doc.chunks_count} chunks)
-                            </span>
-                          )}
+                          ✅ ({doc.chunks_count || 0})
                         </span>
                       )}
                       {doc.processed === false && doc.processing_error && (
@@ -531,8 +534,9 @@ export default function KnowledgeViewer({
                           alignItems: 'center', 
                           gap: '0.25rem',
                           color: 'var(--color-danger)',
-                          fontSize: '0.75rem',
-                          fontWeight: 500
+                          fontSize: '0.7rem',
+                          fontWeight: 500,
+                          whiteSpace: 'nowrap'
                         }}>
                           ❌ Error
                         </span>
@@ -543,28 +547,29 @@ export default function KnowledgeViewer({
                           alignItems: 'center', 
                           gap: '0.25rem',
                           color: 'var(--color-warning)',
-                          fontSize: '0.75rem',
-                          fontWeight: 500
+                          fontSize: '0.7rem',
+                          fontWeight: 500,
+                          whiteSpace: 'nowrap'
                         }}>
-                          ⏳ Processing...
+                          ⏳
                         </span>
                       )}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem', marginLeft: '0.75rem' }}>
                     <button
                       onClick={() => onDeleteDocument(doc)}
                       style={{
-                        padding: '0.5rem 1rem',
+                        padding: '0.375rem 0.75rem',
                         backgroundColor: 'transparent',
                         color: 'var(--color-danger)',
                         border: '1px solid var(--color-danger)',
-                        borderRadius: '6px',
-                        fontSize: '0.875rem',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
                         fontWeight: 500,
                         cursor: 'pointer',
                         transition: 'all 0.2s ease',
-                        minWidth: '80px'
+                        minWidth: '60px'
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.backgroundColor = 'var(--color-danger)';
@@ -575,7 +580,7 @@ export default function KnowledgeViewer({
                         e.currentTarget.style.color = 'var(--color-danger)';
                       }}
                     >
-                      🗑️ Delete
+                      Delete
                     </button>
                   </div>
                 </div>

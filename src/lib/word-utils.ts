@@ -1,4 +1,4 @@
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, PageBreak, AlignmentType, Table, TableRow, TableCell, WidthType, ImageRun, Header, Numbering, LevelFormat } from 'docx';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, PageBreak, AlignmentType, Table, TableRow, TableCell, WidthType, ImageRun, Header, Numbering, LevelFormat, PageNumber } from 'docx';
 import { Project, ReportImage } from '@/lib/supabase';
 
 /**
@@ -402,7 +402,22 @@ export const generate_report_header = async (project: Project | null, pretiumLog
               children: [new Paragraph({ 
                 children: [
                   new TextRun({
-                    text: "Page _ of _",
+                    text: "Page ",
+                    size: 18,
+                    font: "Segoe UI",
+                  }),
+                  new TextRun({
+                    children: [PageNumber.CURRENT],
+                    size: 18,
+                    font: "Segoe UI",
+                  }),
+                  new TextRun({
+                    text: " of ",
+                    size: 18,
+                    font: "Segoe UI",
+                  }),
+                  new TextRun({
+                    children: [PageNumber.TOTAL_PAGES],
                     size: 18,
                     font: "Segoe UI",
                   }),
@@ -539,7 +554,7 @@ export const createProjectDetailsTable = async (project: Project | null) => {
             children: [new Paragraph({ 
               children: [
                 new TextRun({
-                  text: `Contractor: ${project?.[ "Contractor Name 1"] || ''}`,
+                  text: `Contractor: ${project?.[ "Contractor Company Name"] ||  "Contractor Contact Name"}`,
                   size: 18,
                   font: "Segoe UI",
                 }),

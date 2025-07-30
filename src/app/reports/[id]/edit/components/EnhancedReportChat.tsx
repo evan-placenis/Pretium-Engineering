@@ -6,6 +6,14 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 
+// Add TypeScript declarations for Web Speech API
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -204,6 +212,78 @@ export const EnhancedReportChat: React.FC<EnhancedReportChatProps> = ({
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isCentered, setIsCentered] = useState(false);
+  
+  // Voice-to-text functionality
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeechSupported, setIsSpeechSupported] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState('');
+  const recognitionRef = useRef<any>(null);
+  const chatMessageRef = useRef<string>('');
+
+  // Check if speech recognition is supported
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
+      setIsSpeechSupported(!!SpeechRecognition);
+      
+      if (SpeechRecognition) {
+        recognitionRef.current = new SpeechRecognition();
+        recognitionRef.current.continuous = true;
+        recognitionRef.current.interimResults = true;
+        recognitionRef.current.lang = 'en-US';
+        
+        recognitionRef.current.onresult = (event: any) => {
+          let finalTranscript = '';
+          let interimTranscript = '';
+          
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalTranscript += transcript;
+            } else {
+              interimTranscript += transcript;
+            }
+          }
+          
+          if (finalTranscript) {
+            const currentMessage = chatMessageRef.current;
+            setChatMessage(currentMessage + (currentMessage ? ' ' : '') + finalTranscript);
+            setInterimTranscript('');
+          } else if (interimTranscript) {
+            setInterimTranscript(interimTranscript);
+          }
+        };
+        
+        recognitionRef.current.onerror = (event: any) => {
+          console.error('Speech recognition error:', event.error);
+          setIsListening(false);
+        };
+        
+        recognitionRef.current.onend = () => {
+          // Only stop listening if user manually stopped it
+          // Don't automatically stop for continuous mode
+        };
+      }
+    }
+  }, []);
+
+  const toggleListening = () => {
+    if (!isSpeechSupported || !recognitionRef.current) {
+      alert('Speech recognition is not supported in your browser. Please use Chrome, Edge, or Safari.');
+      return;
+    }
+    
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+      setInterimTranscript('');
+    } else {
+      // Clear any existing interim transcript when starting
+      setInterimTranscript('');
+      recognitionRef.current.start();
+      setIsListening(true);
+    }
+  };
 
   // Initialize chat when component loads
   useEffect(() => {
@@ -211,6 +291,11 @@ export const EnhancedReportChat: React.FC<EnhancedReportChatProps> = ({
       initializeChat();
     }
   }, [project?.id, isInitialized, initializeChat]);
+
+  // Update ref when chatMessage changes
+  useEffect(() => {
+    chatMessageRef.current = chatMessage;
+  }, [chatMessage]);
 
   // Handle scroll position
   useEffect(() => {
@@ -472,6 +557,22 @@ export const EnhancedReportChat: React.FC<EnhancedReportChatProps> = ({
         background: '#f8f9fa',
         position: 'relative'
       }}>
+        {/* Interim Transcript Display */}
+        {isListening && interimTranscript && (
+          <div style={{
+            marginBottom: '0.75rem',
+            padding: '0.75rem',
+            background: '#f0f8ff',
+            border: '1px solid #b3d9ff',
+            borderRadius: '8px',
+            fontSize: '0.9rem',
+            color: '#0066cc',
+            fontStyle: 'italic'
+          }}>
+            🎤 <strong>Listening:</strong> {interimTranscript}
+          </div>
+        )}
+        
         <div style={{
           display: 'flex',
           gap: '0.75rem',
@@ -502,6 +603,48 @@ export const EnhancedReportChat: React.FC<EnhancedReportChatProps> = ({
               fontFamily: 'inherit'
             }}
           />
+          
+          {/* Microphone Button */}
+          {isSpeechSupported && (
+            <button
+              onClick={toggleListening}
+              disabled={isSendingMessage || !isInitialized}
+              style={{
+                padding: '0.75rem',
+                background: isListening ? '#ff4444' : (isSendingMessage || !isInitialized ? '#ccc' : '#0E2841'),
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: isSendingMessage || !isInitialized ? 'not-allowed' : 'pointer',
+                fontSize: '1.2rem',
+                height: '40px',
+                width: '40px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                position: 'relative'
+              }}
+              title={isListening ? 'Stop recording' : 'Start voice input'}
+            >
+              {isListening ? (
+                <div style={{
+                  width: '16px',
+                  height: '16px',
+                  borderRadius: '50%',
+                  background: 'white',
+                  transform: 'scale(1.2)',
+                  transition: 'transform 0.3s ease'
+                }} />
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                  <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                </svg>
+              )}
+            </button>
+          )}
+          
           <button
             onClick={handleSendMessage}
             disabled={isSendingMessage || !chatMessage.trim() || !isInitialized}

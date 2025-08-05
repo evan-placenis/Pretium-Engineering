@@ -40,10 +40,11 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
     }
 
     // Update initial processing status
+    const displayMode = mode === 'parallel-summary' ? 'parallel summary' : mode;
     await supabase
       .from('reports')
       .update({ 
-        generated_content: `Starting ${mode} report generation with ${selectedModel}...\n\n[PROCESSING IN PROGRESS...]`
+        generated_content: `Starting ${displayMode} report generation with ${selectedModel}...\n\n[PROCESSING IN PROGRESS...]`
       })
       .eq('id', reportId);
 
@@ -51,7 +52,7 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
     await supabase
       .from('reports')
       .update({ 
-        generated_content: `Starting ${mode} report generation with ${selectedModel}\n\n[PROCESSING IN PROGRESS...]`
+        generated_content: `Starting ${displayMode} report generation with ${selectedModel}\n\n[PROCESSING IN PROGRESS...]`
       })
       .eq('id', reportId);
 
@@ -90,13 +91,27 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
     const generator = new ReportGenerator();
     console.log(`✅ ReportGenerator initialized successfully`);
 
+    // Determine execution strategy based on user's mode selection WILL NEED TO CHANGE THIS LATER !! PARALLEL-SUMMARY IS A TEST FUNCTION
+    let executionStrategy: 'batched-parallel' | 'batched-parallel-with-parallel-summary';
+    let reportMode: 'brief' | 'elaborate';
+    
+    if (mode === 'parallel-summary') {
+      executionStrategy = 'batched-parallel-with-parallel-summary';
+      reportMode = 'brief'; // Use brief mode for the content generation part
+    } else {
+      executionStrategy = 'batched-parallel';
+      reportMode = mode as 'brief' | 'elaborate';
+    }
+
     // User has already selected their preferences - use them directly
     const config = ReportGenerator.custom(
-      mode,                                     // 'brief' or 'elaborate' from job input
+      reportMode,                               // 'brief' or 'elaborate' (or 'brief' for parallel-summary)
       selectedModel as 'grok4' | 'gpt4o',       // User's model choice
-      'batched-parallel',                       // Use batched parallel execution with max 3 agents
+      executionStrategy,                        // Use appropriate execution strategy
       actualMode                                // Use actual mode determined from image data
     );
+
+    console.log(`🔧 Using execution strategy: ${executionStrategy} for ${mode} mode`);
 
     console.log(`🎨 ReportGenerator Config:`, {
       mode: config.mode,

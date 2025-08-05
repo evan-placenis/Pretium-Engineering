@@ -1,7 +1,7 @@
 // Report Generation Types
 export type ReportMode = 'brief' | 'elaborate';
 export type LLMModel = 'grok4' | 'gpt4o';
-export type ExecutionType = 'parallel' | 'sequential' | 'batched-parallel';
+export type ExecutionType = 'parallel' | 'sequential' | 'batched-parallel' | 'batched-parallel-with-parallel-summary';
 export type GroupingMode = 'grouped' | 'ungrouped';
 
 export interface ReportConfig {

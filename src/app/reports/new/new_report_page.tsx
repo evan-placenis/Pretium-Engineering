@@ -39,7 +39,7 @@ export default function NewReport() {
   const [user, setUser] = useState<any>(null);
   const [selectedImages, setSelectedImages] = useState<ExtendedImageItem[]>([]);
   const [selectedModel, setSelectedModel] = useState('grok4');
-  const [reportMode, setReportMode] = useState<'brief' | 'elaborate'>('brief');
+  const [reportMode, setReportMode] = useState<'brief' | 'elaborate' | 'parallel-summary'>('brief');
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [debugInfo, setDebugInfo] = useState<any>(null);
   const [showDebugInfo, setShowDebugInfo] = useState(false);
@@ -918,7 +918,7 @@ export default function NewReport() {
             <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "500" }}>
               Report Style
             </label>
-            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
               <button
                 type="button"
                 onClick={() => setReportMode('brief')}
@@ -949,9 +949,24 @@ export default function NewReport() {
               >
                 Elaborate
               </button>
+              <button
+                type="button"
+                onClick={() => setReportMode('parallel-summary')}
+                className="btn btn-sm"
+                style={{ 
+                  backgroundColor: reportMode === 'parallel-summary' ? 'var(--color-primary)' : 'transparent',
+                  color: reportMode === 'parallel-summary' ? '#fff' : 'var(--color-text)',
+                  borderColor: reportMode === 'parallel-summary' ? 'var(--color-primary)' : 'var(--color-border)',
+                  fontSize: "0.875rem",
+                  padding: "0.5rem 1rem"
+                }}
+                disabled={loading}
+              >
+                Parallel Summary
+              </button>
             </div>
             <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
-              Brief: Concise, focused reports. Elaborate: Detailed, comprehensive analysis.
+              Brief: Concise, focused reports. Elaborate: Detailed, comprehensive analysis. Parallel Summary: Uses multiple AI agents for faster processing with reduced timeout risk.
             </p>
           </div>
 

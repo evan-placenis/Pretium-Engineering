@@ -12,6 +12,83 @@ import UploadPhotoModal from './components/UploadPhotoModal';
 import AddPhotosModal from './components/AddPhotosModal';
 import CollapsibleGroup from '@/components/CollapsibleGroup';
 
+// ===== IMAGE RESIZING UTILITY =====
+
+/**
+ * Resize image for optimal upload size and AI processing
+ * Reduces file size while maintaining quality for better performance
+ */
+async function resizeImageForUpload(file: File, maxWidth: number = 1024, maxHeight: number = 1024): Promise<File> {
+  return new Promise((resolve) => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d')!;
+    const img = new Image();
+    
+    img.onload = () => {
+      // Calculate new dimensions while maintaining aspect ratio
+      let { width, height } = img;
+      const aspectRatio = width / height;
+      
+      if (width > maxWidth || height > maxHeight) {
+        if (width / maxWidth > height / maxHeight) {
+          width = maxWidth;
+          height = maxWidth / aspectRatio;
+        } else {
+          height = maxHeight;
+          width = maxHeight * aspectRatio;
+        }
+      }
+      
+      // Set canvas dimensions
+      canvas.width = width;
+      canvas.height = height;
+      
+      // Draw resized image
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      // Convert to blob with good quality
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const resizedFile = new File([blob], file.name, { 
+            type: 'image/jpeg',
+            lastModified: file.lastModified 
+          });
+          resolve(resizedFile);
+        } else {
+          // Fallback to original file if resizing fails
+          resolve(file);
+        }
+      }, 'image/jpeg', 0.85); // Good quality JPEG
+    };
+    
+    img.onerror = () => {
+      // Fallback to original file if image loading fails
+      resolve(file);
+    };
+    
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+/**
+ * Process and resize multiple images
+ */
+async function resizeImagesForUpload(files: File[]): Promise<File[]> {
+  const resizedFiles: File[] = [];
+  
+  for (const file of files) {
+    try {
+      const resizedFile = await resizeImageForUpload(file);
+      resizedFiles.push(resizedFile);
+    } catch (error) {
+      console.warn(`Failed to resize ${file.name}, using original:`, error);
+      resizedFiles.push(file); // Fallback to original
+    }
+  }
+  
+  return resizedFiles;
+}
+
 // Extend ImageItem to include group property for project images
 interface ImageItem extends BaseImageItem {
   group?: string[];
@@ -313,10 +390,21 @@ export default function ProjectImagesPage() {
    */
   const handleUpload = async (files: File[], dateTaken: string, useFilenameAsDescription: boolean, groupName: string) => {
     try {
-      await uploadFilesToProject(files, dateTaken, useFilenameAsDescription, groupName);
+      setUploadLoading(true);
+      setUploadProgress({ current: 0, total: files.length, batch: 1, totalBatches: 1 });
+      
+      // Resize images before upload for better performance
+      console.log(`🖼️ Resizing ${files.length} images for optimal upload...`);
+      const resizedFiles = await resizeImagesForUpload(files);
+      console.log(`✅ Image resizing complete`);
+      
+      await uploadFilesToProject(resizedFiles, dateTaken, useFilenameAsDescription, groupName);
       setShowUploadModal(false);
     } catch (error) {
       // Error already handled in uploadFilesToProject
+    } finally {
+      setUploadLoading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -389,11 +477,22 @@ export default function ProjectImagesPage() {
    */
   const handleAddPhotosToGroup = async (files: File[], dateTaken: string, useFilenameAsDescription: boolean) => {
     try {
-      await uploadFilesToProject(files, dateTaken, useFilenameAsDescription, selectedGroupForAdd);
+      setUploadLoading(true);
+      setUploadProgress({ current: 0, total: files.length, batch: 1, totalBatches: 1 });
+      
+      // Resize images before upload for better performance
+      console.log(`🖼️ Resizing ${files.length} images for optimal upload...`);
+      const resizedFiles = await resizeImagesForUpload(files);
+      console.log(`✅ Image resizing complete`);
+      
+      await uploadFilesToProject(resizedFiles, dateTaken, useFilenameAsDescription, selectedGroupForAdd);
       setShowAddPhotosModal(false);
       setSelectedGroupForAdd('');
     } catch (error) {
       // Error already handled in uploadFilesToProject
+    } finally {
+      setUploadLoading(false);
+      setUploadProgress(null);
     }
   };
 

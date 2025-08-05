@@ -59,7 +59,7 @@ export class Grok4Provider implements LLMProvider {
           content += delta.content;
           // Log streaming progress for debugging (less frequent)
           if (chunkCount % 10 === 0) {
-            console.log(`🤖 Grok4 Streaming: ${content.length} characters received (${chunkCount} chunks)`);
+            console.log(`🤖 Grok4 Streaming: ${content.length} characters received (${chunkCount} chunks processed)`);
           }
         }
         if (chunk.usage) {
@@ -67,7 +67,7 @@ export class Grok4Provider implements LLMProvider {
         }
       }
       const streamingEndTime = Date.now();
-      console.log(`🤖 Grok4: Streaming completed in ${streamingEndTime - streamingStartTime}ms (${chunkCount} chunks, ${content.length} chars)`);
+      console.log(`🤖 Grok4: Streaming completed in ${streamingEndTime - streamingStartTime}ms (${chunkCount} chunks processed, ${content.length} chars generated)`);
 
       const totalTime = Date.now() - startTime;
       console.log(`🤖 Grok4: Total generation time: ${totalTime}ms`);

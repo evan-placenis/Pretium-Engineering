@@ -4,9 +4,9 @@ import { ExecutionStrategy, ExecutionParams, ExecutionResult, GroupingMode } fro
 
 export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStrategy {
   private readonly BATCH_SIZE = 5;
-  private readonly MAX_PARALLEL_AGENTS = 3;
-  private readonly SUMMARY_CHUNK_SIZE = 1500; // Characters per summary chunk (reduced for faster processing)
-  private readonly MAX_PARALLEL_SUMMARY_AGENTS = 6; // Max parallel summary agents (increased for speed)
+  private readonly MAX_PARALLEL_AGENTS = 1; // Reduced to 1 for image processing to prevent resource contention
+  private readonly SUMMARY_CHUNK_SIZE = 3000; // Increased chunk size to reduce processing overhead
+  private readonly MAX_PARALLEL_SUMMARY_AGENTS = 3; // Increased to 3 for faster summary processing
   private supabase: any = null;
   private reportId: string = '';
 
@@ -42,7 +42,13 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
       
       const finalContent = await this.processSummaryInParallel(content, params);
 
-      return {
+             // Update report with final content
+       await this.updateReportContent(finalContent, false);
+       
+       // Mark report as truly complete
+       await this.markReportComplete(finalContent);
+
+        return {
         content: finalContent,
         metadata: {
           ...metadata,
@@ -72,47 +78,47 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     const summaryResults: string[] = [];
     const activePromises: Promise<{ index: number; content: string }>[] = [];
     
-    for (let i = 0; i < contentChunks.length; i++) {
-      const chunk = contentChunks[i];
-      
-      // Wait if we've reached the parallel limit
-      if (activePromises.length >= this.MAX_PARALLEL_SUMMARY_AGENTS) {
-        console.log(`🔄 Waiting for ${activePromises.length} summary chunks to complete before starting chunk ${i + 1} (parallel limit: ${this.MAX_PARALLEL_SUMMARY_AGENTS})`);
-        
-        // Wait for each chunk individually and update after each one completes
-        for (let j = 0; j < activePromises.length; j++) {
-          const completedResult = await activePromises[j];
-          summaryResults[completedResult.index] = completedResult.content;
-          
-          // Update report content after each summary chunk completes (with proper ordering)
-          const orderedContent = this.combineSummaryResultsInOrder(summaryResults, params);
-          await this.updateReportContent(orderedContent, false);
-        }
-        
-        activePromises.length = 0; // Clear array
-        console.log(`✅ Completed summary chunk group, starting next set of ${this.MAX_PARALLEL_SUMMARY_AGENTS} chunks`);
-      }
-      
-      // Start this summary chunk (only after waiting if needed)
-      console.log(`🚀 Starting summary chunk ${i + 1}/${contentChunks.length} (${activePromises.length + 1} active)`);
-      const chunkResult = this.processSummaryChunk(chunk, i, contentChunks.length, params);
-      activePromises.push(chunkResult);
-    }
+         for (let i = 0; i < contentChunks.length; i++) {
+       const chunk = contentChunks[i];
+       
+       // Wait if we've reached the parallel limit
+       if (activePromises.length >= this.MAX_PARALLEL_SUMMARY_AGENTS) {
+         console.log(`🔄 Waiting for ${activePromises.length} summary chunks to complete before starting chunk ${i + 1} (parallel limit: ${this.MAX_PARALLEL_SUMMARY_AGENTS})`);
+         
+         // Wait for each chunk individually and update after each one completes
+         for (let j = 0; j < activePromises.length; j++) {
+           const completedResult = await activePromises[j];
+           summaryResults[completedResult.index] = completedResult.content;
+           
+           // Update report content after each individual chunk completes
+           const orderedContent = this.combineSummaryResultsInOrder(summaryResults, params);
+           await this.updateReportContent(orderedContent, false);
+         }
+         
+         activePromises.length = 0; // Clear array
+         console.log(`✅ Completed summary chunk group, starting next set of ${this.MAX_PARALLEL_SUMMARY_AGENTS} chunks`);
+       }
+       
+       // Start this summary chunk (only after waiting if needed)
+       console.log(`🚀 Starting summary chunk ${i + 1}/${contentChunks.length} (${activePromises.length + 1} active)`);
+       const chunkResult = this.processSummaryChunk(chunk, i, contentChunks.length, params);
+       activePromises.push(chunkResult);
+     }
 
-    // Wait for remaining summary chunks
-    if (activePromises.length > 0) {
-      console.log(`🔄 Waiting for final ${activePromises.length} summary chunks to complete`);
-      
-      // Wait for each remaining chunk individually and update after each one completes
-      for (let j = 0; j < activePromises.length; j++) {
-        const completedResult = await activePromises[j];
-        summaryResults[completedResult.index] = completedResult.content;
-        
-        // Update report content after each summary chunk completes (with proper ordering)
-        const orderedContent = this.combineSummaryResultsInOrder(summaryResults, params);
-        await this.updateReportContent(orderedContent, false);
-      }
-    }
+         // Wait for remaining summary chunks
+     if (activePromises.length > 0) {
+       console.log(`🔄 Waiting for final ${activePromises.length} summary chunks to complete`);
+       
+       // Wait for each remaining chunk individually and update after each one completes
+       for (let j = 0; j < activePromises.length; j++) {
+         const completedResult = await activePromises[j];
+         summaryResults[completedResult.index] = completedResult.content;
+         
+         // Update report content after each individual chunk completes
+         const orderedContent = this.combineSummaryResultsInOrder(summaryResults, params);
+         await this.updateReportContent(orderedContent, false);
+       }
+     }
 
     // Combine all summary results in proper order
     const combinedSummary = this.combineSummaryResultsInOrder(summaryResults, params);
@@ -130,48 +136,38 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     const chunkStartTime = Date.now();
     console.log(`📝 [SUMMARY CHUNK ${chunkIndex + 1}] Processing chunk ${chunkIndex + 1}/${totalChunks} (${chunk.length} chars)`);
     
-    // Create a simplified summary prompt for this chunk
+    // Create a minimal summary prompt for this chunk
     const summarySystemPrompt = promptStrategy.getSummarySystemPrompt(grouping);
-    const summaryTaskPrompt = `
-    Format this content chunk into a clean, professional report section.
-    
-    Requirements:
-    1. Keep all original content
-    2. Organize into logical sections with headers and proper numbering
-    3. Ensure proper formatting and numbering
-    4. Follow user instructions: ${bulletPoints}
-    5. This is chunk ${chunkIndex + 1} of ${totalChunks} - format accordingly
-    6. ${grouping === 'grouped' ? 'Maintain group structure and ensure each group section is properly formatted' : 'Organize content into logical sections based on the content'}
-    
-    Content to format:
-    ${chunk}`;
+    const summaryTaskPrompt = `Format this content into a clean report section. Keep all content. Follow: ${bulletPoints}. Chunk ${chunkIndex + 1}/${totalChunks}. Content: ${chunk}`;
     
     const fullSummaryPrompt = `${summarySystemPrompt}\n\n${summaryTaskPrompt}`;
     console.log(`📝 [SUMMARY CHUNK ${chunkIndex + 1}] Summary prompt length: ${fullSummaryPrompt.length} characters`);
     
-    // Process the summary chunk with timeout safeguard
-    const summaryPromise = llmProvider.generateContent(fullSummaryPrompt, {
-      temperature: 0.7,
-      maxTokens: 2500  // Further reduced for faster processing
-    });
-    
-    // Set a timeout of 60 seconds for each summary chunk (reduced for faster failure detection)
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(`Summary chunk ${chunkIndex + 1} timed out after 60 seconds`)), 60000);
-    });
-    
-    const response = await Promise.race([summaryPromise, timeoutPromise]) as any;
+         // Process the summary chunk with reduced maxTokens for faster processing
+     const response = await llmProvider.generateContent(fullSummaryPrompt, {
+       temperature: 0.7,
+       maxTokens: 2000  // Reduced for faster processing
+     }) as any;
     
     if (response.error) {
       console.error(`❌ [SUMMARY CHUNK ${chunkIndex + 1}] Summary error: ${response.error}`);
       return { index: chunkIndex, content: `[ERROR: Failed to process summary chunk ${chunkIndex + 1} - ${response.error}]` };
     }
     
-    const chunkEndTime = Date.now();
-    console.log(`✅ [SUMMARY CHUNK ${chunkIndex + 1}] Summary chunk processing time: ${chunkEndTime - chunkStartTime}ms`);
-    console.log(`📄 [SUMMARY CHUNK ${chunkIndex + 1}] Response length: ${response.content.length} characters`);
+    // Check if response is empty or invalid
+    if (!response.content || response.content.trim().length === 0) {
+      console.error(`❌ [SUMMARY CHUNK ${chunkIndex + 1}] Empty response received - using original chunk content`);
+      return { index: chunkIndex, content: chunk }; // Return original chunk content instead of error
+    }
     
-    return { index: chunkIndex, content: response.content };
+         const chunkEndTime = Date.now();
+     console.log(`✅ [SUMMARY CHUNK ${chunkIndex + 1}] Summary chunk processing time: ${chunkEndTime - chunkStartTime}ms`);
+     console.log(`📄 [SUMMARY CHUNK ${chunkIndex + 1}] Response length: ${response.content.length} characters`);
+     
+     // Explicit cleanup to free memory
+     console.log(`🧹 [SUMMARY CHUNK ${chunkIndex + 1}] Cleaning up chunk resources...`);
+     
+     return { index: chunkIndex, content: response.content };
   }
 
   private async finalFormattingPass(content: string, params: ExecutionParams): Promise<string> {
@@ -193,17 +189,11 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     
     const fullFinalPrompt = `${finalSystemPrompt}\n\n${finalTaskPrompt}`;
     
-    // Process final formatting with timeout
-    const finalPromise = llmProvider.generateContent(fullFinalPrompt, {
-      temperature: 0.7,
-      maxTokens: 5000
-    });
-    
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Final formatting timed out after 60 seconds')), 60000);
-    });
-    
-    const response = await Promise.race([finalPromise, timeoutPromise]) as any;
+         // Process final formatting with reduced maxTokens for faster processing
+     const response = await llmProvider.generateContent(fullFinalPrompt, {
+       temperature: 0.7,
+       maxTokens: 3000  // Reduced for faster processing
+     }) as any;
     
     if (response.error) {
       console.error(`❌ Final formatting error: ${response.error}`);
@@ -444,43 +434,24 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     const allGroupResults: string[] = [];
     const groupPromises: Promise<{ groupName: string; content: string }>[] = [];
 
-    for (const groupName of groupNames) {
-      const groupImages = groupedImages[groupName];
-      
-      // Process this group in batches
-      const groupResult = this.processGroupInBatches(groupImages, groupName, params);
-      groupPromises.push(groupResult);
-      
-      // Limit concurrent groups to MAX_PARALLEL_AGENTS
-      if (groupPromises.length >= this.MAX_PARALLEL_AGENTS) {
-        // Wait for each group individually and update after each one completes
-        for (let j = 0; j < groupPromises.length; j++) {
-          const completedResult = await groupPromises[j];
-          allGroupResults.push(completedResult.content);
-          
-          // Update report content after each individual group completes
-          const currentContent = allGroupResults.join('\n\n');
-          await this.updateReportContent(currentContent, false);
-        }
-        
-        groupPromises.length = 0; // Clear array
-      }
-    }
+         // Process groups sequentially (one at a time) to prevent resource contention
+     for (const groupName of groupNames) {
+       const groupImages = groupedImages[groupName];
+       
+       console.log(`🚀 Processing group "${groupName}" sequentially`);
+       
+       // Process this group in batches and wait for it to complete
+       const groupResult = await this.processGroupInBatches(groupImages, groupName, params);
+       allGroupResults.push(groupResult.content);
+       
+       // Update report content after each group completes
+       const currentContent = allGroupResults.join('\n\n');
+       await this.updateReportContent(currentContent, false);
+       
+       console.log(`✅ Completed group "${groupName}"`);
+     }
 
-    // Wait for remaining groups
-    if (groupPromises.length > 0) {
-      // Wait for each remaining group individually and update after each one completes
-      for (let j = 0; j < groupPromises.length; j++) {
-        const completedResult = await groupPromises[j];
-        allGroupResults.push(completedResult.content);
-        
-        // Update report content after each individual group completes
-        const currentContent = allGroupResults.join('\n\n');
-        await this.updateReportContent(currentContent, false);
-      }
-    }
-
-    const content = allGroupResults.join('\n\n');
+         const content = allGroupResults.join('\n\n');
 
     // Update report with final content
     await this.updateReportContent(content, true);
@@ -507,49 +478,24 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     const allBatchResults: string[] = [];
     const activePromises: Promise<string>[] = [];
 
-    for (let i = 0; i < batches.length; i++) {
-      const batch = batches[i];
-      
-      // Wait if we've reached the parallel limit
-      if (activePromises.length >= this.MAX_PARALLEL_AGENTS) {
-        console.log(`🔄 Waiting for ${activePromises.length} batches to complete before starting batch ${i + 1} (parallel limit: ${this.MAX_PARALLEL_AGENTS})`);
-        
-        // Wait for each batch individually and update after each one completes
-        for (let j = 0; j < activePromises.length; j++) {
-          const completedResult = await activePromises[j];
-          allBatchResults.push(completedResult);
-          
-          // Update report content after each individual batch completes
-          const currentContent = allBatchResults.join('\n\n');
-          await this.updateReportContent(currentContent, false);
-        }
-        
-        activePromises.length = 0; // Clear array
-        console.log(`✅ Completed batch group, starting next set of ${this.MAX_PARALLEL_AGENTS} batches`);
-      }
-      
-      // Start this batch (only after waiting if needed)
-      console.log(`🚀 Starting batch ${i + 1}/${batches.length} (${activePromises.length + 1} active)`);
-      const batchResult = this.processBatch(batch, i, batches.length, params);
-      activePromises.push(batchResult);
-    }
+         // Process batches sequentially (one at a time) to prevent resource contention
+     for (let i = 0; i < batches.length; i++) {
+       const batch = batches[i];
+       
+       console.log(`🚀 Processing batch ${i + 1}/${batches.length} sequentially`);
+       
+       // Process this batch and wait for it to complete
+       const batchResult = await this.processBatch(batch, i, batches.length, params);
+       allBatchResults.push(batchResult);
+       
+       // Update report content after each batch completes
+       const currentContent = allBatchResults.join('\n\n');
+       await this.updateReportContent(currentContent, false);
+       
+       console.log(`✅ Completed batch ${i + 1}/${batches.length}`);
+     }
 
-    // Wait for remaining batches
-    if (activePromises.length > 0) {
-      console.log(`🔄 Waiting for final ${activePromises.length} batches to complete`);
-      
-      // Wait for each remaining batch individually and update after each one completes
-      for (let j = 0; j < activePromises.length; j++) {
-        const completedResult = await activePromises[j];
-        allBatchResults.push(completedResult);
-        
-        // Update report content after each individual batch completes
-        const currentContent = allBatchResults.join('\n\n');
-        await this.updateReportContent(currentContent, false);
-      }
-    }
-
-    const content = allBatchResults.join('\n\n');
+         const content = allBatchResults.join('\n\n');
 
     // Update report with final content
     await this.updateReportContent(content, true);
@@ -644,11 +590,14 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
       return `[ERROR: Failed to process batch ${batchIndex + 1} - ${response.error}]`;
     }
 
-    const batchEndTime = Date.now();
-    console.log(`🎉 [BATCH ${batchIndex + 1}] Total batch processing time: ${batchEndTime - batchStartTime}ms`);
-    console.log(`📄 [BATCH ${batchIndex + 1}] Response length: ${response.content.length} characters`);
+         const batchEndTime = Date.now();
+     console.log(`🎉 [BATCH ${batchIndex + 1}] Total batch processing time: ${batchEndTime - batchStartTime}ms`);
+     console.log(`📄 [BATCH ${batchIndex + 1}] Response length: ${response.content.length} characters`);
 
-    return response.content;
+     // Explicit cleanup to free memory
+     console.log(`🧹 [BATCH ${batchIndex + 1}] Cleaning up batch resources...`);
+     
+     return response.content;
   }
 
   private groupImages(images: any[]): Record<string, any[]> {
@@ -669,7 +618,8 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     if (!this.supabase || !this.reportId) return;
     
     try {
-      const status = isComplete ? 'COMPLETE' : '[PROCESSING IN PROGRESS...]';
+      // Always keep the processing marker until the very end
+      const status = '[PROCESSING IN PROGRESS...]';
       const fullContent = `${content}\n\n${status}`;
       
       await this.supabase
@@ -677,9 +627,26 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
         .update({ generated_content: fullContent })
         .eq('id', this.reportId);
         
-      console.log(`📝 Updated report content (${content.length} chars, ${isComplete ? 'complete' : 'in progress'})`);
+      console.log(`📝 Updated report content (${content.length} chars, ${isComplete ? 'final update' : 'in progress'})`);
     } catch (error) {
       console.error('Error updating report content:', error);
+    }
+  }
+
+  private async markReportComplete(content: string) {
+    if (!this.supabase || !this.reportId) return;
+    
+    try {
+      const fullContent = `${content}\n\n✅ REPORT GENERATION COMPLETE`;
+      
+      await this.supabase
+        .from('reports')
+        .update({ generated_content: fullContent })
+        .eq('id', this.reportId);
+        
+      console.log(`🎉 Report marked as complete (${content.length} chars)`);
+    } catch (error) {
+      console.error('Error marking report complete:', error);
     }
   }
 

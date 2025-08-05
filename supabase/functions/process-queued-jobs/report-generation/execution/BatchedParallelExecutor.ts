@@ -68,6 +68,9 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
         throw new Error(`Summary generation failed: ${summaryResponse.error}`);
       }
 
+      // Update report with final summary content
+      await this.updateReportContent(summaryResponse.content, true);
+
       return {
         content: summaryResponse.content,
         metadata: {
@@ -323,7 +326,8 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
     if (!this.supabase || !this.reportId) return;
     
     try {
-      const status = isComplete ? 'COMPLETE' : '[PROCESSING IN PROGRESS...]';
+      // Always keep the processing marker until the very end
+      const status = '[PROCESSING IN PROGRESS...]';
       const fullContent = `${content}\n\n${status}`;
       
       await this.supabase
@@ -331,7 +335,7 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
         .update({ generated_content: fullContent })
         .eq('id', this.reportId);
         
-      console.log(`📝 Updated report content (${content.length} chars, ${isComplete ? 'complete' : 'in progress'})`);
+      console.log(`📝 Updated report content (${content.length} chars, ${isComplete ? 'final update' : 'in progress'})`);
     } catch (error) {
       console.error('Error updating report content:', error);
     }

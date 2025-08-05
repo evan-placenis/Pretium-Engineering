@@ -137,6 +137,14 @@ export default function UploadPhotoModal({
           }}>
             Select the date when these photos were taken. This will be used as the creation date for organizing your photos chronologically.
           </p>
+          <p style={{ 
+            fontSize: '0.75rem', 
+            color: '#2563eb', 
+            marginTop: '0.5rem',
+            fontStyle: 'italic'
+          }}>
+            💡 Images will be automatically optimized for better performance and AI processing.
+          </p>
         </div>
 
         <div style={{ marginBottom: '1.5rem' }}>
@@ -296,7 +304,14 @@ export default function UploadPhotoModal({
               }
             `}</style>
             <p style={{ margin: 0, color: 'var(--color-text)' }}>
-              {progress || 'Uploading photos...'}
+              {progress || 'Processing and uploading photos...'}
+            </p>
+            <p style={{ 
+              margin: '0.5rem 0 0 0', 
+              fontSize: '0.875rem',
+              color: 'var(--color-text-secondary)' 
+            }}>
+              Images are being optimized for better performance
             </p>
           </div>
         )}

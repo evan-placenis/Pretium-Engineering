@@ -67,20 +67,15 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
       console.warn('Could not fetch project data:', projectError.message);
     }
 
-    // Resize images for AI processing
-    const resizedImages = await Promise.all(
-      imagesWithNumbering.map(async (img: any) => {
-        const resizedUrl = await resizeImageForAI(img.url);
-        return {
-          id: img.id,
-          url: resizedUrl,
-          description: img.description || '',
-          tag: img.tag || undefined,
-          group: img.group || [],
-          number: img.number
-        };
-      })
-    );
+         // Use original images - resizing will be done on frontend before upload
+     const resizedImages = imagesWithNumbering.map((img: any) => ({
+       id: img.id,
+       url: img.url, // Use original URL (already resized on frontend)
+       description: img.description || '',
+       tag: img.tag || undefined,
+       group: img.group || [],
+       number: img.number
+     }));
 
     // Determine the actual mode based on the image data, not the frontend parameter
     const hasGroups = resizedImages.some(img => img.group && img.group.length > 0);
@@ -162,26 +157,8 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
       throw new Error(`ReportGenerator failed: ${result.error}`);
     }
 
-    // Update progress: Finalizing report
-    await supabase
-      .from('reports')
-      .update({ 
-        generated_content: `1. Starting ${mode} report generation with ${selectedModel}\nProcessing ${resizedImages.length} images in ${actualMode} mode...\nStarting final review and formatting...\n\n[PROCESSING IN PROGRESS...]`
-      })
-      .eq('id', reportId);
-
-    // Update the database with the generated content
-    const { error: updateError } = await supabase
-      .from('reports')
-      .update({ 
-        generated_content: result.content
-      })
-      .eq('id', reportId);
-
-    if (updateError) {
-      console.error('Error updating database with ReportGenerator content:', updateError);
-      throw new Error(`Failed to save report: ${updateError.message}`);
-    }
+    // The executor handles all content updates, so we don't need to update here
+    // The final content is already in result.content and has been updated by the executor
 
     console.log(`✅ ReportGenerator ${job.input_data.mode} report generation completed successfully`);
     return { 
@@ -212,76 +189,4 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
   }
 }
 
-// Helper function for image resizing (Deno-compatible)
-async function resizeImageForAI(imageUrl: string, maxWidth: number = 1024, maxHeight: number = 1024, quality: number = 0.8): Promise<string> {
-  try {
-    console.log(`🖼️ Resizing image: ${imageUrl}`);
-    
-    // Fetch the original image
-    const response = await fetch(imageUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch image: ${response.statusText}`);
-    }
-    
-    const arrayBuffer = await response.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-    
-    // Create a blob from the image data
-    const blob = new Blob([uint8Array]);
-    const imageBitmap = await createImageBitmap(blob);
-    
-    // Calculate new dimensions while maintaining aspect ratio
-    const { width: originalWidth, height: originalHeight } = imageBitmap;
-    let { width: newWidth, height: newHeight } = imageBitmap;
-    
-    if (originalWidth > maxWidth || originalHeight > maxHeight) {
-      const aspectRatio = originalWidth / originalHeight;
-      
-      if (originalWidth > originalHeight) {
-        newWidth = maxWidth;
-        newHeight = maxWidth / aspectRatio;
-        if (newHeight > maxHeight) {
-          newHeight = maxHeight;
-          newWidth = maxHeight * aspectRatio;
-        }
-      } else {
-        newHeight = maxHeight;
-        newWidth = maxHeight * aspectRatio;
-        if (newWidth > maxWidth) {
-          newWidth = maxWidth;
-          newHeight = maxWidth / aspectRatio;
-        }
-      }
-    }
-    
-    // Create canvas for resizing
-    const canvas = new OffscreenCanvas(newWidth, newHeight);
-    const ctx = canvas.getContext('2d');
-    
-    if (!ctx) {
-      throw new Error('Failed to get canvas context');
-    }
-    
-    // Draw the resized image
-    ctx.drawImage(imageBitmap, 0, 0, newWidth, newHeight);
-    
-    // Convert to blob with specified quality
-    const resizedBlob = await canvas.convertToBlob({
-      type: 'image/jpeg',
-      quality: quality
-    });
-    
-    // Convert blob to base64
-    const arrayBuffer2 = await resizedBlob.arrayBuffer();
-    const uint8Array2 = new Uint8Array(arrayBuffer2);
-    const base64String = btoa(Array.from(uint8Array2, byte => String.fromCharCode(byte)).join(''));
-    
-    console.log(`✅ Image resized from ${originalWidth}x${originalHeight} to ${newWidth}x${newHeight}`);
-    return `data:image/jpeg;base64,${base64String}`;
-    
-  } catch (error) {
-    console.error('Error resizing image:', error);
-    console.log(`⚠️ Falling back to original URL due to resize error`);
-    return imageUrl;
-  }
-} 
+

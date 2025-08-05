@@ -21,27 +21,51 @@ export default function Dashboard() {
   const { viewMode, toggleViewMode } = useViewPreference('dashboard-projects');
 
   useEffect(() => {
-    // Check for user authentication
-    const checkUser = async () => {
-      console.log('Dashboard: Checking user session');
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
+    // Set up auth state listener to handle auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('Dashboard: Auth state changed:', event, session?.user?.email);
         
-        if (session?.user) {
+        if (event === 'SIGNED_IN' && session?.user) {
           console.log('Dashboard: User authenticated:', session.user.email);
           setUser(session.user);
           fetchProjects(session.user.id);
+        } else if (event === 'SIGNED_OUT') {
+          console.log('Dashboard: User signed out, redirecting to login');
+          setUser(null);
+          setProjects([]);
+          setAllProjects([]);
+          router.push('/auth/login');
+        } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+          setUser(session.user);
+        }
+      }
+    );
+
+    // Initial session check (only once)
+    const checkInitialSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          console.log('Dashboard: Initial session found:', session.user.email);
+          setUser(session.user);
+          fetchProjects(session.user.id);
         } else {
-          console.log('Dashboard: No user session found, redirecting to login');
+          console.log('Dashboard: No initial session found, redirecting to login');
           router.push('/auth/login');
         }
       } catch (error) {
-        console.error('Authentication error:', error);
+        console.error('Dashboard: Authentication error:', error);
         router.push('/auth/login');
+      } finally {
+        setLoading(false);
       }
     };
 
-    checkUser();
+    checkInitialSession();
+
+    // Cleanup subscription
+    return () => subscription.unsubscribe();
   }, [router]);
 
   const fetchProjects = async (userId: string) => {

@@ -24,14 +24,10 @@ interface GroupOrder {
   order: number;
 }
 
-// Define available models and their corresponding API routes
+// Define available models for the unified report generation system
 const AVAILABLE_MODELS = [
-  { id: 'grok4', name: 'Grok-4 ', route: '/api/models/generate-report-grok4', streamRoute: '/api/models/generate-report-grok4', description: 'Latest xAI model with advanced reasoning capabilities', supportsStreaming: true },
-  { id: 'advanced-streaming', name: 'gpt-4o', route: '/api/models/generate-report-gpt4', streamRoute: '/api/models/generate-report-gpt4', description: 'Open AI model with strong image understanding', supportsStreaming: true },
-  { id: 'advanced', name: 'Advanced Model (Standard)', route: '/api/models/generate-report-advanced', description: 'Higher quality, slower processing', supportsStreaming: false },
-  { id: 'lightweight', name: 'Lightweight Model', route: '/api/models/generate-report-lite', description: 'Faster processing, basic quality', supportsStreaming: false },
-  { id: 'custom', name: 'Custom Fine-tuned', route: '/api/models/generate-report-custom', description: 'Your fine-tuned model', supportsStreaming: false },
-  { id: 'standard', name: 'Standard Model', route: '/api/generate-report-simple', description: 'Balanced performance and speed', supportsStreaming: false },
+  { id: 'grok4', name: 'Grok-4', description: 'Latest xAI model with advanced reasoning capabilities' },
+  { id: 'gpt4o', name: 'GPT-4o', description: 'OpenAI model with strong image understanding' },
 ];
 
 export default function NewReport() {
@@ -42,7 +38,8 @@ export default function NewReport() {
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
   const [selectedImages, setSelectedImages] = useState<ExtendedImageItem[]>([]);
-  const [selectedModel, setSelectedModel] = useState('advanced-streaming');
+  const [selectedModel, setSelectedModel] = useState('grok4');
+  const [reportMode, setReportMode] = useState<'brief' | 'elaborate'>('brief');
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [debugInfo, setDebugInfo] = useState<any>(null);
   const [showDebugInfo, setShowDebugInfo] = useState(false);
@@ -144,6 +141,14 @@ export default function NewReport() {
                     number: templateData?.number || null
                   };
                 });
+                
+                // Determine if the template was ungrouped or grouped based on the data
+                const hasGroups = restoredImages.some(img => img.group && img.group.length > 0);
+                const isTemplateUngrouped = !hasGroups;
+                
+                // Set the mode based on the template data, not URL parameter
+                setIsUngroupedMode(isTemplateUngrouped);
+                
                 setSelectedImages(restoredImages);
                 setGroupNumberingStates(parsed.groupNumberingStates || {});
                 setGroupOrder(parsed.groupOrder || []);
@@ -222,7 +227,7 @@ export default function NewReport() {
               }
             }
             // Only restore selectedModel if we're still on the default and haven't manually selected a model
-            if (parsed.selectedModel && selectedModel === 'advanced-streaming' && !hasManuallySelectedModel) {
+            if (parsed.selectedModel && selectedModel === 'grok4' && !hasManuallySelectedModel) {
               setSelectedModel(parsed.selectedModel);
               restored = true;
             }
@@ -536,6 +541,12 @@ export default function NewReport() {
 
 
   const generateReport = async () => {
+    // Prevent multiple submissions
+    if (loading) {
+      console.log('Report generation already in progress, ignoring duplicate click');
+      return;
+    }
+
     if (!bulletPoints.trim()) {
       setError('Please enter some bullet points to generate a report');
       return;
@@ -546,6 +557,7 @@ export default function NewReport() {
       return;
     }
 
+    console.log('Starting report generation process...');
     setLoading(true);
     setError(null);
 
@@ -663,48 +675,16 @@ export default function NewReport() {
         rotation: img.rotation || 0, // Preserve rotation information
         user_id: user.id // Add user tracking
       })));
-      
 
-      const selectedModelConfig = AVAILABLE_MODELS.find(model => model.id === selectedModel) || AVAILABLE_MODELS[0];
-      console.log('Starting report generation with reportId:', reportData.id, 'using model:', selectedModelConfig.name);
-
-      // Check if model supports streaming
-      if (selectedModelConfig.supportsStreaming && selectedModelConfig.streamRoute) {
-        // For streaming models, redirect immediately and let the edit page handle the streaming
-        router.push(`/reports/${reportData.id}/edit?streaming=true&model=${selectedModel}`);
-        
-        // Start the streaming generation in the background
-        fetch(selectedModelConfig.streamRoute, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-                  body: JSON.stringify({
-          bulletPoints,
-          projectId: project?.id,
-          contractName: project?.["Client Name"],
-          location: project?.location,
-          reportId: reportData.id,
-          images: imagesWithNumbering,
-          groupOrder: groupOrder, // Include group ordering information
-          modelType: selectedModel
-        }),
-        }).then(response => {
-          console.log('Streaming API response:', response.status);
-          return response.json();
-        }).then(data => {
-          console.log('Streaming API response data:', data);
-        }).catch(error => {
-          console.error('Streaming generation failed:', error);
-        });
-        
-        // Clear saved form data after successful generation
-        clearSavedFormData();
-        return; // Exit early for streaming models
+      if (imagesError) {
+        console.error('Error inserting report images:', imagesError);
+        throw new Error(`Failed to insert report images: ${imagesError.message}`);
       }
 
-      // For non-streaming models, use the original approach
-      const response = await fetch(selectedModelConfig.route, {
+      console.log('Starting report generation with reportId:', reportData.id, 'using model:', selectedModel, 'mode:', reportMode);
+
+      // Use the unified API route with user-selected parameters
+      const response = await fetch('/api/models/generate-report', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -712,11 +692,14 @@ export default function NewReport() {
         body: JSON.stringify({
           bulletPoints,
           projectId: project?.id,
+          contractName: project?.["Client Name"],
           location: project?.location,
           reportId: reportData.id,
-          images: imagesWithNumbering,
+          imagesWithNumbering,
           groupOrder: groupOrder, // Include group ordering information
-          modelType: selectedModel
+          selectedModel, // User's model choice
+          isUngroupedMode, // User's grouping choice
+          mode: reportMode // User's mode choice ('brief' or 'elaborate')
         }),
       });
 
@@ -726,31 +709,26 @@ export default function NewReport() {
       }
 
       const responseData = await response.json();
-      const { generatedContent, images: responseImages, batchDetails, combinedDraft, processingStats } = responseData;
-      
-      // Store debug information if available
-      if (batchDetails || combinedDraft || processingStats) {
+      console.log('Job queued successfully:', responseData);
+
+      if (!responseData.success) {
+        throw new Error(responseData.error || 'Failed to queue report generation job');
+      }
+
+      // Store debug information if available (for job tracking)
+      if (responseData && typeof responseData === 'object' && 'jobId' in responseData) {
         setDebugInfo({
-          batchDetails,
-          combinedDraft,
-          processingStats,
-          modelUsed: selectedModelConfig.name
+          jobId: responseData.jobId,
+          message: responseData.message,
+          modelUsed: selectedModel
         });
       }
 
-      // Update the report with the generated content
-      const { error: updateError } = await supabase
-        .from('reports')
-        .update({ generated_content: generatedContent })
-        .eq('id', reportData.id);
-
-      if (updateError) throw updateError;
-
-      // Clear saved form data after successful generation
+      // Clear saved form data after successful job queuing
       clearSavedFormData();
 
-      // Redirect to the report editor
-      router.push(`/reports/${reportData.id}/edit`);
+      // Redirect to the report editor to show progress
+      router.push(`/reports/${reportData.id}/edit?jobId=${responseData.jobId}&streaming=true&model=${selectedModel}`);
     } catch (error: any) {
       console.error('Error generating report:', error);
       setError(error.message || 'An error occurred while generating the report');
@@ -932,6 +910,48 @@ export default function NewReport() {
             </div>
             <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
               Choose the AI model for generating your report. Different models offer varying levels of quality and processing speed.
+            </p>
+          </div>
+
+          {/* Report Mode Selection */}
+          <div style={{ marginBottom: "1.5rem" }}>
+            <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "500" }}>
+              Report Style
+            </label>
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+              <button
+                type="button"
+                onClick={() => setReportMode('brief')}
+                className="btn btn-sm"
+                style={{ 
+                  backgroundColor: reportMode === 'brief' ? 'var(--color-primary)' : 'transparent',
+                  color: reportMode === 'brief' ? '#fff' : 'var(--color-text)',
+                  borderColor: reportMode === 'brief' ? 'var(--color-primary)' : 'var(--color-border)',
+                  fontSize: "0.875rem",
+                  padding: "0.5rem 1rem"
+                }}
+                disabled={loading}
+              >
+                Brief
+              </button>
+              <button
+                type="button"
+                onClick={() => setReportMode('elaborate')}
+                className="btn btn-sm"
+                style={{ 
+                  backgroundColor: reportMode === 'elaborate' ? 'var(--color-primary)' : 'transparent',
+                  color: reportMode === 'elaborate' ? '#fff' : 'var(--color-text)',
+                  borderColor: reportMode === 'elaborate' ? 'var(--color-primary)' : 'var(--color-border)',
+                  fontSize: "0.875rem",
+                  padding: "0.5rem 1rem"
+                }}
+                disabled={loading}
+              >
+                Elaborate
+              </button>
+            </div>
+            <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
+              Brief: Concise, focused reports. Elaborate: Detailed, comprehensive analysis.
             </p>
           </div>
 

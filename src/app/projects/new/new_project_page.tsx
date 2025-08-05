@@ -17,25 +17,49 @@ export default function NewProject() {
   const router = useRouter();
 
   useEffect(() => {
-    // Check if user is authenticated
-    const checkAuth = async () => {
+    // Set up auth state listener to handle auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('NewProject: Auth state changed:', event, session?.user?.email);
+        
+        if (event === 'SIGNED_IN' && session?.user) {
+          console.log('NewProject: User authenticated:', session.user.email);
+          setUser(session.user);
+          setLoading(false);
+        } else if (event === 'SIGNED_OUT') {
+          console.log('NewProject: User signed out, redirecting to login');
+          setUser(null);
+          router.push('/auth/login');
+        } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+          setUser(session.user);
+        }
+      }
+    );
+
+    // Initial session check (only once)
+    const checkInitialAuth = async () => {
       try {
         const { data } = await supabase.auth.getSession();
         
         if (data.session) {
+          console.log('NewProject: Initial session found:', data.session.user.email);
           setUser(data.session.user);
         } else {
+          console.log('NewProject: No initial session found, redirecting to login');
           router.push('/auth/login');
         }
       } catch (err) {
-        console.error('Error checking authentication:', err);
+        console.error('NewProject: Error checking authentication:', err);
         router.push('/auth/login');
       } finally {
         setLoading(false);
       }
     };
     
-    checkAuth();
+    checkInitialAuth();
+
+    // Cleanup subscription
+    return () => subscription.unsubscribe();
   }, [router]);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {

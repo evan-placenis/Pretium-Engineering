@@ -82,6 +82,12 @@ When NO specifications are provided:
 
 `;
 
+
+
+
+
+
+
 export const Ungrouped_GeneralAndSummaryPrompt = `
 # ROLE:
 You are the final editor of a Civil Engineering report for Pretium. Your job is to format and finalize building observation reports from a draft made of site observations. The technical content is already written. Your task is to apply consistent formatting, organize observations into logical sections, and ensure the final output is clear, professional, and logically structured.

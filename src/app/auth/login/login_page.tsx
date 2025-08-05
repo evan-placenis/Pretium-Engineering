@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
@@ -10,6 +10,9 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [attemptCount, setAttemptCount] = useState(0);
+  const [cooldownTime, setCooldownTime] = useState(0);
+  const lastAttemptTime = useRef<number>(0);
   const router = useRouter();
   const searchParams = useSearchParams();
   
@@ -21,10 +24,39 @@ export default function Login() {
     }
   }, [searchParams]);
 
+  // Cooldown timer effect
+  useEffect(() => {
+    if (cooldownTime > 0) {
+      const timer = setTimeout(() => {
+        setCooldownTime(cooldownTime - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [cooldownTime]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Rate limiting check
+    const now = Date.now();
+    const timeSinceLastAttempt = now - lastAttemptTime.current;
+    
+    // Prevent rapid attempts (minimum 2 seconds between attempts)
+    if (timeSinceLastAttempt < 2000) {
+      setError('Please wait a moment before trying again.');
+      return;
+    }
+    
+    // If we have too many attempts, enforce cooldown
+    if (attemptCount >= 5 && cooldownTime > 0) {
+      setError(`Too many login attempts. Please wait ${cooldownTime} seconds before trying again.`);
+      return;
+    }
+    
     setLoading(true);
     setError(null);
+    lastAttemptTime.current = now;
+    setAttemptCount(prev => prev + 1);
 
     try {
       // Use Supabase to sign in with email/password
@@ -33,7 +65,20 @@ export default function Login() {
         password,
       });
 
-      if (error) throw error;
+      if (error) {
+        // Handle rate limiting specifically
+        if (error.message.includes('rate limit') || error.message.includes('429')) {
+          setCooldownTime(60); // 1 minute cooldown
+          setError('Too many login attempts. Please wait 1 minute before trying again.');
+        } else {
+          throw error;
+        }
+        return;
+      }
+      
+      // Reset attempt count on success
+      setAttemptCount(0);
+      setCooldownTime(0);
       
       // On successful authentication, redirect to dashboard
       console.log('Login successful, redirecting...');
@@ -41,7 +86,17 @@ export default function Login() {
       
     } catch (error: any) {
       console.error('Login error:', error);
-      setError(error.message || 'An error occurred during login');
+      
+      // Handle different types of errors
+      if (error.message.includes('rate limit') || error.message.includes('429')) {
+        setCooldownTime(60);
+        setError('Too many login attempts. Please wait 1 minute before trying again.');
+      } else if (error.message.includes('Invalid login credentials')) {
+        setError('Invalid email or password. Please check your credentials.');
+      } else {
+        setError(error.message || 'An error occurred during login');
+      }
+    } finally {
       setLoading(false);
     }
   };
@@ -73,6 +128,7 @@ export default function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 className="form-input"
                 placeholder="Email address"
+                disabled={loading || cooldownTime > 0}
               />
             </div>
             
@@ -90,17 +146,19 @@ export default function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 className="form-input"
                 placeholder="Password"
+                disabled={loading || cooldownTime > 0}
               />
             </div>
 
             <div style={{ marginTop: "1.5rem" }}>
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || cooldownTime > 0}
                 className="btn btn-primary"
                 style={{ width: "100%" }}
               >
-                {loading ? 'Signing in...' : 'Sign in'}
+                {loading ? 'Signing in...' : 
+                 cooldownTime > 0 ? `Wait ${cooldownTime}s...` : 'Sign in'}
               </button>
             </div>
           </form>

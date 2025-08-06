@@ -139,8 +139,8 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
 
     const content = allGroupResults.join('\n\n');
 
-    // Update report with final content
-    await this.updateReportContent(content, true);
+    // Update report with content from image processing (not final yet)
+    await this.updateReportContent(content, false);
 
     return {
       content,
@@ -208,8 +208,8 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
 
     const content = allBatchResults.join('\n\n');
 
-    // Update report with final content
-    await this.updateReportContent(content, true);
+    // Update report with content from image processing (not final yet)
+    await this.updateReportContent(content, false);
 
     return {
       content,
@@ -326,9 +326,23 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
     if (!this.supabase || !this.reportId) return;
     
     try {
-      // Always keep the processing marker until the very end
-      const status = '[PROCESSING IN PROGRESS...]';
-      const fullContent = `${content}\n\n${status}`;
+      let fullContent = content;
+      
+      if (isComplete) {
+        // Remove any existing processing marker (handle various line break patterns)
+        let cleanedContent = content;
+        cleanedContent = cleanedContent.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, '');
+        cleanedContent = cleanedContent.replace(/\n\[PROCESSING IN PROGRESS\.\.\.\]/g, '');
+        cleanedContent = cleanedContent.replace(/\[PROCESSING IN PROGRESS\.\.\.\]/g, '');
+        
+        // Just use the cleaned content without adding a completion message
+        fullContent = cleanedContent;
+        console.log(`🎉 [COMPLETE] Final content ends with: "${fullContent.slice(-50)}"`);
+      } else {
+        // Add processing marker for in-progress updates
+        const status = '[PROCESSING IN PROGRESS...]';
+        fullContent = `${content}\n\n${status}`;
+      }
       
       await this.supabase
         .from('reports')

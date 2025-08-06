@@ -20481,7 +20481,7 @@ ${summaryTaskPrompt}`;
       }
     }
     const content = allGroupResults.join("\n\n");
-    await this.updateReportContent(content, true);
+    await this.updateReportContent(content, false);
     return {
       content,
       metadata: {
@@ -20526,7 +20526,7 @@ ${summaryTaskPrompt}`;
       }
     }
     const content = allBatchResults.join("\n\n");
-    await this.updateReportContent(content, true);
+    await this.updateReportContent(content, false);
     return {
       content,
       metadata: {
@@ -20619,10 +20619,20 @@ ${batchPrompt}`;
     if (!this.supabase || !this.reportId)
       return;
     try {
-      const status = "[PROCESSING IN PROGRESS...]";
-      const fullContent = `${content}
+      let fullContent = content;
+      if (isComplete) {
+        let cleanedContent = content;
+        cleanedContent = cleanedContent.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, "");
+        cleanedContent = cleanedContent.replace(/\n\[PROCESSING IN PROGRESS\.\.\.\]/g, "");
+        cleanedContent = cleanedContent.replace(/\[PROCESSING IN PROGRESS\.\.\.\]/g, "");
+        fullContent = cleanedContent;
+        console.log(`\u{1F389} [COMPLETE] Final content ends with: "${fullContent.slice(-50)}"`);
+      } else {
+        const status = "[PROCESSING IN PROGRESS...]";
+        fullContent = `${content}
 
 ${status}`;
+      }
       await this.supabase.from("reports").update({ generated_content: fullContent }).eq("id", this.reportId);
       console.log(`\u{1F4DD} Updated report content (${content.length} chars, ${isComplete ? "final update" : "in progress"})`);
     } catch (error) {
@@ -20670,7 +20680,7 @@ var BatchedParallelWithParallelSummaryExecutor = class {
       console.log("\u{1F4DD} Generating final summary using parallel agents (STREAMING ENABLED)...");
       await this.updateReportContent(content + "\n\n\u{1F4DD} PARALLEL SUMMARY PHASE: Starting final review and formatting...", false);
       const finalContent = await this.processSummaryInParallel(content, params);
-      await this.markReportComplete(finalContent);
+      await this.updateReportContent(finalContent, true);
       return {
         content: finalContent,
         metadata: {
@@ -21097,28 +21107,22 @@ ${batchPrompt}`;
     if (!this.supabase || !this.reportId)
       return;
     try {
-      const status = "[PROCESSING IN PROGRESS...]";
-      const fullContent = `${content}
+      let fullContent = content;
+      if (isComplete) {
+        fullContent = content.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, "");
+        fullContent = `${fullContent}
+
+\u2705 REPORT GENERATION COMPLETE`;
+      } else {
+        const status = "[PROCESSING IN PROGRESS...]";
+        fullContent = `${content}
 
 ${status}`;
+      }
       await this.supabase.from("reports").update({ generated_content: fullContent }).eq("id", this.reportId);
       console.log(`\u{1F4DD} Updated report content (${content.length} chars, ${isComplete ? "final update" : "in progress"})`);
     } catch (error) {
       console.error("Error updating report content:", error);
-    }
-  }
-  async markReportComplete(content) {
-    if (!this.supabase || !this.reportId)
-      return;
-    try {
-      const contentWithoutMarker = content.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, "");
-      const fullContent = `${contentWithoutMarker}
-
-\u2705 REPORT GENERATION COMPLETE`;
-      await this.supabase.from("reports").update({ generated_content: fullContent }).eq("id", this.reportId);
-      console.log(`\u{1F389} Report marked as complete (${contentWithoutMarker.length} chars)`);
-    } catch (error) {
-      console.error("Error marking report complete:", error);
     }
   }
   chunkArray(array, size) {
@@ -28899,13 +28903,18 @@ var handler = async (event) => {
     }
     if (error) {
       try {
-        await supabase.from("reports").update({
-          generated_content: `\u274C REPORT GENERATION FAILED
+        const { data: currentReport } = await supabase.from("reports").select("generated_content").eq("id", job.input_data.reportId).single();
+        let currentContent = currentReport?.generated_content || "";
+        currentContent = currentContent.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, "");
+        const errorMessage = `
+
+\u274C REPORT GENERATION FAILED
 
 Error: ${error}
 
-Your content has been preserved. You can continue editing or try generating again.`
-        }).eq("id", job.input_data.reportId);
+Your content has been preserved. You can continue editing or try generating again.`;
+        const updatedContent = currentContent + errorMessage;
+        await supabase.from("reports").update({ generated_content: updatedContent }).eq("id", job.input_data.reportId);
       } catch (updateError) {
         console.error("Failed to update report with error:", updateError);
       }

@@ -42,8 +42,8 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
       
       const finalContent = await this.processSummaryInParallel(content, params);
 
-       // Mark report as truly complete (no need to update with processing marker first)
-       await this.markReportComplete(finalContent);
+       // Update report with final content (mark as complete)
+       await this.updateReportContent(finalContent, true);
 
         return {
         content: finalContent,
@@ -653,9 +653,17 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     if (!this.supabase || !this.reportId) return;
     
     try {
-      // Always keep the processing marker until the very end
-      const status = '[PROCESSING IN PROGRESS...]';
-      const fullContent = `${content}\n\n${status}`;
+      let fullContent = content;
+      
+      if (isComplete) {
+        // Remove any existing processing marker and add completion message
+        fullContent = content.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, '');
+        fullContent = `${fullContent}\n\n✅ REPORT GENERATION COMPLETE`;
+      } else {
+        // Add processing marker for in-progress updates
+        const status = '[PROCESSING IN PROGRESS...]';
+        fullContent = `${content}\n\n${status}`;
+      }
       
       await this.supabase
         .from('reports')
@@ -668,24 +676,7 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     }
   }
 
-  private async markReportComplete(content: string) {
-    if (!this.supabase || !this.reportId) return;
-    
-    try {
-      // Remove the processing marker and add completion message
-      const contentWithoutMarker = content.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, '');
-      const fullContent = `${contentWithoutMarker}\n\n✅ REPORT GENERATION COMPLETE`;
-      
-      await this.supabase
-        .from('reports')
-        .update({ generated_content: fullContent })
-        .eq('id', this.reportId);
-        
-      console.log(`🎉 Report marked as complete (${contentWithoutMarker.length} chars)`);
-    } catch (error) {
-      console.error('Error marking report complete:', error);
-    }
-  }
+
 
   private chunkArray<T>(array: T[], size: number): T[][] {
     const chunks: T[][] = [];

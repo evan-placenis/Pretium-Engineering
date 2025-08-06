@@ -18,9 +18,9 @@ cd ../..
 
 # Create zip file for process-jobs
 echo "📦 Creating process-jobs.zip..."
-cd src/process-jobs
-zip -r ../../dist/process-jobs.zip dist/ node_modules/
-cd ../..
+cd src/process-jobs/dist
+zip -r ../../../dist/process-jobs.zip . ../node_modules/
+cd ../../..
 
 # Build trigger-processor function
 echo "📦 Building trigger-processor function..."
@@ -31,9 +31,9 @@ cd ../..
 
 # Create zip file for trigger-processor
 echo "📦 Creating trigger-processor.zip..."
-cd src/trigger-processor
-zip -r ../../dist/trigger-processor.zip dist/ node_modules/
-cd ../..
+cd src/trigger-processor/dist
+zip -r ../../../dist/trigger-processor.zip . ../node_modules/
+cd ../../..
 
 echo "✅ Build completed successfully!"
 echo "📁 Distribution files created in dist/ directory:"

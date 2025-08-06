@@ -178,7 +178,7 @@ resource "aws_lambda_function" "process_jobs" {
 
   environment {
     variables = {
-      SUPABASE_URL                    = var.supabase_url
+      NEXT_PUBLIC_SUPABASE_URL        = var.supabase_url
       SUPABASE_SERVICE_ROLE_KEY       = var.supabase_service_role_key
       NEXT_PUBLIC_SUPABASE_ANON_KEY   = var.next_public_supabase_anon_key
       OPENAI_API_KEY                 = var.openai_api_key

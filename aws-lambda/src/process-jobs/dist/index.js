@@ -17355,7 +17355,24 @@ var handler = async (event) => {
     };
   }
   try {
-    const supabaseUrl = process.env.SUPABASE_URL;
+    console.log("Environment variables check:");
+    console.log("NEXT_PUBLIC_SUPABASE_URL exists:", !!process.env.NEXT_PUBLIC_SUPABASE_URL);
+    console.log("SUPABASE_SERVICE_ROLE_KEY exists:", !!process.env.SUPABASE_SERVICE_ROLE_KEY);
+    console.log("NEXT_PUBLIC_SUPABASE_ANON_KEY exists:", !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+    console.log("OPENAI_API_KEY exists:", !!process.env.OPENAI_API_KEY);
+    console.log("GROK_API_KEY exists:", !!process.env.GROK_API_KEY);
+    console.log("NODE_ENV exists:", !!process.env.NODE_ENV);
+    console.log("NEXT_PUBLIC_SUPABASE_URL length:", process.env.NEXT_PUBLIC_SUPABASE_URL?.length || 0);
+    console.log("SUPABASE_SERVICE_ROLE_KEY length:", process.env.SUPABASE_SERVICE_ROLE_KEY?.length || 0);
+    console.log("NEXT_PUBLIC_SUPABASE_ANON_KEY length:", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.length || 0);
+    console.log("OPENAI_API_KEY length:", process.env.OPENAI_API_KEY?.length || 0);
+    console.log("GROK_API_KEY length:", process.env.GROK_API_KEY?.length || 0);
+    console.log("NODE_ENV value:", process.env.NODE_ENV || "undefined");
+    console.log("NEXT_PUBLIC_SUPABASE_URL starts with:", process.env.NEXT_PUBLIC_SUPABASE_URL?.substring(0, 10) || "undefined");
+    console.log("SUPABASE_SERVICE_ROLE_KEY starts with:", process.env.SUPABASE_SERVICE_ROLE_KEY?.substring(0, 10) || "undefined");
+    console.log("OPENAI_API_KEY starts with:", process.env.OPENAI_API_KEY?.substring(0, 10) || "undefined");
+    console.log("GROK_API_KEY starts with:", process.env.GROK_API_KEY?.substring(0, 10) || "undefined");
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!supabaseUrl || !supabaseServiceKey) {
       throw new Error("Missing Supabase environment variables");

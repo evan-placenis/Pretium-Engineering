@@ -128,15 +128,26 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         
         // Remove processing marker if it exists
         currentContent = currentContent.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, '');
+        currentContent = currentContent.replace(/\n\[PROCESSING IN PROGRESS\.\.\.\]/g, '');
+        currentContent = currentContent.replace(/\[PROCESSING IN PROGRESS\.\.\.\]/g, '');
         
-        // Append error message to existing content
-        const errorMessage = `\n\n❌ REPORT GENERATION FAILED\n\nError: ${error}\n\nYour content has been preserved. You can continue editing or try generating again.`;
-        const updatedContent = currentContent + errorMessage;
-        
-        await supabase
-          .from('reports')
-          .update({ generated_content: updatedContent })
-          .eq('id', job.input_data.reportId);
+        // Only append error message if there's existing content to preserve
+        if (currentContent.trim().length > 0) {
+          const errorMessage = `\n\n❌ REPORT GENERATION FAILED\n\nError: ${error}\n\nYour content has been preserved. You can continue editing or try generating again.`;
+          const updatedContent = currentContent + errorMessage;
+          
+          await supabase
+            .from('reports')
+            .update({ generated_content: updatedContent })
+            .eq('id', job.input_data.reportId);
+        } else {
+          // If no existing content, just show the error
+          const errorMessage = `❌ REPORT GENERATION FAILED\n\nError: ${error}\n\nPlease try generating again.`;
+          await supabase
+            .from('reports')
+            .update({ generated_content: errorMessage })
+            .eq('id', job.input_data.reportId);
+        }
       } catch (updateError) {
         console.error('Failed to update report with error:', updateError);
       }

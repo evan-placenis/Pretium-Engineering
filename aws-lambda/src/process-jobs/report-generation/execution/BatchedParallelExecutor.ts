@@ -83,7 +83,48 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
       };
 
     } catch (error) {
-      console.error('Batched Parallel Executor Error:', error);
+      console.error('❌ Batched Parallel Executor Error:', error);
+      
+      // Try to update the report with error information while preserving existing content
+      try {
+        if (this.supabase && this.reportId) {
+          // Get current content first
+          const { data: currentReport } = await this.supabase
+            .from('reports')
+            .select('generated_content')
+            .eq('id', this.reportId)
+            .single();
+          
+          let currentContent = currentReport?.generated_content || '';
+          
+          // Remove processing marker if it exists
+          currentContent = currentContent.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, '\n\n❌ REPORT GENERATION FAILED');
+          currentContent = currentContent.replace(/\n\[PROCESSING IN PROGRESS\.\.\.\]/g, '\n\n❌ REPORT GENERATION FAILED');
+          currentContent = currentContent.replace(/\[PROCESSING IN PROGRESS\.\.\.\]/g, '\n\n❌ REPORT GENERATION FAILED');
+          
+          // Only append error message if there's existing content to preserve
+          if (currentContent.trim().length > 0) {
+            const errorMessage = `\n\n❌ REPORT GENERATION FAILED\n\nError: ${error}\n\nYour content has been preserved. You can continue editing or try generating again.`;
+            const updatedContent = currentContent + errorMessage;
+            
+            await this.supabase
+              .from('reports')
+              .update({ generated_content: updatedContent })
+              .eq('id', this.reportId);
+          } else {
+            // If no existing content, just show the error
+            const errorMessage = `❌ REPORT GENERATION FAILED\n\nError: ${error}\n\nPlease try generating again.`;
+            await this.supabase
+              .from('reports')
+              .update({ generated_content: errorMessage })
+              .eq('id', this.reportId);
+          }
+          console.log('📝 Updated report with error message');
+        }
+      } catch (updateError) {
+        console.error('❌ Failed to update report with error:', updateError);
+      }
+      
       throw error;
     }
   }
@@ -323,7 +364,12 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
   }
 
   private async updateReportContent(content: string, isComplete: boolean = false) {
-    if (!this.supabase || !this.reportId) return;
+    console.log(`🔄 updateReportContent called: isComplete=${isComplete}, contentLength=${content.length}, reportId=${this.reportId}`);
+    
+    if (!this.supabase || !this.reportId) {
+      console.error('❌ Missing supabase or reportId for updateReportContent');
+      return;
+    }
     
     try {
       let fullContent = content;
@@ -349,9 +395,8 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
         .update({ generated_content: fullContent })
         .eq('id', this.reportId);
         
-      console.log(`📝 Updated report content (${content.length} chars, ${isComplete ? 'final update' : 'in progress'})`);
     } catch (error) {
-      console.error('Error updating report content:', error);
+      console.error('Failed to log to frontend:', error);
     }
   }
 

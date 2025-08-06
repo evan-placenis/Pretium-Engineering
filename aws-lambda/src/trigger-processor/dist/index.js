@@ -42,6 +42,7 @@ var handler = async (event) => {
       throw new Error("Missing PROCESS_JOBS_FUNCTION_URL environment variable");
     }
     console.log("\u{1F680} Triggering job processor...");
+    console.log("\u{1F4CB} Process jobs URL:", processJobsFunctionUrl);
     try {
       const response = await fetch(processJobsFunctionUrl, {
         method: "POST",

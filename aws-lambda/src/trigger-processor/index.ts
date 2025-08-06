@@ -25,6 +25,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     console.log('🚀 Triggering job processor...');
+    console.log('📋 Process jobs URL:', processJobsFunctionUrl);
 
     // Call the main job processor function (fire-and-forget)
     try {

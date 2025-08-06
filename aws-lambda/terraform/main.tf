@@ -173,7 +173,7 @@ resource "aws_lambda_function" "process_jobs" {
   handler         = "index.handler"
   runtime         = "nodejs18.x"
   timeout         = 900  # 15 minutes
-  memory_size     = 2048
+  memory_size     = 1024
   source_code_hash = filebase64sha256("../dist/process-jobs.zip")
 
   environment {

@@ -42,10 +42,7 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
       
       const finalContent = await this.processSummaryInParallel(content, params);
 
-             // Update report with final content
-       await this.updateReportContent(finalContent, false);
-       
-       // Mark report as truly complete
+       // Mark report as truly complete (no need to update with processing marker first)
        await this.markReportComplete(finalContent);
 
         return {

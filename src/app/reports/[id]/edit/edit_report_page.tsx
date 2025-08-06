@@ -70,16 +70,19 @@ function groupBulletsByImageAndText(rawContent: string) {
   const noImageParagraphs: string[] = [];
 
   for (const line of lines) {
-    const imageMatches = [...line.matchAll(imageRegex)];
-    if (imageMatches.length > 0) {
-      imageMatches.forEach(match => {
+    const imageMatches = line.match(imageRegex);
+    if (imageMatches) {
+      // Reset regex for next match
+      imageRegex.lastIndex = 0;
+      let match;
+      while ((match = imageRegex.exec(line)) !== null) {
         const imageId = match[1];
         const groupName = match[2] || 'Ungrouped'; // Default to 'Ungrouped' if no group name
         if (!groups[imageId]) groups[imageId] = [];
         // Remove the image tag and clean up spaces
         let cleanText = line.replace(imageRegex, '').replace(/\s+([.,;:])/g, '$1').replace(/\s{2,}/g, ' ').trim();
         groups[imageId].push(cleanText);
-      });
+      }
     } else {
       noImageParagraphs.push(line);
     }
@@ -116,10 +119,10 @@ const processContentWithImages = (rawContent: string, images: ReportImage[]): st
   // First pass: collect all bullets for each image (by key)
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const imageMatches = [...line.matchAll(imageRegex)];
-    if (imageMatches.length > 0) {
-      let imageId = imageMatches[0][1];
-      let groupName = imageMatches[0][2] || 'Ungrouped'; // Default to 'Ungrouped' if no group name
+    const imageMatches = line.match(imageRegex);
+    if (imageMatches) {
+      let imageId = imageMatches[1];
+      let groupName = imageMatches[2] || 'Ungrouped'; // Default to 'Ungrouped' if no group name
       let bullet = '';
       if (line.replace(imageRegex, '').trim() === '') {
         // Look back for previous non-empty line
@@ -157,10 +160,10 @@ const processContentWithImages = (rawContent: string, images: ReportImage[]): st
     ) {
       continue;
     }
-    const imageMatches = [...line.matchAll(imageRegex)];
-    if (imageMatches.length > 0) {
-      let imageId = imageMatches[0][1];
-      let groupName = imageMatches[0][2] || 'Ungrouped'; // Ensure groupName is never undefined
+    const imageMatches = line.match(imageRegex);
+    if (imageMatches) {
+      let imageId = imageMatches[1];
+      let groupName = imageMatches[2] || 'Ungrouped'; // Ensure groupName is never undefined
       const key = `${imageId}|||${groupName}`;
       if (!renderedImages.has(key)) {
         renderedImages.add(key);
@@ -557,7 +560,8 @@ export default function EditReportPage() {
             return;
           }
           
-          if (!currentContent.includes('[PROCESSING IN PROGRESS...]')) {
+          // Check if generation is complete (either no processing marker or has completion message)
+          if (!currentContent.includes('[PROCESSING IN PROGRESS...]') || currentContent.includes('✅ REPORT GENERATION COMPLETE')) {
             console.log('Generation complete - stopping polling');
             setIsStreaming(false);
             setStreamingStatus('Report generation complete!');

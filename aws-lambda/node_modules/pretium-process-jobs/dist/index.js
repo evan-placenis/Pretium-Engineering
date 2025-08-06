@@ -20670,7 +20670,6 @@ var BatchedParallelWithParallelSummaryExecutor = class {
       console.log("\u{1F4DD} Generating final summary using parallel agents (STREAMING ENABLED)...");
       await this.updateReportContent(content + "\n\n\u{1F4DD} PARALLEL SUMMARY PHASE: Starting final review and formatting...", false);
       const finalContent = await this.processSummaryInParallel(content, params);
-      await this.updateReportContent(finalContent, false);
       await this.markReportComplete(finalContent);
       return {
         content: finalContent,

@@ -56,14 +56,12 @@ export async function POST(request: NextRequest) {
     });
 
     // Immediately trigger the job processor (fire-and-forget)
-    const triggerUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/trigger-job-processor`;
+    const triggerUrl = process.env.NEXT_PUBLIC_TRIGGER_PROCESSOR_URL || 'https://w7cf4bvaq3l3glpwze5ehcxeiq0ywcgh.lambda-url.ca-central-1.on.aws/';
     
     fetch(triggerUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY!
+        'Content-Type': 'application/json'
       }
     }).then(() => {
       console.log('✅ Job processor triggered successfully');

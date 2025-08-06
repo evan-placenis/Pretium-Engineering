@@ -1,0 +1,17 @@
+# AWS Lambda Configuration for Pretium
+# Copy this file to terraform.tfvars and fill in your actual values
+aws_region = "ca-central-1"
+project_name = "pretium"
+environment = "dev"
+
+# Supabase Configuration
+supabase_url = "https://your-project.supabase.co"
+supabase_service_role_key = "your-service-role-key-here"
+
+# API Keys - DO NOT COMMIT ACTUAL KEYS TO GIT
+openai_api_key = "your-openai-api-key-here"
+xai_api_key = "your-xai-api-key-here"
+
+# Lambda Configuration (optional - defaults are usually fine)
+lambda_timeout = 900
+lambda_memory_size = 2048 

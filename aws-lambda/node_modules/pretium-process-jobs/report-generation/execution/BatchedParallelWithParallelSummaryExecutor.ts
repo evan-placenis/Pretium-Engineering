@@ -675,14 +675,16 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     if (!this.supabase || !this.reportId) return;
     
     try {
-      const fullContent = `${content}\n\n✅ REPORT GENERATION COMPLETE`;
+      // Remove the processing marker and add completion message
+      const contentWithoutMarker = content.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, '');
+      const fullContent = `${contentWithoutMarker}\n\n✅ REPORT GENERATION COMPLETE`;
       
       await this.supabase
         .from('reports')
         .update({ generated_content: fullContent })
         .eq('id', this.reportId);
         
-      console.log(`🎉 Report marked as complete (${content.length} chars)`);
+      console.log(`🎉 Report marked as complete (${contentWithoutMarker.length} chars)`);
     } catch (error) {
       console.error('Error marking report complete:', error);
     }

@@ -55,16 +55,19 @@ export async function POST(request: NextRequest) {
       mode // Pass the user's mode selection
     });
 
-    // Immediately trigger the job processor (fire-and-forget)
+    // Trigger the job processor immediately
     const triggerUrl = process.env.NEXT_PUBLIC_TRIGGER_PROCESSOR_URL || 'https://w7cf4bvaq3l3glpwze5ehcxeiq0ywcgh.lambda-url.ca-central-1.on.aws/';
     
+    console.log('🚀 Triggering job processor at:', triggerUrl);
+    
+    // Fire and forget - the trigger processor handles the rest
     fetch(triggerUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       }
     }).then(() => {
-      console.log('✅ Job processor triggered successfully');
+      console.log('✅ Job processor trigger sent successfully');
     }).catch((error) => {
       console.error('❌ Failed to trigger job processor:', error);
     });

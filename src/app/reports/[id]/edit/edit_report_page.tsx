@@ -510,7 +510,7 @@ export default function EditReportPage() {
   // Poll for database updates during streaming
   const pollForUpdates = async (reportId: string) => {
     let pollCount = 0;
-    const maxPolls = 180; // 3 minutes max
+    const maxPolls = 900; // 15 minutes max (matches Lambda timeout)
     
     console.log('Starting polling for report:', reportId);
     
@@ -523,7 +523,7 @@ export default function EditReportPage() {
           clearInterval(pollInterval);
           setIsStreaming(false);
           setStreamingStatus('Generation timeout - please refresh and try again');
-          setError('Report generation timed out');
+          setError('Report generation timed out - but your content has been preserved. You can continue editing, try generating again, or continue waiting for the current job to finish.');
           return;
         }
 
@@ -535,14 +535,27 @@ export default function EditReportPage() {
 
         if (error) {
           console.error('Error polling report:', error);
+          // Don't clear content on polling errors - just log and continue
+          setStreamingStatus('Connection issue - retrying...');
           return;
         }
 
         if (reportData?.generated_content) {
           const currentContent = reportData.generated_content;
-          console.log('Poll result - content length:', currentContent.length, 'has processing marker:', currentContent.includes('[PROCESSING IN PROGRESS...]'));
+          // Content received
           
+          // Always preserve content, even if there are errors
           setContent(currentContent);
+          
+          // Check if the content contains error indicators
+          if (currentContent.includes('ERROR:') || currentContent.includes('FAILED:') || currentContent.includes('❌')) {
+            console.log('Generation failed - stopping polling but preserving content');
+            setIsStreaming(false);
+            setStreamingStatus('Generation failed - but your content has been preserved');
+            setError('Report generation failed - but your content has been preserved. You can continue editing or try generating again.');
+            clearInterval(pollInterval);
+            return;
+          }
           
           if (!currentContent.includes('[PROCESSING IN PROGRESS...]')) {
             console.log('Generation complete - stopping polling');
@@ -573,11 +586,13 @@ export default function EditReportPage() {
             }
           }
         } else {
-          console.log('No content yet in database');
+          // No content yet
           setStreamingStatus('Waiting for generation to start...');
         }
       } catch (error) {
         console.error('Error during polling:', error);
+        // Don't clear content on polling errors - preserve what we have
+        setStreamingStatus('Connection issue - retrying...');
       }
     }, 2000);
 

@@ -261,26 +261,7 @@ resource "aws_lambda_function_url" "trigger_processor" {
   }
 }
 
-# EventBridge Rule for periodic job processing (optional)
-resource "aws_cloudwatch_event_rule" "job_processor_schedule" {
-  name                = "${var.project_name}-job-processor-schedule"
-  description         = "Trigger job processor every 5 minutes"
-  schedule_expression = "rate(5 minutes)"
-}
-
-resource "aws_cloudwatch_event_target" "job_processor_target" {
-  rule      = aws_cloudwatch_event_rule.job_processor_schedule.name
-  target_id = "JobProcessorTarget"
-  arn       = aws_lambda_function.trigger_processor.arn
-}
-
-resource "aws_lambda_permission" "allow_eventbridge" {
-  statement_id  = "AllowExecutionFromEventBridge"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.trigger_processor.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.job_processor_schedule.arn
-}
+# EventBridge removed - jobs are triggered immediately by frontend
 
 # Outputs
 output "process_jobs_url" {

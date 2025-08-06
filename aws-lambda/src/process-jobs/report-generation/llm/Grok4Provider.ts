@@ -1,5 +1,6 @@
 // Grok4 LLM Provider
 import { LLMProvider, LLMResponse } from '../types.ts';
+import { OpenAI } from 'openai';
 
 export class Grok4Provider implements LLMProvider {
   private apiKey: string;
@@ -16,8 +17,7 @@ export class Grok4Provider implements LLMProvider {
     try {
       console.log(`🤖 Grok4: Starting content generation (prompt: ${prompt.length} chars)`);
 
-      // Dynamic import for OpenAI
-      const { OpenAI } = await import('https://esm.sh/openai@4.20.1');
+            // Static import for OpenAI
       const grokClient = new OpenAI({
         apiKey: this.apiKey,
         baseURL: "https://api.x.ai/v1",
@@ -47,7 +47,7 @@ export class Grok4Provider implements LLMProvider {
 
       // Handle streaming response
       let content = '';
-      let usage = null;
+      let usage: any = null;
       let chunkCount = 0;
       const streamingStartTime = Date.now();
       

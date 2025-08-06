@@ -1,5 +1,6 @@
 // GPT-4o LLM Provider
 import { LLMProvider, LLMResponse } from '../types.ts';
+import { OpenAI } from 'openai';
 
 export class GPT4oProvider implements LLMProvider {
   private apiKey: string;
@@ -15,8 +16,7 @@ export class GPT4oProvider implements LLMProvider {
     try {
       console.log('🤖 GPT-4o: Generating content...');
 
-      // Dynamic import for OpenAI
-      const { OpenAI } = await import('https://esm.sh/openai@4.20.1');
+      // Static import for OpenAI
       const openai = new OpenAI({ apiKey: this.apiKey });
 
       const response = await openai.chat.completions.create({
@@ -38,7 +38,7 @@ export class GPT4oProvider implements LLMProvider {
 
       // Handle streaming response
       let content = '';
-      let usage = null;
+      let usage: any = null;
       
       for await (const chunk of response) {
         const delta = chunk.choices[0]?.delta;

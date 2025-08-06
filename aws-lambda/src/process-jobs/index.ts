@@ -20,28 +20,6 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
   try {
     
-    // Debug: Log environment variables (without exposing sensitive data)
-    console.log('Environment variables check:');
-    console.log('NEXT_PUBLIC_SUPABASE_URL exists:', !!process.env.NEXT_PUBLIC_SUPABASE_URL);
-    console.log('SUPABASE_SERVICE_ROLE_KEY exists:', !!process.env.SUPABASE_SERVICE_ROLE_KEY);
-    console.log('NEXT_PUBLIC_SUPABASE_ANON_KEY exists:', !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
-    console.log('OPENAI_API_KEY exists:', !!process.env.OPENAI_API_KEY);
-    console.log('GROK_API_KEY exists:', !!process.env.GROK_API_KEY);
-    console.log('NODE_ENV exists:', !!process.env.NODE_ENV);
-    
-    console.log('NEXT_PUBLIC_SUPABASE_URL length:', process.env.NEXT_PUBLIC_SUPABASE_URL?.length || 0);
-    console.log('SUPABASE_SERVICE_ROLE_KEY length:', process.env.SUPABASE_SERVICE_ROLE_KEY?.length || 0);
-    console.log('NEXT_PUBLIC_SUPABASE_ANON_KEY length:', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.length || 0);
-    console.log('OPENAI_API_KEY length:', process.env.OPENAI_API_KEY?.length || 0);
-    console.log('GROK_API_KEY length:', process.env.GROK_API_KEY?.length || 0);
-    console.log('NODE_ENV value:', process.env.NODE_ENV || 'undefined');
-    
-    // Log first few characters of each key to verify they're not empty strings
-    console.log('NEXT_PUBLIC_SUPABASE_URL starts with:', process.env.NEXT_PUBLIC_SUPABASE_URL?.substring(0, 10) || 'undefined');
-    console.log('SUPABASE_SERVICE_ROLE_KEY starts with:', process.env.SUPABASE_SERVICE_ROLE_KEY?.substring(0, 10) || 'undefined');
-    console.log('OPENAI_API_KEY starts with:', process.env.OPENAI_API_KEY?.substring(0, 10) || 'undefined');
-    console.log('GROK_API_KEY starts with:', process.env.GROK_API_KEY?.substring(0, 10) || 'undefined');
-    
     // Get environment variables
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -54,6 +32,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Get next job to process
+    console.log('🔍 Looking for next job to process...');
     const { data: nextJobData, error: getJobError } = await supabase
       .rpc('get_next_job');
 
@@ -61,7 +40,10 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       throw new Error(`Error getting next job: ${getJobError.message}`);
     }
 
+    console.log('📋 Next job data:', nextJobData);
+
     if (!nextJobData || nextJobData.length === 0) {
+      console.log('ℹ️ No jobs to process');
       return {
         statusCode: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -72,6 +54,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         })
       };
     }
+
+    console.log('✅ Found job to process:', nextJobData[0].id);
 
     // Get the full job details
     const { data: jobData, error: jobError } = await supabase
@@ -87,14 +71,19 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const job = jobData;
 
     // Mark job as processing
+    console.log('🔄 Marking job as processing...');
     const { data: processingResult, error: processingError } = await supabase
       .rpc('mark_job_processing', { job_id: job.id });
 
     if (processingError) {
+      console.error('❌ Error marking job as processing:', processingError);
       throw new Error(`Error marking job as processing: ${processingError.message}`);
     }
 
+    console.log('📊 Processing result:', processingResult);
+
     if (!processingResult) {
+      console.log('⚠️ Job already being processed by another worker');
       return {
         statusCode: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -105,6 +94,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         })
       };
     }
+
+    console.log('✅ Job marked as processing successfully');
 
     // Process the job based on its type
     let result: any;
@@ -124,6 +115,18 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     // Mark job as completed or failed
     if (error) {
+      // Also update the report content to show the error
+      try {
+        await supabase
+          .from('reports')
+          .update({ 
+            generated_content: `❌ REPORT GENERATION FAILED\n\nError: ${error}\n\nYour content has been preserved. You can continue editing or try generating again.`
+          })
+          .eq('id', job.input_data.reportId);
+      } catch (updateError) {
+        console.error('Failed to update report with error:', updateError);
+      }
+      
       await supabase.rpc('mark_job_failed', {
         job_id: job.id,
         error_message: error

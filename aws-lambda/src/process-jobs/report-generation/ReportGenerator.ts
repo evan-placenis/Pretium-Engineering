@@ -8,8 +8,7 @@ import { Grok4Provider } from './llm/Grok4Provider.ts';
 import { GPT4oProvider } from './llm/GPT4oProvider.ts';
 import { BriefPromptStrategy } from './prompts/BriefPromptStrategy.ts';
 import { ElaboratePromptStrategy } from './prompts/ElaboratePromptStrategy.ts';
-// OpenAI import will be handled dynamically in the function
-
+import { OpenAI } from 'openai'; //maybe turn in a dynamic import later once it is working
 export class ReportGenerator {
   private llmProviders!: Map<string, LLMProvider>;
   private executionStrategies!: Map<string, ExecutionStrategy>;
@@ -133,7 +132,6 @@ export class ReportGenerator {
       const searchQuery = `${imageDescription} ${imageTag}`
       
       // Generate embedding for the query using OpenAI
-      const { OpenAI } = await import('https://esm.sh/openai@4.20.1');
       const openai = new OpenAI({
         apiKey: process.env.OPENAI_API_KEY!,
       })

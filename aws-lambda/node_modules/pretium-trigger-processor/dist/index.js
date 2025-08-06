@@ -42,16 +42,21 @@ var handler = async (event) => {
       throw new Error("Missing PROCESS_JOBS_FUNCTION_URL environment variable");
     }
     console.log("\u{1F680} Triggering job processor...");
-    fetch(processJobsFunctionUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
+    try {
+      const response = await fetch(processJobsFunctionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        }
+      });
+      if (response.ok) {
+        console.log("\u2705 Job processor triggered successfully");
+      } else {
+        console.error("\u274C Job processor returned error status:", response.status);
       }
-    }).then(() => {
-      console.log("\u2705 Job processor triggered (fire-and-forget)");
-    }).catch((error) => {
+    } catch (error) {
       console.error("\u274C Trigger failed:", error);
-    });
+    }
     console.log("\u2705 Trigger request sent");
     return {
       statusCode: 200,

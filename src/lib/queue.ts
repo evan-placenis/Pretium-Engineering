@@ -225,23 +225,32 @@ export async function cleanupOldJobs(daysToKeep: number = 30): Promise<{ deleted
 export async function waitForJobCompletion(
   jobId: string, 
   pollInterval: number = 2000, 
-  timeout: number = 300000
+  timeout: number = 900000  // Increased to 15 minutes to match Lambda timeout
 ): Promise<{ job?: Job; error?: string }> {
   const startTime = Date.now();
+  let pollCount = 0;
+  
+  // Starting job polling
   
   while (Date.now() - startTime < timeout) {
+    pollCount++;
     const result = await getJobStatus(jobId);
     
     if (result.error) {
+      console.error(`❌ Error polling job ${jobId}:`, result.error);
       return result;
     }
     
     if (result.job) {
+      // Job status update
+      
       if (result.job.status === 'completed') {
+        // Job completed
         return { job: result.job };
       }
       
       if (result.job.status === 'failed') {
+        // Job failed
         return { 
           job: result.job, 
           error: result.job.error || 'Job failed' 
@@ -253,5 +262,6 @@ export async function waitForJobCompletion(
     await new Promise(resolve => setTimeout(resolve, pollInterval));
   }
   
+  // Job polling timed out
   return { error: 'Job completion timeout' };
 } 

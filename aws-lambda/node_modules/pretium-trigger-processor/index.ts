@@ -27,16 +27,22 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     console.log('🚀 Triggering job processor...');
 
     // Call the main job processor function (fire-and-forget)
-    fetch(processJobsFunctionUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    try {
+      const response = await fetch(processJobsFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (response.ok) {
+        console.log('✅ Job processor triggered successfully');
+      } else {
+        console.error('❌ Job processor returned error status:', response.status);
       }
-    }).then(() => {
-      console.log('✅ Job processor triggered (fire-and-forget)');
-    }).catch((error) => {
+    } catch (error) {
       console.error('❌ Trigger failed:', error);
-    });
+    }
 
     // Return immediately - don't wait for the processor
     console.log('✅ Trigger request sent');

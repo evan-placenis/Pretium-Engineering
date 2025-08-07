@@ -10,6 +10,7 @@ import { useViewPreference } from '@/hooks/useViewPreference';
 import KnowledgeUpload from './components/KnowledgeUpload';
 import KnowledgeViewer from './components/KnowledgeViewer';
 import Breadcrumb from '@/components/Breadcrumb';
+import { getReportImage } from '@/lib/image-utils';
 
 export default function ProjectPage({ id }: { id: string }) {
   const [project, setProject] = useState<Project | null>(null);
@@ -22,6 +23,7 @@ export default function ProjectPage({ id }: { id: string }) {
   const [uploadLoading, setUploadLoading] = useState(false);
   const [knowledgeUploadError, setKnowledgeUploadError] = useState<string | null>(null);
   const [knowledgeUploadSuccess, setKnowledgeUploadSuccess] = useState<string | null>(null);
+  const [isProjectDetailsExpanded, setIsProjectDetailsExpanded] = useState(false);
   const router = useRouter();
   
   // Use the view preference hook for persistent view state
@@ -295,15 +297,6 @@ export default function ProjectPage({ id }: { id: string }) {
           />
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <h1>{project.project_name}</h1>
-            <div style={{ display: "flex", gap: "0.75rem" }}>
-              <button
-                onClick={() => setShowEditModal(true)}
-                className="btn btn-secondary"
-              >
-                Update Project Info
-              </button>
-              
-            </div>
           </div>
         </div>
 
@@ -389,124 +382,194 @@ export default function ProjectPage({ id }: { id: string }) {
           </div>
         )}
 
-        <div className="card" style={{ marginBottom: "2rem" }}>
+        <div className="card" style={{ marginBottom: "0.75rem" }}>
           <div className="card-body">
-            <h3 style={{ marginBottom: "1rem" }}>Project Details</h3>
-            {/* Sectioned dropdowns for project info */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {/* Pretium Information */}
-              <details>
-                <summary style={{ fontWeight: 600, fontSize: '1.1rem' }}>Pretium Information</summary>
-                <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-                  {["Name", "Title", "Office", "Tel", "Cell", "Email", "Fax", "Project No."].map((key) =>
-                    project[key] ? (
-                      <div key={key}>
-                        <label className="form-label">{key}</label>
-                        <div>{String(project[key])}</div>
-                      </div>
-                    ) : null
-                  )}
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'space-between',
+              cursor: 'pointer',
+              padding: '0rem',
+              borderRadius: '6px',
+              backgroundColor: 'var(--color-background)',
+              transition: 'all 0.2s ease'
+            }} 
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--color-background-hover)';
+            }} 
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--color-background)';
+            }}
+            onClick={() => setIsProjectDetailsExpanded(!isProjectDetailsExpanded)}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{ 
+                  width: '20px', 
+                  height: '20px', 
+                  opacity: 0.8,
+                  transform: isProjectDetailsExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                  transition: 'transform 0.2s ease'
+                }}>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ width: '100%', height: '100%', color: 'var(--color-primary)' }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
                 </div>
-              </details>
-              {/* Client Information */}
-              <details>
-                <summary style={{ fontWeight: 600, fontSize: '1.1rem' }}>Client Information</summary>
-                <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-                  {["Client Contact Name", "Client Company Name", "Client Address 1", "Client Address 2", "Client Email", "Client Tel", "Client Fax"].map((key) =>
-                    project[key] ? (
-                      <div key={key}>
-                        <label className="form-label">{key}</label>
-                        <div>{String(project[key])}</div>
-                      </div>
-                    ) : null
-                  )}
+                <div style={{ width: '24px', height: '24px', opacity: 0.8 }}>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ width: '100%', height: '100%', color: 'var(--color-primary)' }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
                 </div>
-              </details>
-              {/* Project Information */}
-              <details>
-                <summary style={{ fontWeight: 600, fontSize: '1.1rem' }}>Project Information</summary>
-                <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-                  {["Project Title", "Project Address 1", "Project Address 2", "Tender Meeting Date & Time", "Tender Closing Date & Time", "Project Type", "Project Date"].map((key) =>
-                    project[key] ? (
-                      <div key={key}>
-                        <label className="form-label">{key}</label>
-                        <div>{String(project[key])}</div>
-                      </div>
-                    ) : null
-                  )}
+                <h3 style={{ margin: 0, color: "var(--color-text)" }}>Project Details</h3>
+              </div>
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ fontSize: "0.875rem", color: "var(--color-text-lighter)" }}>
+                  Project Information & Details
                 </div>
-              </details>
-              {/* Owner Information */}
-              <details>
-                <summary style={{ fontWeight: 600, fontSize: '1.1rem' }}>Owner Information</summary>
-                <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-                  {["Owner / Condo Corp / Building Name", "Owner Address 1 (if applicable)", "Owner Address 2 (if applicable)", "Owner Contact Name (if applicable)"].map((key) =>
-                    project[key] ? (
-                      <div key={key}>
-                        <label className="form-label">{key}</label>
-                        <div>{String(project[key])}</div>
-                      </div>
-                    ) : null
-                  )}
-                </div>
-              </details>
-              {/* Contractor Invite */}
-              <details>
-                <summary style={{ fontWeight: 600, fontSize: '1.1rem' }}>Contractor Invite</summary>
-                <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-                  {["Contractor Name 1", "Contractor Contact Name 1", "Contractor Name 2", "Contractor Contact Name 2", "Contractor Name 3", "Contractor Contact Name 3", "Contractor Name 4", "Contractor Contact Name 4", "Contractor Name 5", "Contractor Contact Name 5", "Contractor Name 6", "Contractor Contact Name 6", "Contractor Name 7", "Contractor Contact Name 7", "Contractor Name 8", "Contractor Contact Name 8"].map((key) =>
-                    project[key] ? (
-                      <div key={key}>
-                        <label className="form-label">{key}</label>
-                        <div>{String(project[key])}</div>
-                      </div>
-                    ) : null
-                  )}
-                </div>
-              </details>
-              {/* Tender Summary */}
-              <details>
-                <summary style={{ fontWeight: 600, fontSize: '1.1rem' }}>Tender Summary</summary>
-                <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-                  {["Contractor Name", "Total Stipulated Price (Excluding HST)", "Specification Date", "Tender Date"].map((key) =>
-                    project[key] ? (
-                      <div key={key}>
-                        <label className="form-label">{key}</label>
-                        <div>{String(project[key])}</div>
-                      </div>
-                    ) : null
-                  )}
-                </div>
-              </details>
-              {/* Contractor Award Information */}
-              <details>
-                <summary style={{ fontWeight: 600, fontSize: '1.1rem' }}>Contractor Award Information</summary>
-                <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-                  {["Contractor Contact Name", "Contractor Company Name", "Contractor Address 1", "Contractor Address 2", "Contractor Email", "Contractor Tel"].map((key) =>
-                    project[key] ? (
-                      <div key={key}>
-                        <label className="form-label">{key}</label>
-                        <div>{String(project[key])}</div>
-                      </div>
-                    ) : null
-                  )}
-                </div>
-              </details>
-              {/* Autocad TitleBlock Information */}
-              <details>
-                <summary style={{ fontWeight: 600, fontSize: '1.1rem' }}>Autocad TitleBlock Information</summary>
-                <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-                  {["Drafted By {Initials}", "Reviewed By {Initials}", "Revision No."].map((key) =>
-                    project[key] ? (
-                      <div key={key}>
-                        <label className="form-label">{key}</label>
-                        <div>{String(project[key])}</div>
-                      </div>
-                    ) : null
-                  )}
-                </div>
-              </details>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowEditModal(true);
+                  }}
+                  className="btn btn-secondary"
+                  style={{ 
+                    backgroundColor: 'black', 
+                    color: 'white', 
+                    border: '1px solid black',
+                    fontSize: '0.75rem',
+                    padding: '0.25rem 0.5rem'
+                  }}
+                >
+                  Update Project Info
+                </button>
+              </div>
             </div>
+            
+            {isProjectDetailsExpanded && (
+              <div style={{ 
+                transition: 'all 0.3s ease',
+                opacity: isProjectDetailsExpanded ? 1 : 0,
+                maxHeight: isProjectDetailsExpanded ? 'none' : '0',
+                overflow: 'hidden',
+                marginTop: '1rem'
+              }}>
+                {/* Sectioned dropdowns for project info */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {/* Pretium Information */}
+                  <details>
+                    <summary style={{ fontWeight: 600, fontSize: '1rem' }}>Pretium Information</summary>
+                    <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                      {["Name", "Title", "Office", "Tel", "Cell", "Email", "Fax", "Project No."].map((key) =>
+                        project[key] ? (
+                          <div key={key}>
+                            <label className="form-label">{key}</label>
+                            <div>{String(project[key])}</div>
+                          </div>
+                        ) : null
+                      )}
+                    </div>
+                  </details>
+                  {/* Client Information */}
+                  <details>
+                    <summary style={{ fontWeight: 600, fontSize: '1rem' }}>Client Information</summary>
+                    <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                      {["Client Contact Name", "Client Company Name", "Client Address 1", "Client Address 2", "Client Email", "Client Tel", "Client Fax"].map((key) =>
+                        project[key] ? (
+                          <div key={key}>
+                            <label className="form-label">{key}</label>
+                            <div>{String(project[key])}</div>
+                          </div>
+                        ) : null
+                      )}
+                    </div>
+                  </details>
+                  {/* Project Information */}
+                  <details>
+                    <summary style={{ fontWeight: 600, fontSize: '1rem' }}>Project Information</summary>
+                    <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                      {["Project Title", "Project Address 1", "Project Address 2", "Tender Meeting Date & Time", "Tender Closing Date & Time", "Project Type", "Project Date"].map((key) =>
+                        project[key] ? (
+                          <div key={key}>
+                            <label className="form-label">{key}</label>
+                            <div>{String(project[key])}</div>
+                          </div>
+                        ) : null
+                      )}
+                    </div>
+                  </details>
+                  {/* Owner Information */}
+                  <details>
+                    <summary style={{ fontWeight: 600, fontSize: '1rem' }}>Owner Information</summary>
+                    <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                      {["Owner / Condo Corp / Building Name", "Owner Address 1 (if applicable)", "Owner Address 2 (if applicable)", "Owner Contact Name (if applicable)"].map((key) =>
+                        project[key] ? (
+                          <div key={key}>
+                            <label className="form-label">{key}</label>
+                            <div>{String(project[key])}</div>
+                          </div>
+                        ) : null
+                      )}
+                    </div>
+                  </details>
+                  {/* Contractor Invite */}
+                  <details>
+                    <summary style={{ fontWeight: 600, fontSize: '1rem' }}>Contractor Invite</summary>
+                    <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                      {["Contractor Name 1", "Contractor Contact Name 1", "Contractor Name 2", "Contractor Contact Name 2", "Contractor Name 3", "Contractor Contact Name 3", "Contractor Name 4", "Contractor Contact Name 4", "Contractor Name 5", "Contractor Contact Name 5", "Contractor Name 6", "Contractor Contact Name 6", "Contractor Name 7", "Contractor Contact Name 7", "Contractor Name 8", "Contractor Contact Name 8"].map((key) =>
+                        project[key] ? (
+                          <div key={key}>
+                            <label className="form-label">{key}</label>
+                            <div>{String(project[key])}</div>
+                          </div>
+                        ) : null
+                      )}
+                    </div>
+                  </details>
+                  {/* Tender Summary */}
+                  <details>
+                    <summary style={{ fontWeight: 600, fontSize: '1rem' }}>Tender Summary</summary>
+                    <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                      {["Contractor Name", "Total Stipulated Price (Excluding HST)", "Specification Date", "Tender Date"].map((key) =>
+                        project[key] ? (
+                          <div key={key}>
+                            <label className="form-label">{key}</label>
+                            <div>{String(project[key])}</div>
+                          </div>
+                        ) : null
+                      )}
+                    </div>
+                  </details>
+                  {/* Contractor Award Information */}
+                  <details>
+                    <summary style={{ fontWeight: 600, fontSize: '1rem' }}>Contractor Award Information</summary>
+                    <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                      {["Contractor Contact Name", "Contractor Company Name", "Contractor Address 1", "Contractor Address 2", "Contractor Email", "Contractor Tel"].map((key) =>
+                        project[key] ? (
+                          <div key={key}>
+                            <label className="form-label">{key}</label>
+                            <div>{String(project[key])}</div>
+                          </div>
+                        ) : null
+                      )}
+                    </div>
+                  </details>
+                  {/* Autocad TitleBlock Information */}
+                  <details>
+                    <summary style={{ fontWeight: 600, fontSize: '1rem' }}>Autocad TitleBlock Information</summary>
+                    <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                      {["Drafted By {Initials}", "Reviewed By {Initials}", "Revision No."].map((key) =>
+                        project[key] ? (
+                          <div key={key}>
+                            <label className="form-label">{key}</label>
+                            <div>{String(project[key])}</div>
+                          </div>
+                        ) : null
+                      )}
+                    </div>
+                  </details>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -578,36 +641,38 @@ export default function ProjectPage({ id }: { id: string }) {
             </div>
           ) : (
             reportViewMode === 'grid' ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "1.5rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "1rem" }}>
                 {reports.map((report, index) => (
                   <div
                     key={report.id}
                     className="card"
-                    style={{ height: '100%', cursor: 'pointer' }}
+                    style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', aspectRatio: '5.5/7' }}
                     onClick={() => router.push(`/reports/${report.id}/edit`)}
                   >
-                    <div className="card-image">
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
+                    <div className="card-image" style={{ flex: '1', minHeight: '80px' }}>
+                      <img 
+                        src={getReportImage(index)} 
+                        alt="Report" 
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
                     </div>
-                    <div className="card-body">
-                      <h4 style={{ marginBottom: "0.5rem" }}>
+                    <div className="card-body" style={{ flex: '0 0 auto', padding: '0.5rem' }}>
+                      <h4 style={{ marginBottom: "0.25rem", fontSize: "0.9rem" }}>
                         {report.title || `Report ${index + 1}`}
                       </h4>
-                      <p className="text-secondary" style={{ marginBottom: "0.5rem", fontSize: "0.875rem" }}>
-                        Created on {new Date(report.created_at).toLocaleDateString()}
-                      </p>
-                      <p className="text-secondary" style={{ marginBottom: "0.75rem", fontSize: "0.875rem" }}>
-                        {report.delivered_at 
-                          ? `Delivered on ${new Date(report.delivered_at).toLocaleDateString('en-US', { 
-                              month: 'long', 
-                              day: 'numeric', 
-                              year: 'numeric' 
-                            })}`
-                          : 'Not Delivered'
-                        }
-                      </p>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: "0.7rem", color: "var(--color-text-secondary)", marginBottom: "0.5rem" }}>
+                        <span>Created on {new Date(report.created_at).toLocaleDateString()}</span>
+                        <span>
+                          {report.delivered_at 
+                            ? `Delivered on ${new Date(report.delivered_at).toLocaleDateString('en-US', { 
+                                month: 'long', 
+                                day: 'numeric', 
+                                year: 'numeric' 
+                              })}`
+                            : 'Not Delivered'
+                          }
+                        </span>
+                      </div>
                       <div className="report-actions">
                         <Link
                           href={`/reports/${report.id}/edit`}

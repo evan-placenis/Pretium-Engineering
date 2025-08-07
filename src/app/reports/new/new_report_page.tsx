@@ -274,6 +274,39 @@ export default function NewReport() {
               setSuccessMessage('Your previous form data has been restored');
               setTimeout(() => setSuccessMessage(null), 3000);
             }
+            
+            // Check for backup form data to restore user's input when returning from image selection
+            const backupFormData = localStorage.getItem(`report-form-backup-${projectId}`);
+            if (backupFormData) {
+              try {
+                const preservedFormData = JSON.parse(backupFormData);
+                
+                // Restore preserved form data (like report title) if available
+                if (preservedFormData.reportTitle) {
+                  setReportTitle(preservedFormData.reportTitle);
+                }
+                if (preservedFormData.selectedModel) {
+                  setSelectedModel(preservedFormData.selectedModel);
+                }
+                if (preservedFormData.reportStyle) {
+                  setReportStyle(preservedFormData.reportStyle);
+                }
+                if (preservedFormData.executionStrategy) {
+                  setExecutionStrategy(preservedFormData.executionStrategy);
+                }
+                if (preservedFormData.bulletPoints) {
+                  setBulletPoints(preservedFormData.bulletPoints);
+                }
+                
+                // Clear backup after restoring
+                localStorage.removeItem(`report-form-backup-${projectId}`);
+                
+                setSuccessMessage('Your form data has been preserved while selecting photos');
+                setTimeout(() => setSuccessMessage(null), 3000);
+              } catch (error) {
+                console.warn('Failed to parse backup form data:', error);
+              }
+            }
           } catch (error) {
             console.warn('Failed to parse saved form data:', error);
           }
@@ -312,6 +345,14 @@ export default function NewReport() {
       }
     }
   }, [reportTitle, bulletPoints, selectedModel, projectId, groupNumberingStates, selectedImages, selectedImageIds, groupsData]);
+
+  // Auto-switch execution strategy to Standard when in ungrouped mode
+  // TODO: Remove this restriction later - Parallel Summary should work with ungrouped photos
+  useEffect(() => {
+    if (isUngroupedMode && executionStrategy === 'batched-parallel-with-parallel-summary') {
+      setExecutionStrategy('batched-parallel');
+    }
+  }, [isUngroupedMode, executionStrategy]);
 
   // Clear saved form data when report is successfully generated
   // Initialize group order when groups are loaded
@@ -779,10 +820,6 @@ export default function NewReport() {
 
   return (
     <div className="container page-content" style={{ background: 'var(--color-bg)', minHeight: '100vh' }}>
-      <h1 style={{ marginBottom: '2rem', color: 'var(--color-primary)' }}>
-        Create New Report
-      </h1>
-
       <header style={{ marginBottom: "2rem" }}>
         {/* Breadcrumb navigation */}
         {project && (
@@ -804,6 +841,10 @@ export default function NewReport() {
           />
         )}
       </header>
+
+      <h1 style={{ marginBottom: '2rem', color: 'var(--color-primary)' }}>
+        Create New Report
+      </h1>
     
 
       {error && (
@@ -1012,20 +1053,30 @@ export default function NewReport() {
                 onClick={() => setExecutionStrategy('batched-parallel-with-parallel-summary')}
                 className="btn btn-sm"
                 style={{ 
-                  backgroundColor: executionStrategy === 'batched-parallel-with-parallel-summary' ? 'var(--color-primary)' : 'transparent',
-                  color: executionStrategy === 'batched-parallel-with-parallel-summary' ? '#fff' : 'var(--color-text)',
-                  borderColor: executionStrategy === 'batched-parallel-with-parallel-summary' ? 'var(--color-primary)' : 'var(--color-border)',
+                  backgroundColor: (loading || isUngroupedMode) ? 'var(--color-bg-secondary)' : (executionStrategy === 'batched-parallel-with-parallel-summary' ? 'var(--color-primary)' : 'transparent'),
+                  color: (loading || isUngroupedMode) ? 'var(--color-text-secondary)' : (executionStrategy === 'batched-parallel-with-parallel-summary' ? '#fff' : 'var(--color-text)'),
+                  borderColor: (loading || isUngroupedMode) ? 'var(--color-border)' : (executionStrategy === 'batched-parallel-with-parallel-summary' ? 'var(--color-primary)' : 'var(--color-border)'),
                   fontSize: "0.875rem",
-                  padding: "0.5rem 1rem"
+                  padding: "0.5rem 1rem",
+                  cursor: (loading || isUngroupedMode) ? 'not-allowed' : 'pointer',
+                  opacity: (loading || isUngroupedMode) ? 0.6 : 1
                 }}
-                disabled={loading}
+                disabled={loading || isUngroupedMode}
+                title={isUngroupedMode ? "Parallel Summary is not available for ungrouped photos" : "Use multiple AI agents for faster processing"}
               >
                 Parallel Summary
               </button>
             </div>
             <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
               Standard: Traditional processing. Parallel Summary: Uses multiple AI agents for faster processing with reduced timeout risk.
+              {/* TODO: Remove this restriction later - Parallel Summary should work with ungrouped photos */}
+              {isUngroupedMode && (
+                <span style={{ color: 'var(--color-accent)', fontWeight: '500' }}>
+                  {' '}(Parallel Summary disabled for ungrouped photos)
+                </span>
+              )}
             </p>
+            
           </div>
 
           <h4 style={{ marginBottom: "1rem" }}>Project Images</h4>
@@ -1033,6 +1084,26 @@ export default function NewReport() {
             <button 
               type="button"
               onClick={() => {
+                // Save current form data before navigating to select photos
+                if (projectId) {
+                  const currentFormData = {
+                    reportTitle,
+                    bulletPoints,
+                    selectedModel,
+                    reportStyle,
+                    executionStrategy,
+                    selectedImages: selectedImages.map(img => ({
+                      id: img.id,
+                      group: img.group,
+                      number: img.number
+                    })),
+                    groupNumberingStates,
+                    groupOrder,
+                    timestamp: Date.now()
+                  };
+                  localStorage.setItem(`report-form-backup-${projectId}`, JSON.stringify(currentFormData));
+                }
+                
                 let url = `/projects/${projectId}/images?mode=select&returnTo=reports`;
                 
                 if (selectedImages.length > 0) {

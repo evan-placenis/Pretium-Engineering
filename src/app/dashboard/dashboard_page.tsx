@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Project } from '@/lib/supabase';
 import { useViewPreference } from '@/hooks/useViewPreference';
+import { getBuildingImage } from '@/lib/image-utils';
 
 
 export default function Dashboard() {
@@ -77,8 +78,8 @@ export default function Dashboard() {
       let attempts = 0;
       const maxAttempts = 3;
       let success = false;
-      let data = null;
-      let fetchError = null;
+      let data: any = null;
+      let fetchError: any = null;
       
       while (attempts < maxAttempts && !success) {
         attempts++;
@@ -111,19 +112,19 @@ export default function Dashboard() {
       if (!success) {
         console.error('All attempts to fetch projects failed:', fetchError);
         // Handle the error but don't throw - we'll just show empty state
-        setAllProjects([]);
-        setProjects([]);
+        setAllProjects([] as Project[]);
+        setProjects([] as Project[]);
       } else {
         console.log(`Dashboard: Found ${data?.length || 0} projects`);
-        setAllProjects(data || []);
+        setAllProjects(data || [] as Project[]);
         // Apply current filter
-        applyProjectFilter(data || [], projectFilter, userId);
+        applyProjectFilter(data || [] as Project[], projectFilter, userId);
       }
-    } catch (error) {
-      console.error('Unexpected error in fetchProjects:', error);
-      // Set empty projects on error rather than crashing
-      setAllProjects([]);
-      setProjects([]);
+          } catch (error) {
+        console.error('Unexpected error in fetchProjects:', error);
+        // Set empty projects on error rather than crashing
+        setAllProjects([] as Project[]);
+        setProjects([] as Project[]);
     } finally {
       setLoading(false);
     }
@@ -281,8 +282,8 @@ export default function Dashboard() {
           </div>
         ) : (
           viewMode === 'grid' ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" }}>
-              {filteredProjects.map((project) => (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "1rem" }}>
+              {filteredProjects.map((project, index) => (
                 <Link key={project.id} href={`/projects/${project.id}`} className="card" style={{
                   display: 'flex',
                   flexDirection: 'column',
@@ -292,9 +293,9 @@ export default function Dashboard() {
                   background: '#f9fafb',
                   borderRadius: '1rem',
                   boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-                  padding: '2.5rem 1.5rem',
+                  padding: '0.75rem 0.5rem',
                   border: '1px solid #e5e7eb',
-                  minHeight: '120px',
+                  minHeight: '100px',
                   transition: 'box-shadow 0.18s, transform 0.18s',
                   cursor: 'pointer',
                   height: '100%',
@@ -302,15 +303,17 @@ export default function Dashboard() {
                   onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.10)')}
                   onMouseLeave={e => (e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.06)')}
                 >
-                  <div style={{ width: '48px', height: '48px', marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ width: '100%', height: '100%', color: '#2b579a' }}>
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                    </svg>
+                  <div style={{ width: '40px', height: '40px', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <img 
+                      src={getBuildingImage(index)} 
+                      alt="Building" 
+                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                    />
                   </div>
                   <h3 style={{
                     margin: 0,
                     fontWeight: 700,
-                    fontSize: '1.75rem',
+                    fontSize: '1.5rem',
                     color: '#2b579a',
                     letterSpacing: '0.01em',
                     textAlign: 'center',
@@ -319,21 +322,18 @@ export default function Dashboard() {
                     maxWidth: '90%',
                     wordBreak: 'break-word',
                     whiteSpace: 'pre-line',
-                    marginBottom: '1.5rem',
+                    marginBottom: '0rem',
                   }}>{project.project_name}</h3>
                   <div className="card-body">
-                    <h3 style={{ marginBottom: "0.5rem" }}>{project.name}</h3>
-                    <p style={{ marginBottom: "1rem", fontSize: "0.875rem" }} className="text-secondary">
+                    <h3 style={{ marginBottom: "0.25rem", fontSize: "0.9rem" }}>{project.name}</h3>
+                    <p style={{ marginBottom: "0.5rem", fontSize: "0.7rem" }} className="text-secondary">
                       <strong>Company:</strong> {project["Client Company Name"]}
                     </p>
-                    <p style={{ marginBottom: "0.25rem", fontSize: "0.875rem" }} className="text-secondary">
+                    <p style={{ marginBottom: "0.25rem", fontSize: "0.7rem" }} className="text-secondary">
                       <strong>Title:</strong> {project["Project Title"]}
                     </p>
                     
-                    <div style={{ marginTop: "0.5rem", display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span className="badge badge-secondary">
-                        View Reports
-                      </span>
+                    <div style={{ marginTop: "0.25rem" }}>
                       <span style={{ fontSize: '0.75rem', color: 'var(--color-text-light)' }}>
                         {project.user_id === user?.id ? 'Your project' : 'Shared project'}
                       </span>
@@ -343,13 +343,13 @@ export default function Dashboard() {
               ))}
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {filteredProjects.map((project) => (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {filteredProjects.map((project, index) => (
                 <Link key={project.id} href={`/projects/${project.id}`} className="card" style={{ 
                   display: 'flex', 
                   alignItems: 'center', 
-                  gap: '1.5rem', 
-                  padding: '1rem',
+                  gap: '1rem', 
+                  padding: '0.5rem',
                   textDecoration: 'none',
                   transition: 'box-shadow 0.18s, transform 0.18s',
                   cursor: 'pointer'
@@ -358,25 +358,20 @@ export default function Dashboard() {
                   onMouseLeave={e => (e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.06)')}
                 >
                   <div style={{ width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ width: '100%', height: '100%', color: '#2b579a' }}>
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                    </svg>
+                    <img 
+                      src={getBuildingImage(index)} 
+                      alt="Building" 
+                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                    />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <h4 style={{ marginBottom: "0.5rem", fontSize: '1.25rem', fontWeight: 600, color: '#2b579a' }}>{project.project_name}</h4>
-                    <p style={{ marginBottom: "0.25rem", fontSize: "0.875rem" }} className="text-secondary">
-                      <strong>Company:</strong> {project["Client Company Name"]}
-                    </p>
-                    <p style={{ marginBottom: "0.25rem", fontSize: "0.875rem" }} className="text-secondary">
-                      <strong>Title:</strong> {project["Project Title"]}
-                    </p>
-                    <div style={{ marginTop: "0.5rem", display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span className="badge badge-secondary">
-                        View Reports
-                      </span>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-light)' }}>
-                        {project.user_id === user?.id ? 'Your project' : 'Shared project'}
-                      </span>
+                    <h4 style={{ marginBottom: "0.25rem", fontSize: '1.25rem', fontWeight: 600, color: '#2b579a' }}>{project.project_name}</h4>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: "0.75rem", color: "var(--color-text-secondary)" }}>
+                      <span><strong>Company:</strong> {project["Client Company Name"]}</span>
+                      <span>•</span>
+                      <span><strong>Title:</strong> {project["Project Title"]}</span>
+                      <span>•</span>
+                      <span>{project.user_id === user?.id ? 'Your project' : 'Shared project'}</span>
                     </div>
                   </div>
                 </Link>

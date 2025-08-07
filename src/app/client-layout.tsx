@@ -93,8 +93,9 @@ export default function ClientLayout({
 
   // Helper function to check if a path is active
   const isActive = (path: string) => {
+    // Dashboard is never highlighted
     if (path === '/dashboard') {
-      return pathname === '/dashboard';
+      return false;
     }
     if (path === '/references') {
       return pathname === '/references';

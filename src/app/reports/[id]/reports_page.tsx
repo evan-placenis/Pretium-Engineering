@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { supabase, Project, Report, ReportImage } from '@/lib/supabase';
 import { createWordDocumentWithImages } from '@/lib/word-utils';
 import { extractStorageRelativePath, extractStorageBucketName } from '@/lib/utils';
+import Breadcrumb from '@/components/Breadcrumb';
 
 interface ReportViewProps {
   id: string;
@@ -222,17 +223,16 @@ export default function ReportView({ id }: ReportViewProps) {
       {/* Main Content */}
       <div className="container page-content">
         <header style={{ marginBottom: "2rem" }}>
-          <div style={{ marginBottom: "0.5rem", display: "flex" }}>
-            {project && (
-              <Link
-                href={`/projects/${project.id}`}
-                className="text-accent"
-                style={{ marginRight: "0.5rem", fontSize: "0.875rem" }}
-              >
-                ← Back to Project
-              </Link>
-            )}
-          </div>
+          {/* Breadcrumb navigation */}
+          {project && (
+            <Breadcrumb
+              items={[
+                { label: 'Dashboard', href: '/dashboard' },
+                { label: `${project.project_name} Project`, href: `/projects/${project.id}` },
+                { label: report?.title || 'Report', isCurrent: true }
+              ]}
+            />
+          )}
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <h1>
               {project?.project_name || 'Project'}: {report?.title || 'Report 1'}

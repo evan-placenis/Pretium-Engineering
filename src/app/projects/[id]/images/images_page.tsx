@@ -11,6 +11,7 @@ import ImageFilter, { type FilterableImage } from '@/components/ImageFilter';
 import UploadPhotoModal from './components/UploadPhotoModal';
 import AddPhotosModal from './components/AddPhotosModal';
 import CollapsibleGroup from '@/components/CollapsibleGroup';
+import Breadcrumb from '@/components/Breadcrumb';
 
 // ===== IMAGE RESIZING UTILITY =====
 
@@ -693,28 +694,47 @@ export default function ProjectImagesPage() {
       {/* Navigation header */}
       <header style={{ marginBottom: "1rem" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-          {/* Back button - always show */}
-          <div style={{ display: "flex" }}>
-            <Link
-              href={isSelectionMode ? `/reports/new?project_id=${projectId}` : `/projects/${project.id}`}
-              className="text-accent"
-              style={{ marginRight: "0.5rem", fontSize: "0.875rem" }}
-            >
-              ← {isSelectionMode ? 'Back to Report' : 'Back to Project'}
-            </Link>
-          </div>
+                     {/* Breadcrumb navigation */}
+           <Breadcrumb
+             items={
+               isSelectionMode 
+                 ? [
+                     { label: 'Dashboard', href: '/dashboard' },
+                     { label: 'Reports', href: '/reports' },
+                     { label: 'New Report', href: `/reports/new?project_id=${projectId}` },
+                     { label: 'Organize Images', isCurrent: true }
+                   ]
+                 : [
+                     { label: 'Dashboard', href: '/dashboard' },
+                     { label: `${project.project_name || 'Project'} Project`, href: `/projects/${project.id}` },
+                     { label: 'Images', isCurrent: true }
+                   ]
+             }
+           />
 
-          {/* Page title and project info */}
-          <div style={{ marginBottom: "0.5rem" }}>
+          {/* Page title and project info with create report button */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
             <h1 style={{ marginBottom: "0.25rem" }}>
               {isSelectionMode ? 'Organize Images for Report' : `${project.project_name ? project.project_name : 'Project'} Images`}
             </h1>
-            {isSelectionMode && (
-              <p style={{ color: "var(--color-text-secondary)", fontSize: "0.875rem", marginBottom: "0.5rem" }}>
-                Create report sections or select AI-generated sections to start selecting images and give complete control to AI with the report generation.
-              </p>
+            
+            {/* Create Report button - only show when not in selection mode */}
+            {!isSelectionMode && (
+              <Link
+                href={`/reports/new?project_id=${projectId}`}
+                className="btn btn-secondary"
+                style={{ fontSize: "0.875rem", backgroundColor: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+              >
+                Create Report
+              </Link>
             )}
           </div>
+          
+          {isSelectionMode && (
+            <p style={{ color: "var(--color-text-secondary)", fontSize: "0.875rem", marginBottom: "0.5rem" }}>
+              Create report sections or select AI-generated sections to start selecting images and give complete control to AI with the report generation.
+            </p>
+          )}
           
           {/* Selection mode controls */}
           {isSelectionMode && (

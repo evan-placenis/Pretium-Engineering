@@ -20,7 +20,8 @@ export async function POST(request: NextRequest) {
       groupOrder,
       selectedModel,
       isUngroupedMode,
-      mode, // 'brief' or 'elaborate'
+      reportStyle, // 'brief' or 'elaborate'
+      executionStrategy, // 'batched-parallel' or 'batched-parallel-with-parallel-summary'
       requestId // Unique request ID for tracking
     } = body;
 
@@ -29,14 +30,15 @@ export async function POST(request: NextRequest) {
       reportId,
       projectId,
       selectedModel,
-      mode,
+      reportStyle,
+      executionStrategy,
       imageCount: imagesWithNumbering?.length || 0
     });
 
     // Validate required fields
-    if (!reportId || !projectId || !selectedModel || !mode) {
+    if (!reportId || !projectId || !selectedModel || !reportStyle || !executionStrategy) {
       return NextResponse.json(
-        { error: 'Missing required fields: reportId, projectId, selectedModel, mode' },
+        { error: 'Missing required fields: reportId, projectId, selectedModel, reportStyle, executionStrategy' },
         { status: 400 }
       );
     }
@@ -52,7 +54,8 @@ export async function POST(request: NextRequest) {
       groupOrder,
       selectedModel,
       isUngroupedMode,
-      mode // Pass the user's mode selection
+      reportStyle, // Pass the user's report style selection
+      executionStrategy // Pass the user's execution strategy selection
     });
 
     // Trigger the job processor immediately
@@ -75,7 +78,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       jobId: job.jobId,
-      message: `Report generation job enqueued with ${mode} mode using ${selectedModel}`,
+      message: `Report generation job enqueued with ${reportStyle} style and ${executionStrategy} execution using ${selectedModel}`,
       requestId: requestId
     });
 

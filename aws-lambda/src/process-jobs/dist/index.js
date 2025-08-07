@@ -20409,6 +20409,7 @@ var BatchedParallelExecutor = class {
         content = result.content;
         Object.assign(metadata, result.metadata);
       }
+      console.error("[DEBUG] STARTING SUMMARY PHASE");
       console.log("\u{1F4DD} Generating final summary sequentially (STREAMING ENABLED)...");
       await this.updateReportContent(content + "\n\n\u{1F4DD} SUMMARY PHASE: Starting final review and formatting...", false);
       const summarySystemPrompt = promptStrategy.getSummarySystemPrompt(grouping);
@@ -20425,17 +20426,25 @@ ${summaryTaskPrompt}`;
       console.log(`\u{1F4DD} Summary prompt length: ${fullSummaryPrompt.length} characters`);
       const summaryPromise = llmProvider.generateContent(fullSummaryPrompt, {
         temperature: 0.7,
-        maxTokens: 4e3
-        // Reduced from 8000 to prevent timeouts
+        maxTokens: 12e3
+        // Increased to prevent content truncation
       });
       const timeoutPromise = new Promise((_2, reject) => {
         setTimeout(() => reject(new Error("Summary generation timed out after 6 minutes")), 36e4);
       });
       const summaryResponse = await Promise.race([summaryPromise, timeoutPromise]);
+      console.error(`[DEBUG] SUMMARY RESPONSE: hasError=${!!summaryResponse.error}, hasContent=${!!summaryResponse.content}, contentLength=${summaryResponse.content?.length || 0}`);
       if (summaryResponse.error) {
+        console.error(`[ERROR] SUMMARY ERROR: ${summaryResponse.error}`);
         throw new Error(`Summary generation failed: ${summaryResponse.error}`);
       }
+      if (!summaryResponse.content || summaryResponse.content.trim().length === 0) {
+        console.error(`[ERROR] SUMMARY EMPTY: No content returned`);
+        throw new Error(`Summary generation returned empty content`);
+      }
+      console.error(`[DEBUG] SUMMARY SUCCESS: Updating report with ${summaryResponse.content.length} characters`);
       await this.updateReportContent(summaryResponse.content, true);
+      console.error(`[DEBUG] SUMMARY COMPLETE: Report updated successfully`);
       return {
         content: summaryResponse.content,
         metadata: {
@@ -20447,7 +20456,37 @@ ${summaryTaskPrompt}`;
         }
       };
     } catch (error) {
-      console.error("Batched Parallel Executor Error:", error);
+      console.error("\u274C Batched Parallel Executor Error:", error);
+      try {
+        if (this.supabase && this.reportId) {
+          const { data: currentReport } = await this.supabase.from("reports").select("generated_content").eq("id", this.reportId).single();
+          let currentContent = currentReport?.generated_content || "";
+          currentContent = currentContent.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, "\n\n\u274C REPORT GENERATION FAILED");
+          currentContent = currentContent.replace(/\n\[PROCESSING IN PROGRESS\.\.\.\]/g, "\n\n\u274C REPORT GENERATION FAILED");
+          currentContent = currentContent.replace(/\[PROCESSING IN PROGRESS\.\.\.\]/g, "\n\n\u274C REPORT GENERATION FAILED");
+          if (currentContent.trim().length > 0) {
+            const errorMessage = `
+
+\u274C REPORT GENERATION FAILED
+
+Error: ${error}
+
+Your content has been preserved. You can continue editing or try generating again.`;
+            const updatedContent = currentContent + errorMessage;
+            await this.supabase.from("reports").update({ generated_content: updatedContent }).eq("id", this.reportId);
+          } else {
+            const errorMessage = `\u274C REPORT GENERATION FAILED
+
+Error: ${error}
+
+Please try generating again.`;
+            await this.supabase.from("reports").update({ generated_content: errorMessage }).eq("id", this.reportId);
+          }
+          console.log("\u{1F4DD} Updated report with error message");
+        }
+      } catch (updateError) {
+        console.error("\u274C Failed to update report with error:", updateError);
+      }
       throw error;
     }
   }
@@ -20616,8 +20655,11 @@ ${batchPrompt}`;
     return groups;
   }
   async updateReportContent(content, isComplete = false) {
-    if (!this.supabase || !this.reportId)
+    console.error(`[DEBUG] UPDATE REPORT: isComplete=${isComplete}, contentLength=${content.length}, reportId=${this.reportId}`);
+    if (!this.supabase || !this.reportId) {
+      console.error("[ERROR] UPDATE ERROR: Missing supabase or reportId");
       return;
+    }
     try {
       let fullContent = content;
       if (isComplete) {
@@ -20626,17 +20668,22 @@ ${batchPrompt}`;
         cleanedContent = cleanedContent.replace(/\n\[PROCESSING IN PROGRESS\.\.\.\]/g, "");
         cleanedContent = cleanedContent.replace(/\[PROCESSING IN PROGRESS\.\.\.\]/g, "");
         fullContent = cleanedContent;
-        console.log(`\u{1F389} [COMPLETE] Final content ends with: "${fullContent.slice(-50)}"`);
+        console.error(`[DEBUG] UPDATE COMPLETE: Final content length: ${fullContent.length}`);
       } else {
         const status = "[PROCESSING IN PROGRESS...]";
         fullContent = `${content}
 
 ${status}`;
       }
-      await this.supabase.from("reports").update({ generated_content: fullContent }).eq("id", this.reportId);
-      console.log(`\u{1F4DD} Updated report content (${content.length} chars, ${isComplete ? "final update" : "in progress"})`);
+      console.error(`[DEBUG] UPDATE DB: Updating report ${this.reportId} with ${fullContent.length} characters`);
+      const { error } = await this.supabase.from("reports").update({ generated_content: fullContent }).eq("id", this.reportId);
+      if (error) {
+        console.error(`[ERROR] UPDATE DB ERROR: ${error.message}`);
+      } else {
+        console.error(`[DEBUG] UPDATE DB SUCCESS: Report updated`);
+      }
     } catch (error) {
-      console.error("Error updating report content:", error);
+      console.error("[ERROR] UPDATE EXCEPTION:", error);
     }
   }
   chunkArray(array, size) {
@@ -20655,8 +20702,7 @@ var BatchedParallelWithParallelSummaryExecutor = class {
     this.MAX_PARALLEL_AGENTS = 3;
     this.SUMMARY_CHUNK_SIZE = 3e3;
     // Increased chunk size to reduce processing overhead
-    this.MAX_PARALLEL_SUMMARY_AGENTS = 1;
-    // Reduced to 1 to prevent resource contention
+    this.MAX_PARALLEL_SUMMARY_AGENTS = 3;
     this.supabase = null;
     this.reportId = "";
   }
@@ -20739,15 +20785,21 @@ var BatchedParallelWithParallelSummaryExecutor = class {
     const chunkStartTime = Date.now();
     console.log(`\u{1F4DD} [SUMMARY CHUNK ${chunkIndex + 1}] Processing chunk ${chunkIndex + 1}/${totalChunks} (${chunk.length} chars)`);
     const summarySystemPrompt = promptStrategy.getSummarySystemPrompt(grouping);
-    const summaryTaskPrompt = `Format this content into a clean report section. Keep all content. Follow: ${bulletPoints}. Chunk ${chunkIndex + 1}/${totalChunks}. Content: ${chunk}`;
+    const summaryTaskPrompt = promptStrategy.generateSummaryPrompt(chunk, {
+      mode: params.mode,
+      grouping,
+      bulletPoints,
+      projectData,
+      options
+    });
     const fullSummaryPrompt = `${summarySystemPrompt}
 
 ${summaryTaskPrompt}`;
     console.log(`\u{1F4DD} [SUMMARY CHUNK ${chunkIndex + 1}] Summary prompt length: ${fullSummaryPrompt.length} characters`);
     const response = await llmProvider.generateContent(fullSummaryPrompt, {
       temperature: 0.7,
-      maxTokens: 2e3
-      // Reduced for faster processing
+      maxTokens: 6e3
+      // Increased to prevent content truncation
     });
     if (response.error) {
       console.error(`\u274C [SUMMARY CHUNK ${chunkIndex + 1}] Summary error: ${response.error}`);
@@ -20780,8 +20832,8 @@ ${summaryTaskPrompt}`;
 ${finalTaskPrompt}`;
     const response = await llmProvider.generateContent(fullFinalPrompt, {
       temperature: 0.7,
-      maxTokens: 3e3
-      // Reduced for faster processing
+      maxTokens: 8e3
+      // Increased to prevent content truncation
     });
     if (response.error) {
       console.error(`\u274C Final formatting error: ${response.error}`);
@@ -21110,9 +21162,8 @@ ${batchPrompt}`;
       let fullContent = content;
       if (isComplete) {
         fullContent = content.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, "");
-        fullContent = `${fullContent}
-
-\u2705 REPORT GENERATION COMPLETE`;
+        fullContent = fullContent.replace(/\n\[PROCESSING IN PROGRESS\.\.\.\]/g, "");
+        fullContent = fullContent.replace(/\[PROCESSING IN PROGRESS\.\.\.\]/g, "");
       } else {
         const status = "[PROCESSING IN PROGRESS...]";
         fullContent = `${content}
@@ -28015,7 +28066,7 @@ var BriefPromptStrategy = class {
   - This section will be appended to an existing report. Do not include a title or summary.
   
   # INSTRUCTIONS:
-  1. Group related observations into clearly titled sections (e.g., ROOFING, HVAC).
+  1. Group related observations into clearly titled sections (e.g., Roofing, HVAC).
   2. Number sections: 1., 2., 3., etc. (Always include the period).
   3. Number bullet points: 1.1, 1.2, etc. per section.
   4. Maintain image references using [IMAGE:X].
@@ -28906,15 +28957,26 @@ var handler = async (event) => {
         const { data: currentReport } = await supabase.from("reports").select("generated_content").eq("id", job.input_data.reportId).single();
         let currentContent = currentReport?.generated_content || "";
         currentContent = currentContent.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, "");
-        const errorMessage = `
+        currentContent = currentContent.replace(/\n\[PROCESSING IN PROGRESS\.\.\.\]/g, "");
+        currentContent = currentContent.replace(/\[PROCESSING IN PROGRESS\.\.\.\]/g, "");
+        if (currentContent.trim().length > 0) {
+          const errorMessage = `
 
 \u274C REPORT GENERATION FAILED
 
 Error: ${error}
 
 Your content has been preserved. You can continue editing or try generating again.`;
-        const updatedContent = currentContent + errorMessage;
-        await supabase.from("reports").update({ generated_content: updatedContent }).eq("id", job.input_data.reportId);
+          const updatedContent = currentContent + errorMessage;
+          await supabase.from("reports").update({ generated_content: updatedContent }).eq("id", job.input_data.reportId);
+        } else {
+          const errorMessage = `\u274C REPORT GENERATION FAILED
+
+Error: ${error}
+
+Please try generating again.`;
+          await supabase.from("reports").update({ generated_content: errorMessage }).eq("id", job.input_data.reportId);
+        }
       } catch (updateError) {
         console.error("Failed to update report with error:", updateError);
       }

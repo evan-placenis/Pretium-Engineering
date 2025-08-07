@@ -37,116 +37,104 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
-# Pretium - Engineering Report Automation App
+# Pretium Engineering Report Generator
 
-Pretium is a full-stack web application designed to automate engineering report writing workflows using AI. The application allows engineering firms to streamline their report creation process, from bullet-point notes to finalized reports, with AI assistance.
+A comprehensive engineering report generation system that processes site inspection photos and generates professional reports.
 
 ## Features
 
-- **Authentication System**: Secure user accounts with email/password login
-- **Building & Report Management**: Organize reports by buildings/locations
-- **AI Report Generation**: Convert bullet-point notes into detailed professional reports
-- **Interactive Chat Interface**: Refine and modify reports through AI chat
-- **Custom Style Training**: Train AI on company-specific report styles
-- **Word Document Support**: Import and export Word documents
+- **Multi-Executor Support**: Choose from different execution strategies for report generation
+- **Real-time Streaming**: Live progress updates during report generation
+- **Image Analysis**: AI-powered analysis of inspection photos
+- **Knowledge Integration**: Connect reports to project specifications and requirements
+- **Enhanced Chatbot**: AI-powered chat assistant for report editing and questions
+- **AWS Lambda Deployment**: Scalable serverless architecture
 
-## Technology Stack
+## Environment Variables
 
-- **Frontend**: React, Next.js, Custom CSS
-- **Backend**: Next.js API Routes
-- **Database & Auth**: Supabase
-- **AI Integration**: OpenAI GPT API
-- **Document Processing**: Mammoth.js (for Word file extraction), Docx (for Word file generation)
+### Required for Report Generation
 
-## Setup Instructions
+- `GROK_API_KEY` - API key for Grok AI (used for report generation)
+- `SUPABASE_URL` - Your Supabase project URL
+- `SUPABASE_ANON_KEY` - Your Supabase anonymous key
 
-### Prerequisites
+### Required for Enhanced Chatbot
 
-- Node.js (v16 or newer)
-- npm or yarn
-- Supabase account
-- OpenAI API key
+- `GROK_API_KEY` - API key for Grok AI (used for chatbot functionality)
 
-### Environment Variables
+### Optional
 
-Create a `.env.local` file in the project root with the following variables:
+- `AWS_ACCESS_KEY_ID` - AWS access key for Lambda deployment
+- `AWS_SECRET_ACCESS_KEY` - AWS secret key for Lambda deployment
+- `AWS_REGION` - AWS region for Lambda deployment
 
-```
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key (optional)
-OPENAI_API_KEY=your_openai_api_key
-```
+## Enhanced Chatbot Features
 
-### Database Setup
+The enhanced chatbot now supports:
 
-Create the following tables in your Supabase database:
+### "@" Reference System
 
-1. **buildings**
+Use "@" to make explicit references to specific content in your report:
 
-   - id (uuid, primary key)
-   - name (text)
-   - location (text)
-   - date (date)
-   - user_id (uuid, foreign key to auth.users)
-   - created_at (timestamp with time zone)
+- `@section 1.1` or `@1.1` - Reference to section 1.1
+- `@roofing` - Reference to any content containing "roofing"
+- `@image 5` or `@[IMAGE:5]` - Reference to image 5
+- `@group HVAC` - Reference to HVAC group content
+- `@first paragraph` - Reference to the first paragraph
+- `@last bullet` - Reference to the last bullet point
 
-2. **reports**
+### Examples
 
-   - id (uuid, primary key)
-   - building_id (uuid, foreign key to buildings)
-   - bullet_points (text)
-   - generated_content (text)
-   - created_at (timestamp with time zone)
-   - updated_at (timestamp with time zone)
+- "Change @section 1.1 to be more detailed"
+- "Remove @image 3 from the report"
+- "Add a new section after @roofing"
+- "Make @first paragraph more professional"
 
-3. **chat_messages**
+### Agent Types
 
-   - id (uuid, primary key)
-   - report_id (uuid, foreign key to reports)
-   - content (text)
-   - role (text, 'user' or 'assistant')
-   - created_at (timestamp with time zone)
+The chatbot automatically determines which agent to use:
 
-4. **training_documents**
-   - id (uuid, primary key)
-   - filename (text)
-   - content (text)
-   - created_at (timestamp with time zone)
+- **Knowledge Agent**: For questions about specifications, codes, and requirements
+- **Modification Agent**: For making changes to the report (automatically selected when using "@" references)
+- **Assistant Agent**: For general questions and help
 
-### Installation
+## Getting Started
 
 1. Clone the repository
-2. Install dependencies:
-   ```
-   npm install
-   ```
-3. Run the development server:
-   ```
-   npm run dev
-   ```
-4. Open [http://localhost:3000](http://localhost:3000) in your browser
+2. Install dependencies: `npm install`
+3. Set up environment variables
+4. Deploy to AWS Lambda: `npm run deploy`
+5. Start the development server: `npm run dev`
 
-## Usage Flow
+## Deployment
 
-1. **Sign Up/Login**: Create an account or sign in
-2. **Create a Building**: Add a new building with location and date
-3. **Create a Report**: Enter bullet-point observations about the building
-4. **Generate Report**: AI converts bullet points into a detailed report
-5. **Chat & Refine**: Use the chat interface to make adjustments
-6. **Export to Word**: Download the finalized report as a Word document
+### AWS Lambda Deployment
 
-## Additional Configuration
+```bash
+npm run deploy
+```
 
-### OpenAI Models
+### Local Development
 
-The application uses GPT-4 by default. For lower costs, you can modify the model in the API routes:
+```bash
+npm run dev
+```
 
-- `src/app/api/generate-report/route.ts`
-- `src/app/api/chat/route.ts`
+## Architecture
 
-### Custom Styling
+- **Frontend**: Next.js with TypeScript
+- **Backend**: AWS Lambda functions
+- **Database**: Supabase (PostgreSQL)
+- **AI**: Grok AI for report generation and chatbot
+- **Storage**: Supabase Storage for images
 
-The application uses a custom CSS system with variables for consistent styling. Modify the globals.css file to adjust colors, spacing, and other design elements to match your brand style.
+## Contributing
 
-https://pretium-engineering-p8qn.vercel.app/
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+## License
+
+MIT License

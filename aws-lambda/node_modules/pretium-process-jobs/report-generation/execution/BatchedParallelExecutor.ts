@@ -33,6 +33,7 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
       }
 
       // STEP 2: Generate final summary sequentially
+      console.error('[DEBUG] STARTING SUMMARY PHASE');
       console.log('📝 Generating final summary sequentially (STREAMING ENABLED)...');
       
       // Update report to indicate summary has started
@@ -54,7 +55,7 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
       // Add timeout safeguard for summary generation
       const summaryPromise = llmProvider.generateContent(fullSummaryPrompt, {
         temperature: 0.7,
-        maxTokens: 4000  // Reduced from 8000 to prevent timeouts
+        maxTokens: 12000  // Increased to prevent content truncation
       });
 
       // Set a timeout of 180 seconds for summary generation (increased due to larger content from embeddings)
@@ -64,12 +65,24 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
 
       const summaryResponse = await Promise.race([summaryPromise, timeoutPromise]) as any;
 
+      console.error(`[DEBUG] SUMMARY RESPONSE: hasError=${!!summaryResponse.error}, hasContent=${!!summaryResponse.content}, contentLength=${summaryResponse.content?.length || 0}`);
+
       if (summaryResponse.error) {
+        console.error(`[ERROR] SUMMARY ERROR: ${summaryResponse.error}`);
         throw new Error(`Summary generation failed: ${summaryResponse.error}`);
       }
 
+      if (!summaryResponse.content || summaryResponse.content.trim().length === 0) {
+        console.error(`[ERROR] SUMMARY EMPTY: No content returned`);
+        throw new Error(`Summary generation returned empty content`);
+      }
+
+      console.error(`[DEBUG] SUMMARY SUCCESS: Updating report with ${summaryResponse.content.length} characters`);
+      
       // Update report with final summary content
       await this.updateReportContent(summaryResponse.content, true);
+      
+      console.error(`[DEBUG] SUMMARY COMPLETE: Report updated successfully`);
 
       return {
         content: summaryResponse.content,
@@ -364,10 +377,10 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
   }
 
   private async updateReportContent(content: string, isComplete: boolean = false) {
-    console.log(`🔄 updateReportContent called: isComplete=${isComplete}, contentLength=${content.length}, reportId=${this.reportId}`);
+    console.error(`[DEBUG] UPDATE REPORT: isComplete=${isComplete}, contentLength=${content.length}, reportId=${this.reportId}`);
     
     if (!this.supabase || !this.reportId) {
-      console.error('❌ Missing supabase or reportId for updateReportContent');
+      console.error('[ERROR] UPDATE ERROR: Missing supabase or reportId');
       return;
     }
     
@@ -383,20 +396,28 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
         
         // Just use the cleaned content without adding a completion message
         fullContent = cleanedContent;
-        console.log(`🎉 [COMPLETE] Final content ends with: "${fullContent.slice(-50)}"`);
+        console.error(`[DEBUG] UPDATE COMPLETE: Final content length: ${fullContent.length}`);
       } else {
         // Add processing marker for in-progress updates
         const status = '[PROCESSING IN PROGRESS...]';
         fullContent = `${content}\n\n${status}`;
       }
       
-      await this.supabase
+      console.error(`[DEBUG] UPDATE DB: Updating report ${this.reportId} with ${fullContent.length} characters`);
+      
+      const { error } = await this.supabase
         .from('reports')
         .update({ generated_content: fullContent })
         .eq('id', this.reportId);
         
+      if (error) {
+        console.error(`[ERROR] UPDATE DB ERROR: ${error.message}`);
+      } else {
+        console.error(`[DEBUG] UPDATE DB SUCCESS: Report updated`);
+      }
+        
     } catch (error) {
-      console.error('Failed to log to frontend:', error);
+      console.error('[ERROR] UPDATE EXCEPTION:', error);
     }
   }
 

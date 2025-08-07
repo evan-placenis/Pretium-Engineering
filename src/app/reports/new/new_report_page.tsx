@@ -11,6 +11,7 @@ import { Toast } from '@/components/feedback';
 import CollapsibleGroup from '@/components/CollapsibleGroup';
 import { NumberingMode, NumberedImageCard } from './components';
 import { useNumberingMode } from './hooks/useNumberingMode';
+import Breadcrumb from '@/components/Breadcrumb';
 
 
 // Extended interface for report images
@@ -39,7 +40,8 @@ export default function NewReport() {
   const [user, setUser] = useState<any>(null);
   const [selectedImages, setSelectedImages] = useState<ExtendedImageItem[]>([]);
   const [selectedModel, setSelectedModel] = useState('grok4');
-  const [reportMode, setReportMode] = useState<'brief' | 'elaborate' | 'parallel-summary'>('brief');
+  const [reportStyle, setReportStyle] = useState<'brief' | 'elaborate'>('brief');
+  const [executionStrategy, setExecutionStrategy] = useState<'batched-parallel' | 'batched-parallel-with-parallel-summary'>('batched-parallel');
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [debugInfo, setDebugInfo] = useState<any>(null);
   const [showDebugInfo, setShowDebugInfo] = useState(false);
@@ -153,6 +155,18 @@ export default function NewReport() {
                 setGroupNumberingStates(parsed.groupNumberingStates || {});
                 setGroupOrder(parsed.groupOrder || []);
                 
+                // Check for backup form data to preserve user's current input
+                const backupFormData = localStorage.getItem(`report-form-backup-${projectId}`);
+                let preservedFormData: any = null;
+                
+                if (backupFormData) {
+                  try {
+                    preservedFormData = JSON.parse(backupFormData);
+                  } catch (error) {
+                    console.warn('Failed to parse backup form data:', error);
+                  }
+                }
+                
                 // Load bullet points and generated content from template
                 if (parsed.bulletPoints) {
                   setBulletPoints(parsed.bulletPoints);
@@ -165,11 +179,28 @@ export default function NewReport() {
                   setBulletPoints(savedBulletPoints);
                 }
                 
+                // Restore preserved form data (like report title) if available
+                if (preservedFormData) {
+                  if (preservedFormData.reportTitle) {
+                    setReportTitle(preservedFormData.reportTitle);
+                  }
+                  if (preservedFormData.selectedModel) {
+                    setSelectedModel(preservedFormData.selectedModel);
+                  }
+                  if (preservedFormData.reportStyle) {
+                    setReportStyle(preservedFormData.reportStyle);
+                  }
+                  if (preservedFormData.executionStrategy) {
+                    setExecutionStrategy(preservedFormData.executionStrategy);
+                  }
+                }
+                
                 // Clear the separate localStorage items after loading
                 localStorage.removeItem(`report-bullet-points-${projectId}`);
                 localStorage.removeItem(`report-generated-content-${projectId}`);
+                localStorage.removeItem(`report-form-backup-${projectId}`); // Clear backup after restoring
                 
-                setSuccessMessage('Template loaded successfully! Photo structure, bullet points, and content restored.');
+                setSuccessMessage('Template loaded successfully! Photo structure, bullet points, and content restored. Your report title and settings have been preserved.');
                 setTimeout(() => setSuccessMessage(null), 3000);
                 
                 // Clear the template from localStorage after loading
@@ -681,7 +712,7 @@ export default function NewReport() {
         throw new Error(`Failed to insert report images: ${imagesError.message}`);
       }
 
-      console.log('Starting report generation with reportId:', reportData.id, 'using model:', selectedModel, 'mode:', reportMode);
+      console.log('Starting report generation with reportId:', reportData.id, 'using model:', selectedModel, 'style:', reportStyle, 'execution:', executionStrategy);
 
       // Use the unified API route with user-selected parameters
       const response = await fetch('/api/models/generate-report', {
@@ -699,7 +730,8 @@ export default function NewReport() {
           groupOrder: groupOrder, // Include group ordering information
           selectedModel, // User's model choice
           isUngroupedMode, // User's grouping choice
-          mode: reportMode // User's mode choice ('brief' or 'elaborate')
+          reportStyle, // User's report style choice ('brief' or 'elaborate')
+          executionStrategy // User's execution strategy choice
         }),
       });
 
@@ -752,26 +784,25 @@ export default function NewReport() {
       </h1>
 
       <header style={{ marginBottom: "2rem" }}>
-        <div style={{ marginBottom: "0.5rem", display: "flex" }}>
-          {project && (
-            <Link
-              href={`/projects/${project.id}`}
-              className="text-accent"
-              style={{ marginRight: "0.5rem", fontSize: "0.875rem" }}
-            >
-              ← Back to Project
-            </Link>
-          )}
-          {reportId && (
-            <Link
-              href={`/reports/${reportId}`}
-              className="text-accent"
-              style={{ marginRight: "0.5rem", fontSize: "0.875rem" }}
-            >
-              ← Back to Report Details
-            </Link>
-          )}
-        </div>
+        {/* Breadcrumb navigation */}
+        {project && (
+          <Breadcrumb
+            items={
+              reportId 
+                ? [
+                    { label: 'Dashboard', href: '/dashboard' },
+                    { label: `${project.project_name} Project`, href: `/projects/${project.id}` },
+                    { label: 'Reports', href: `/reports/${reportId}` },
+                    { label: 'Edit Report', isCurrent: true }
+                  ]
+                : [
+                    { label: 'Dashboard', href: '/dashboard' },
+                    { label: `${project.project_name} Project`, href: `/projects/${project.id}` },
+                    { label: 'New Report', isCurrent: true }
+                  ]
+            }
+          />
+        )}
       </header>
     
 
@@ -913,7 +944,7 @@ export default function NewReport() {
             </p>
           </div>
 
-          {/* Report Mode Selection */}
+          {/* Report Style Selection */}
           <div style={{ marginBottom: "1.5rem" }}>
             <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "500" }}>
               Report Style
@@ -921,12 +952,12 @@ export default function NewReport() {
             <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
               <button
                 type="button"
-                onClick={() => setReportMode('brief')}
+                onClick={() => setReportStyle('brief')}
                 className="btn btn-sm"
                 style={{ 
-                  backgroundColor: reportMode === 'brief' ? 'var(--color-primary)' : 'transparent',
-                  color: reportMode === 'brief' ? '#fff' : 'var(--color-text)',
-                  borderColor: reportMode === 'brief' ? 'var(--color-primary)' : 'var(--color-border)',
+                  backgroundColor: reportStyle === 'brief' ? 'var(--color-primary)' : 'transparent',
+                  color: reportStyle === 'brief' ? '#fff' : 'var(--color-text)',
+                  borderColor: reportStyle === 'brief' ? 'var(--color-primary)' : 'var(--color-border)',
                   fontSize: "0.875rem",
                   padding: "0.5rem 1rem"
                 }}
@@ -936,12 +967,12 @@ export default function NewReport() {
               </button>
               <button
                 type="button"
-                onClick={() => setReportMode('elaborate')}
+                onClick={() => setReportStyle('elaborate')}
                 className="btn btn-sm"
                 style={{ 
-                  backgroundColor: reportMode === 'elaborate' ? 'var(--color-primary)' : 'transparent',
-                  color: reportMode === 'elaborate' ? '#fff' : 'var(--color-text)',
-                  borderColor: reportMode === 'elaborate' ? 'var(--color-primary)' : 'var(--color-border)',
+                  backgroundColor: reportStyle === 'elaborate' ? 'var(--color-primary)' : 'transparent',
+                  color: reportStyle === 'elaborate' ? '#fff' : 'var(--color-text)',
+                  borderColor: reportStyle === 'elaborate' ? 'var(--color-primary)' : 'var(--color-border)',
                   fontSize: "0.875rem",
                   padding: "0.5rem 1rem"
                 }}
@@ -949,14 +980,41 @@ export default function NewReport() {
               >
                 Elaborate
               </button>
+            </div>
+            <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
+              Brief: Concise, focused reports. Elaborate: Detailed, comprehensive analysis.
+            </p>
+          </div>
+
+          {/* Execution Strategy Selection */}
+          <div style={{ marginBottom: "1.5rem" }}>
+            <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "500" }}>
+              Execution Strategy
+            </label>
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
               <button
                 type="button"
-                onClick={() => setReportMode('parallel-summary')}
+                onClick={() => setExecutionStrategy('batched-parallel')}
                 className="btn btn-sm"
                 style={{ 
-                  backgroundColor: reportMode === 'parallel-summary' ? 'var(--color-primary)' : 'transparent',
-                  color: reportMode === 'parallel-summary' ? '#fff' : 'var(--color-text)',
-                  borderColor: reportMode === 'parallel-summary' ? 'var(--color-primary)' : 'var(--color-border)',
+                  backgroundColor: executionStrategy === 'batched-parallel' ? 'var(--color-primary)' : 'transparent',
+                  color: executionStrategy === 'batched-parallel' ? '#fff' : 'var(--color-text)',
+                  borderColor: executionStrategy === 'batched-parallel' ? 'var(--color-primary)' : 'var(--color-border)',
+                  fontSize: "0.875rem",
+                  padding: "0.5rem 1rem"
+                }}
+                disabled={loading}
+              >
+                Standard
+              </button>
+              <button
+                type="button"
+                onClick={() => setExecutionStrategy('batched-parallel-with-parallel-summary')}
+                className="btn btn-sm"
+                style={{ 
+                  backgroundColor: executionStrategy === 'batched-parallel-with-parallel-summary' ? 'var(--color-primary)' : 'transparent',
+                  color: executionStrategy === 'batched-parallel-with-parallel-summary' ? '#fff' : 'var(--color-text)',
+                  borderColor: executionStrategy === 'batched-parallel-with-parallel-summary' ? 'var(--color-primary)' : 'var(--color-border)',
                   fontSize: "0.875rem",
                   padding: "0.5rem 1rem"
                 }}
@@ -966,7 +1024,7 @@ export default function NewReport() {
               </button>
             </div>
             <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
-              Brief: Concise, focused reports. Elaborate: Detailed, comprehensive analysis. Parallel Summary: Uses multiple AI agents for faster processing with reduced timeout risk.
+              Standard: Traditional processing. Parallel Summary: Uses multiple AI agents for faster processing with reduced timeout risk.
             </p>
           </div>
 
@@ -996,7 +1054,28 @@ export default function NewReport() {
             </button>
             <button
               type="button"
-              onClick={() => router.push(`/reports/new/use-previous?project_id=${projectId}&returnTo=reports`)}
+              onClick={() => {
+                // Save current form data before navigating to use-previous
+                if (projectId) {
+                  const currentFormData = {
+                    reportTitle,
+                    bulletPoints,
+                    selectedModel,
+                    reportStyle,
+                    executionStrategy,
+                    selectedImages: selectedImages.map(img => ({
+                      id: img.id,
+                      group: img.group,
+                      number: img.number
+                    })),
+                    groupNumberingStates,
+                    groupOrder,
+                    timestamp: Date.now()
+                  };
+                  localStorage.setItem(`report-form-backup-${projectId}`, JSON.stringify(currentFormData));
+                }
+                router.push(`/reports/new/use-previous?project_id=${projectId}&returnTo=reports`);
+              }}
               className="btn btn-outline"
               disabled={loading || isUngroupedMode}
               title={isUngroupedMode ? "Cannot use previous grouped reports when using ungrouped photos" : "Use previous report as template"}

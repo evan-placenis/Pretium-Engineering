@@ -73,8 +73,8 @@ export default function ClientLayout({
     }
   };
 
-  // Don't show navigation on auth pages
-  if (pathname.startsWith('/auth/')) {
+  // Don't show navigation on auth pages or edit report page
+  if (pathname.startsWith('/auth/') || pathname.includes('/edit')) {
     return <>{children}</>;
   }
 

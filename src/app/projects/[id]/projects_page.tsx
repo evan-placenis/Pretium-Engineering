@@ -9,6 +9,7 @@ import * as XLSX from 'xlsx';
 import { useViewPreference } from '@/hooks/useViewPreference';
 import KnowledgeUpload from './components/KnowledgeUpload';
 import KnowledgeViewer from './components/KnowledgeViewer';
+import Breadcrumb from '@/components/Breadcrumb';
 
 export default function ProjectPage({ id }: { id: string }) {
   const [project, setProject] = useState<Project | null>(null);
@@ -285,15 +286,13 @@ export default function ProjectPage({ id }: { id: string }) {
     <div className="container page-content">
       <div style={{ width: "100%" }}>
         <div style={{ marginBottom: "2rem" }}>
-          <div style={{ marginBottom: "0.5rem", display: "flex" }}>
-            <Link
-              href="/dashboard"
-              className="text-accent"
-              style={{ marginRight: "0.5rem", fontSize: "0.875rem" }}
-            >
-              ← Back to Dashboard
-            </Link>
-          </div>
+          {/* Breadcrumb navigation */}
+          <Breadcrumb
+            items={[
+              { label: 'Dashboard', href: '/dashboard' },
+              { label: `${project.project_name} Project`, isCurrent: true }
+            ]}
+          />
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <h1>{project.project_name}</h1>
             <div style={{ display: "flex", gap: "0.75rem" }}>

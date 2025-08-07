@@ -3,9 +3,16 @@ import OpenAI from 'openai';
 import { createServerSupabaseClient } from '@/lib/supabase';
 import { ReportImage } from '@/lib/supabase';
 
-// Initialize OpenAI client
+// Initialize OpenAI client for embeddings
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+});
+
+// Initialize Grok client for chat
+const grokClient = new OpenAI({
+  apiKey: process.env.GROK_API_KEY,
+  baseURL: "https://api.x.ai/v1",
+  timeout: 360000, // 6 minute timeout for reasoning models
 });
 
 // Initialize Supabase client
@@ -240,7 +247,7 @@ function estimateMessageTokens(message: any): number {
 // Limit conversation history to stay within token limits
 function limitConversationHistory(history: any[], maxTokens: number = 15000): any[] {
   let totalTokens = 0;
-  const limitedHistory = [];
+  const limitedHistory: any[] = [];
   
   // Start from the most recent messages and work backwards
   for (let i = history.length - 1; i >= 0; i--) {
@@ -379,14 +386,22 @@ export async function POST(req: NextRequest) {
       conversationLength: conversationHistory.length
     });
 
-    // Validate required environment variables
-    if (!process.env.OPENAI_API_KEY) {
-      console.error('OpenAI API key not configured');
-      return NextResponse.json(
-        { error: 'OpenAI API key not configured' },
-        { status: 500 }
-      );
-    }
+         // Validate required environment variables
+     if (!process.env.OPENAI_API_KEY) {
+       console.error('OpenAI API key not configured');
+       return NextResponse.json(
+         { error: 'OpenAI API key not configured' },
+         { status: 500 }
+       );
+     }
+     
+     if (!process.env.GROK_API_KEY) {
+       console.error('Grok API key not configured');
+       return NextResponse.json(
+         { error: 'Grok API key not configured' },
+         { status: 500 }
+       );
+     }
 
     // If this is a knowledge base search request
     if (searchKnowledgeBase && searchQuery && projectId) {
@@ -642,36 +657,42 @@ If relevant project knowledge is provided in the context, use it to answer quest
       console.warn('Warning: Request approaching token limit:', totalEstimatedTokens);
     }
 
-    // Call OpenAI API
-    let response;
-    try {
-      response = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: messages,
-        temperature: 0.7,
-        response_format: { type: "json_object" }
-      });
-    } catch (openaiError: any) {
-      console.error('OpenAI API error:', openaiError);
-      
-      // Handle specific OpenAI errors
-      if (openaiError.code === 'insufficient_quota') {
-        return NextResponse.json(
-          { error: 'OpenAI quota exceeded. Please try again later.' },
-          { status: 429 }
-        );
-      } else if (openaiError.code === 'invalid_api_key') {
-        return NextResponse.json(
-          { error: 'OpenAI API key is invalid' },
-          { status: 500 }
-        );
-      } else if (openaiError.status === 429) {
-        // Rate limit error - provide more helpful information
-        const retryAfter = openaiError.headers?.['retry-after'] || '60';
-        const waitTime = parseInt(retryAfter) || 60;
-        
-        // Check if it's a token limit issue
-        if (openaiError.error?.type === 'tokens') {
+         // Call Grok API
+     let response;
+     try {
+       console.log('🤖 Making Grok API call with model: grok-4');
+       console.log('🤖 Messages count:', messages.length);
+       console.log('🤖 First message preview:', messages[0]?.content?.substring(0, 200) + '...');
+       
+               response = await grokClient.chat.completions.create({
+          model: 'grok-4',
+          messages: messages,
+          temperature: 0.7
+        });
+       
+       console.log('✅ Grok API call successful');
+       console.log('✅ Response choices:', response.choices?.length || 0);
+     } catch (grokError: any) {
+       console.error('❌ Grok API error:', grokError);
+       
+       // Handle specific Grok API errors
+       if (grokError.code === 'insufficient_quota') {
+         return NextResponse.json(
+           { error: 'Grok quota exceeded. Please try again later.' },
+           { status: 429 }
+         );
+       } else if (grokError.code === 'invalid_api_key') {
+         return NextResponse.json(
+           { error: 'Grok API key is invalid' },
+           { status: 500 }
+         );
+       } else if (grokError.status === 429) {
+                 // Rate limit error - provide more helpful information
+         const retryAfter = grokError.headers?.['retry-after'] || '60';
+         const waitTime = parseInt(retryAfter) || 60;
+         
+         // Check if it's a token limit issue
+         if (grokError.error?.type === 'tokens') {
           return NextResponse.json(
             { 
               error: 'Request too large. Try asking a shorter question or wait a moment before trying again.',
@@ -692,18 +713,19 @@ If relevant project knowledge is provided in the context, use it to answer quest
           { status: 429 }
         );
       } else {
-        return NextResponse.json(
-          { error: `OpenAI API error: ${openaiError.message || 'Unknown error'}` },
-          { status: 500 }
-        );
+                 return NextResponse.json(
+           { error: `Grok API error: ${grokError.message || 'Unknown error'}` },
+           { status: 500 }
+         );
       }
     }
 
-    // Extract and parse the response
-    const responseContent = response.choices[0]?.message.content || '';
-    console.log('Received enhanced response from OpenAI');
-    console.log('Raw response content length:', responseContent.length);
-    console.log('Raw response content (first 500 chars):', responseContent.substring(0, 500));
+         // Extract and parse the response
+     const responseContent = response.choices[0]?.message.content || '';
+     console.log('📄 Received response from Grok');
+     console.log('📄 Response content length:', responseContent.length);
+     console.log('📄 Response content (first 500 chars):', responseContent.substring(0, 500));
+     console.log('📄 Response content (full):', responseContent);
     
     let parsedResponse;
     try {

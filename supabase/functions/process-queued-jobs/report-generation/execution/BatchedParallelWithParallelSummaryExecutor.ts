@@ -146,7 +146,7 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
          // Process the summary chunk with reduced maxTokens for faster processing
      const response = await llmProvider.generateContent(fullSummaryPrompt, {
        temperature: 0.7,
-       maxTokens: 2000  // Reduced for faster processing
+       maxTokens: 6000  // Reduced for faster processing
      }) as any;
     
     if (response.error) {
@@ -189,7 +189,7 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
          // Process final formatting with reduced maxTokens for faster processing
      const response = await llmProvider.generateContent(fullFinalPrompt, {
        temperature: 0.7,
-       maxTokens: 3000  // Reduced for faster processing
+       maxTokens: 6000  // Reduced for faster processing
      }) as any;
     
     if (response.error) {

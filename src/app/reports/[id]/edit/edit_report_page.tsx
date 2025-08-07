@@ -8,6 +8,7 @@ import { createWordDocumentWithImages} from '@/lib/word-utils';
 import { useChatMessages } from '@/app/reports/[id]/edit/hooks/chat-utils';
 import { ReportEditor, EnhancedReportChat } from './components';
 import { EmbeddingTestPanel } from './components/EmbeddingTestPanel';
+import Breadcrumb from '@/components/Breadcrumb';
 import './report_style.css';
 
 const SECTION_TEMPLATES: Record<string, string> = {
@@ -648,22 +649,7 @@ export default function EditReportPage() {
         top: 0,
         zIndex: 1000
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <button
-            onClick={() => router.push(`/projects/${project?.id}`)}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'white',
-              cursor: 'pointer',
-              fontSize: '1rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}
-          >
-            ← Back to Project
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
           <h1 style={{ 
             margin: 0, 
             fontSize: '1.8rem',
@@ -673,6 +659,21 @@ export default function EditReportPage() {
           }}>
             Report Editor
           </h1>
+          
+          {/* Breadcrumb navigation next to title */}
+          {project && (
+            <Breadcrumb
+              items={[
+                { label: 'Dashboard', href: '/dashboard' },
+                { label: `${project.project_name} Project`, href: `/projects/${project.id}` },
+                { label: 'Edit Report', isCurrent: true }
+              ]}
+              customStyle={{
+                color: 'white',
+                marginBottom: '0'
+              }}
+            />
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <button

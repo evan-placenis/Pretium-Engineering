@@ -6,7 +6,7 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
   private readonly BATCH_SIZE = 5;
   private readonly MAX_PARALLEL_AGENTS = 3;
   private readonly SUMMARY_CHUNK_SIZE = 3000; // Increased chunk size to reduce processing overhead
-  private readonly MAX_PARALLEL_SUMMARY_AGENTS = 1; // Reduced to 1 to prevent resource contention
+  private readonly MAX_PARALLEL_SUMMARY_AGENTS = 3;
   private supabase: any = null;
   private reportId: string = '';
 
@@ -135,15 +135,22 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     
     // Create a minimal summary prompt for this chunk
     const summarySystemPrompt = promptStrategy.getSummarySystemPrompt(grouping);
-    const summaryTaskPrompt = `Format this content into a clean report section. Keep all content. Follow: ${bulletPoints}. Chunk ${chunkIndex + 1}/${totalChunks}. Content: ${chunk}`;
+
+    const summaryTaskPrompt = promptStrategy.generateSummaryPrompt(chunk, {
+      mode: params.mode,
+      grouping,
+      bulletPoints,
+      projectData,
+      options
+    });
     
     const fullSummaryPrompt = `${summarySystemPrompt}\n\n${summaryTaskPrompt}`;
     console.log(`📝 [SUMMARY CHUNK ${chunkIndex + 1}] Summary prompt length: ${fullSummaryPrompt.length} characters`);
     
-         // Process the summary chunk with reduced maxTokens for faster processing
+         // Process the summary chunk with increased maxTokens to prevent content truncation
      const response = await llmProvider.generateContent(fullSummaryPrompt, {
        temperature: 0.7,
-       maxTokens: 2000  // Reduced for faster processing
+       maxTokens: 6000  // Increased to prevent content truncation
      }) as any;
     
     if (response.error) {
@@ -183,10 +190,10 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     
     const fullFinalPrompt = `${finalSystemPrompt}\n\n${finalTaskPrompt}`;
     
-         // Process final formatting with reduced maxTokens for faster processing
+         // Process final formatting with increased maxTokens to prevent content truncation
      const response = await llmProvider.generateContent(fullFinalPrompt, {
        temperature: 0.7,
-       maxTokens: 3000  // Reduced for faster processing
+       maxTokens: 8000  // Increased to prevent content truncation
      }) as any;
     
     if (response.error) {
@@ -656,9 +663,10 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
       let fullContent = content;
       
       if (isComplete) {
-        // Remove any existing processing marker and add completion message
+        // Remove any existing processing marker
         fullContent = content.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, '');
-        fullContent = `${fullContent}\n\n✅ REPORT GENERATION COMPLETE`;
+        fullContent = fullContent.replace(/\n\[PROCESSING IN PROGRESS\.\.\.\]/g, '');
+        fullContent = fullContent.replace(/\[PROCESSING IN PROGRESS\.\.\.\]/g, '');
       } else {
         // Add processing marker for in-progress updates
         const status = '[PROCESSING IN PROGRESS...]';

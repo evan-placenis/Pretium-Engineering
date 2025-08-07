@@ -14,15 +14,17 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
       groupOrder, 
       selectedModel, 
       isUngroupedMode,
-      mode // 'brief' or 'elaborate' from user selection
+      reportStyle, // 'brief' or 'elaborate' from user selection
+      executionStrategy // 'batched-parallel' or 'batched-parallel-with-parallel-summary' from user selection
     } = job.input_data;
 
-    console.log(`🚀 ReportGenerator: Starting ${mode} report generation...`);
+    console.log(`🚀 ReportGenerator: Starting ${reportStyle} report generation with ${executionStrategy} execution...`);
     console.log(`📋 Job data:`, {
       reportId,
       projectId,
       selectedModel,
-      mode,
+      reportStyle,
+      executionStrategy,
       isUngroupedMode,
       imageCount: imagesWithNumbering?.length || 0
     });
@@ -39,11 +41,12 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
     }
 
     // Update initial processing status
-    const displayMode = mode === 'parallel-summary' ? 'parallel summary' : mode;
+    const displayStyle = reportStyle === 'brief' ? 'brief' : 'elaborate';
+    const displayExecution = executionStrategy === 'batched-parallel-with-parallel-summary' ? 'parallel summary' : 'standard';
     await supabase
       .from('reports')
       .update({ 
-        generated_content: `Starting ${displayMode} report generation with ${selectedModel}...\n\n[PROCESSING IN PROGRESS...]`
+        generated_content: `Starting ${displayStyle} report generation with ${displayExecution} execution using ${selectedModel}...\n\n[PROCESSING IN PROGRESS...]`
       })
       .eq('id', reportId);
 
@@ -51,7 +54,7 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
     await supabase
       .from('reports')
       .update({ 
-        generated_content: `Starting ${displayMode} report generation with ${selectedModel}\n\n[PROCESSING IN PROGRESS...]`
+        generated_content: `Starting ${displayStyle} report generation with ${displayExecution} execution using ${selectedModel}\n\n[PROCESSING IN PROGRESS...]`
       })
       .eq('id', reportId);
 
@@ -85,27 +88,15 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
     const generator = new ReportGenerator();
     console.log(`✅ ReportGenerator initialized successfully`);
 
-    // Determine execution strategy based on user's mode selection WILL NEED TO CHANGE THIS LATER !! PARALLEL-SUMMARY IS A TEST FUNCTION
-    let executionStrategy: 'batched-parallel' | 'batched-parallel-with-parallel-summary';
-    let reportMode: 'brief' | 'elaborate';
-    
-    if (mode === 'parallel-summary') {
-      executionStrategy = 'batched-parallel-with-parallel-summary';
-      reportMode = 'brief'; // Use brief mode for the content generation part
-    } else {
-      executionStrategy = 'batched-parallel';
-      reportMode = mode as 'brief' | 'elaborate';
-    }
-
-    // User has already selected their preferences - use them directly
+    // Use the user's selected preferences directly
     const config = ReportGenerator.custom(
-      reportMode,                               // 'brief' or 'elaborate' (or 'brief' for parallel-summary)
+      reportStyle,                              // 'brief' or 'elaborate'
       selectedModel as 'grok4' | 'gpt4o',       // User's model choice
-      executionStrategy,                        // Use appropriate execution strategy
+      executionStrategy,                        // User's execution strategy choice
       actualMode                                // Use actual mode determined from image data
     );
 
-    console.log(`🔧 Using execution strategy: ${executionStrategy} for ${mode} mode`);
+    console.log(`🔧 Using execution strategy: ${executionStrategy} for ${reportStyle} style`);
 
     console.log(`🎨 ReportGenerator Config:`, {
       mode: config.mode,
@@ -118,16 +109,16 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
     await supabase
       .from('reports')
       .update({ 
-        generated_content: `1. Starting ${mode} report generation with ${selectedModel}\nProcessing ${resizedImages.length} images in ${actualMode} mode...\n\n[PROCESSING IN PROGRESS...]`
+        generated_content: `1. Starting ${reportStyle} report generation with ${executionStrategy} execution using ${selectedModel}\nProcessing ${resizedImages.length} images in ${actualMode} mode...\n\n[PROCESSING IN PROGRESS...]`
       })
       .eq('id', reportId);
 
     // Generate report using the new system
     console.log(`🎯 Starting report generation with ReportGenerator...`);
     const result = await generator.generateReport({
-      mode: config.mode || mode,
+      mode: config.mode || reportStyle,
       model: config.model || selectedModel as 'grok4' | 'gpt4o',
-      execution: config.execution || 'parallel',
+      execution: config.execution || executionStrategy,
       grouping: config.grouping || (isUngroupedMode ? 'ungrouped' : 'grouped'),
       images: resizedImages,
       bulletPoints,
@@ -159,22 +150,22 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
     // The executor handles all content updates, so we don't need to update here
     // The final content is already in result.content and has been updated by the executor
 
-    console.log(`✅ ReportGenerator ${job.input_data.mode} report generation completed successfully`);
+    console.log(`✅ ReportGenerator ${reportStyle} report generation with ${executionStrategy} execution completed successfully`);
     return { 
       success: true, 
-      message: `ReportGenerator ${job.input_data.mode} report generated successfully using ${config.model}`,
+      message: `ReportGenerator ${reportStyle} report with ${executionStrategy} execution generated successfully using ${config.model}`,
       metadata: result.metadata
     };
 
   } catch (error: any) {
-    console.error(`❌ ReportGenerator ${job.input_data.mode} report generation failed:`, error);
+    console.error(`❌ ReportGenerator ${job.input_data.reportStyle} report generation with ${job.input_data.executionStrategy} execution failed:`, error);
     
     // Update report with error
     try {
       await supabase
         .from('reports')
         .update({ 
-          generated_content: `Error generating ${job.input_data.mode} report: ${error.message}\n\n[PROCESSING FAILED]`
+          generated_content: `Error generating ${job.input_data.reportStyle} report with ${job.input_data.executionStrategy} execution: ${error.message}\n\n[PROCESSING FAILED]`
         })
         .eq('id', job.input_data.reportId);
     } catch (updateError) {

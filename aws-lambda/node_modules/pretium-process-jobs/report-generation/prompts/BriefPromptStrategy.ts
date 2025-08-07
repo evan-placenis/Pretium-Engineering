@@ -103,7 +103,7 @@ export class BriefPromptStrategy implements PromptStrategy {
   - This section will be appended to an existing report. Do not include a title or summary.
   
   # INSTRUCTIONS:
-  1. Group related observations into clearly titled sections (e.g., ROOFING, HVAC).
+  1. Group related observations into clearly titled sections (e.g., Roofing, HVAC).
   2. Number sections: 1., 2., 3., etc. (Always include the period).
   3. Number bullet points: 1.1, 1.2, etc. per section.
   4. Maintain image references using [IMAGE:X].

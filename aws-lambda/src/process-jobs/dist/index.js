@@ -27720,8 +27720,8 @@ var GPT5Provider = class {
       const config = this.getConfigurationForReasoningEffort(options?.reasoningEffort || "medium");
       console.log(`\u{1F916} GPT-5: Making API call...`);
       const response = await openai.chat.completions.create({
-        model: "gpt-5o",
-        // Use GPT-5o as the model name
+        model: "gpt-5",
+        // Use GPT-5 as the model name
         messages: [
           {
             role: "system",

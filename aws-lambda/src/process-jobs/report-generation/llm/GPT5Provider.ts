@@ -43,16 +43,12 @@ export class GPT5Provider implements LLMProvider {
         model: 'gpt-5', // Use GPT-5 as the model name
         messages: [
           {
-            role: 'system',
-            content: this.getSystemPrompt(options?.mode || 'brief', options?.reasoningEffort || 'medium')
-          },
-          {
             role: 'user',
             content: prompt
           }
         ],
-        temperature: config.temperature,
-        max_tokens: config.maxTokens,
+        max_completion_tokens: config.maxTokens, // Use correct parameter name
+        reasoning_effort: options?.reasoningEffort || 'medium', // Add reasoning effort parameter
         stream: true // Enable streaming
       });
 
@@ -86,9 +82,8 @@ export class GPT5Provider implements LLMProvider {
         content,
         metadata: {
           model: 'gpt-5',
-          reasoningEffort: options?.reasoningEffort || 'medium',
           mode: options?.mode || 'brief',
-          temperature: config.temperature,
+          reasoningEffort: options?.reasoningEffort || 'medium',
           maxTokens: config.maxTokens,
           streaming: true,
           processingTime: totalTime,
@@ -111,45 +106,20 @@ export class GPT5Provider implements LLMProvider {
     switch (reasoningEffort) {
       case 'low':
         return {
-          temperature: 0.3, // Lower temperature for more focused, consistent output
-          maxTokens: 1500,  // Fewer tokens for faster processing
-          systemPrompt: 'low'
+          maxTokens: 1500   // Fewer tokens for faster processing
         };
       case 'medium':
         return {
-          temperature: 0.7, // Balanced temperature for good creativity and consistency
-          maxTokens: 2000,  // Standard token limit
-          systemPrompt: 'medium'
+          maxTokens: 2000   // Standard token limit
         };
       case 'high':
         return {
-          temperature: 0.9, // Higher temperature for more creative, thorough analysis
-          maxTokens: 3000,  // More tokens for comprehensive analysis
-          systemPrompt: 'high'
+          maxTokens: 3000   // More tokens for comprehensive analysis
         };
       default:
         return {
-          temperature: 0.7,
-          maxTokens: 2000,
-          systemPrompt: 'medium'
+          maxTokens: 2000
         };
     }
-  }
-
-  private getSystemPrompt(mode: string, reasoningEffort: string): string {
-    const basePrompt = 'You are a professional engineering inspector with expertise in building assessment and technical documentation.';
-    
-    const reasoningInstructions = {
-      low: 'Provide clear, concise observations with basic analysis. Focus on speed and efficiency.',
-      medium: 'Provide balanced analysis with moderate detail. Balance thoroughness with processing speed.',
-      high: 'Provide comprehensive, detailed analysis with deep technical insights. Take time to thoroughly examine all aspects.'
-    };
-
-    const modeInstructions = {
-      brief: 'Generate concise, focused reports with key findings and essential details.',
-      elaborate: 'Generate comprehensive, detailed reports with thorough analysis and extensive documentation.'
-    };
-
-    return `${basePrompt} ${reasoningInstructions[reasoningEffort as keyof typeof reasoningInstructions] || reasoningInstructions.medium} ${modeInstructions[mode as keyof typeof modeInstructions] || modeInstructions.brief}`;
   }
 }

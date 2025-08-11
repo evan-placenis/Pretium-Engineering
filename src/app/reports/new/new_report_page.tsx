@@ -272,6 +272,7 @@ export default function NewReport() {
                 setSelectedImages(restoredImages);
                 restored = true;
               }
+
             }
             // Only restore selectedModel if we're still on the default and haven't manually selected a model
             if (parsed.selectedModel && selectedModel === 'gpt5' && !hasManuallySelectedModel) {
@@ -1676,4 +1677,4 @@ export default function NewReport() {
       <Toast message={successMessage} type="success" />
     </div>
   );
-} 
+}

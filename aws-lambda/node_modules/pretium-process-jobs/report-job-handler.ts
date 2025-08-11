@@ -91,7 +91,7 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
     // Use the user's selected preferences directly
     const config = ReportGenerator.custom(
       reportStyle,                              // 'brief' or 'elaborate'
-      selectedModel as 'grok4' | 'gpt4o',       // User's model choice
+      selectedModel as 'grok4' | 'gpt4o' | 'gpt5',       // User's model choice
       executionStrategy,                        // User's execution strategy choice
       actualMode                                // Use actual mode determined from image data
     );
@@ -133,7 +133,8 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
       options: {
         contractName,
         location,
-        groupOrder
+        groupOrder,
+        reasoningEffort: selectedModel === 'gpt5' ? job.input_data.reasoningEffort || 'medium' : undefined
       }
     });
 

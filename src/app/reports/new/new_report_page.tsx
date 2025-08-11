@@ -26,9 +26,24 @@ interface GroupOrder {
 }
 
 // Define available models for the unified report generation system
-const AVAILABLE_MODELS = [
+interface ModelConfig {
+  id: string;
+  name: string;
+  description: string;
+  reasoningEffort?: 'low' | 'medium' | 'high';
+  verbosity?: 'low' | 'medium' | 'high';
+}
+
+const AVAILABLE_MODELS: ModelConfig[] = [
   { id: 'grok4', name: 'Grok-4', description: 'Latest xAI model with advanced reasoning capabilities' },
   { id: 'gpt4o', name: 'GPT-4o', description: 'OpenAI model with strong image understanding' },
+  { 
+    id: 'gpt5', 
+    name: 'GPT-5', 
+    description: 'Latest OpenAI model with enhanced capabilities',
+    reasoningEffort: 'medium', // Default reasoning effort
+    verbosity: 'medium'
+  },
 ];
 
 export default function NewReport() {
@@ -51,6 +66,7 @@ export default function NewReport() {
   const [groupOrder, setGroupOrder] = useState<GroupOrder[]>([]);
   const [isGroupOrderingMode, setIsGroupOrderingMode] = useState(false);
   const [isUngroupedMode, setIsUngroupedMode] = useState(false);
+  const [reasoningEffort, setReasoningEffort] = useState<'low' | 'medium' | 'high'>('medium');
   const hasRestoredFormData = useRef(false);
   
   // Use the numbering mode hook
@@ -258,8 +274,12 @@ export default function NewReport() {
               }
             }
             // Only restore selectedModel if we're still on the default and haven't manually selected a model
-            if (parsed.selectedModel && selectedModel === 'grok4' && !hasManuallySelectedModel) {
+            if (parsed.selectedModel && selectedModel === 'gpt5' && !hasManuallySelectedModel) {
               setSelectedModel(parsed.selectedModel);
+              restored = true;
+            }
+            if (parsed.reasoningEffort && selectedModel === 'gpt5') {
+              setReasoningEffort(parsed.reasoningEffort);
               restored = true;
             }
             if (parsed.groupNumberingStates && typeof parsed.groupNumberingStates === 'object') {
@@ -297,6 +317,9 @@ export default function NewReport() {
                 if (preservedFormData.bulletPoints) {
                   setBulletPoints(preservedFormData.bulletPoints);
                 }
+                if (preservedFormData.reasoningEffort && preservedFormData.selectedModel === 'gpt5') {
+                  setReasoningEffort(preservedFormData.reasoningEffort);
+                }
                 
                 // Clear backup after restoring
                 localStorage.removeItem(`report-form-backup-${projectId}`);
@@ -324,6 +347,7 @@ export default function NewReport() {
         reportTitle,
         bulletPoints,
         selectedModel,
+        reasoningEffort: selectedModel === 'gpt5' ? reasoningEffort : undefined, // Save reasoning effort if GPT-5 is selected
         selectedImages: selectedImages.map(img => ({
           id: img.id,
           group: img.group,
@@ -344,7 +368,7 @@ export default function NewReport() {
         window.history.replaceState({}, '', newUrl.toString());
       }
     }
-  }, [reportTitle, bulletPoints, selectedModel, projectId, groupNumberingStates, selectedImages, selectedImageIds, groupsData]);
+  }, [reportTitle, bulletPoints, selectedModel, reasoningEffort, projectId, groupNumberingStates, selectedImages, selectedImageIds, groupsData]);
 
   // Auto-switch execution strategy to Standard when in ungrouped mode
   // TODO: Remove this restriction later - Parallel Summary should work with ungrouped photos
@@ -755,6 +779,15 @@ export default function NewReport() {
 
       console.log('Starting report generation with reportId:', reportData.id, 'using model:', selectedModel, 'style:', reportStyle, 'execution:', executionStrategy);
 
+      // Get the selected model configuration to extract parameters
+      const selectedModelConfig = AVAILABLE_MODELS.find(model => model.id === selectedModel);
+
+      console.log('Model configuration:', {
+        model: selectedModel,
+        reasoningEffort: selectedModel === 'gpt5' ? reasoningEffort : selectedModelConfig?.reasoningEffort,
+        verbosity: selectedModelConfig?.verbosity
+      });
+
       // Use the unified API route with user-selected parameters
       const response = await fetch('/api/models/generate-report', {
         method: 'POST',
@@ -772,7 +805,9 @@ export default function NewReport() {
           selectedModel, // User's model choice
           isUngroupedMode, // User's grouping choice
           reportStyle, // User's report style choice ('brief' or 'elaborate')
-          executionStrategy // User's execution strategy choice
+          executionStrategy, // User's execution strategy choice
+          reasoningEffort: selectedModel === 'gpt5' ? reasoningEffort : selectedModelConfig?.reasoningEffort, // Use state for GPT-5, config for others
+          verbosity: selectedModelConfig?.verbosity // Include verbosity if available
         }),
       });
 
@@ -982,7 +1017,72 @@ export default function NewReport() {
             </div>
             <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
               Choose the AI model for generating your report. Different models offer varying levels of quality and processing speed.
+              {selectedModel === 'gpt5' && (
+                <span>
+                  {' '}Select GPT-5 and then choose your preferred reasoning effort level below.
+                </span>
+              )}
             </p>
+            
+            {/* Reasoning Effort Selection for GPT-5 */}
+            {selectedModel === 'gpt5' && (
+              <div style={{ marginTop: "1rem" }}>
+                <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "500" }}>
+                  Reasoning Effort 
+                </label>
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    onClick={() => setReasoningEffort('low')}
+                    className="btn btn-sm"
+                    style={{ 
+                      backgroundColor: reasoningEffort === 'low' ? 'var(--color-primary)' : 'transparent',
+                      color: reasoningEffort === 'low' ? '#fff' : 'var(--color-text)',
+                      borderColor: reasoningEffort === 'low' ? 'var(--color-primary)' : 'var(--color-border)',
+                      fontSize: "0.875rem",
+                      padding: "0.5rem 1rem"
+                    }}
+                    disabled={loading}
+                  >
+                    Low
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReasoningEffort('medium')}
+                    className="btn btn-sm"
+                    style={{ 
+                      backgroundColor: reasoningEffort === 'medium' ? 'var(--color-primary)' : 'transparent',
+                      color: reasoningEffort === 'medium' ? '#fff' : 'var(--color-text)',
+                      borderColor: reasoningEffort === 'medium' ? 'var(--color-primary)' : 'var(--color-border)',
+                      fontSize: "0.875rem",
+                      padding: "0.5rem 1rem"
+                    }}
+                    disabled={loading}
+                  >
+                    Medium
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReasoningEffort('high')}
+                    className="btn btn-sm"
+                    style={{ 
+                      backgroundColor: reasoningEffort === 'high' ? 'var(--color-primary)' : 'transparent',
+                      color: reasoningEffort === 'high' ? '#fff' : 'var(--color-text)',
+                      borderColor: reasoningEffort === 'high' ? 'var(--color-primary)' : 'var(--color-border)',
+                      fontSize: "0.875rem",
+                      padding: "0.5rem 1rem"
+                    }}
+                    disabled={loading}
+                  >
+                    High
+                  </button>
+                </div>
+                <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
+                  <strong>Low:</strong> Faster processing, basic analysis • <strong>Medium:</strong> Balanced speed and depth • <strong>High:</strong> Maximum analysis depth, slower
+                </p>
+              </div>
+            )}
+            
           </div>
 
           {/* Report Style Selection */}
@@ -1090,6 +1190,7 @@ export default function NewReport() {
                     reportTitle,
                     bulletPoints,
                     selectedModel,
+                    reasoningEffort: selectedModel === 'gpt5' ? reasoningEffort : undefined,
                     reportStyle,
                     executionStrategy,
                     selectedImages: selectedImages.map(img => ({
@@ -1132,6 +1233,7 @@ export default function NewReport() {
                     reportTitle,
                     bulletPoints,
                     selectedModel,
+                    reasoningEffort: selectedModel === 'gpt5' ? reasoningEffort : undefined,
                     reportStyle,
                     executionStrategy,
                     selectedImages: selectedImages.map(img => ({
@@ -1524,9 +1626,43 @@ export default function NewReport() {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: "2rem", marginBottom: "2rem" }}>
-        <p style={{ fontSize: "0.875rem", color: "var(--color-text-secondary)", marginBottom: "1rem" }}>
-          Using: <strong>{AVAILABLE_MODELS.find(model => model.id === selectedModel)?.name}</strong>
-        </p>
+        <div style={{ textAlign: "center", marginBottom: "1rem" }}>
+          <p style={{ fontSize: "0.875rem", color: "var(--color-text-secondary)", marginBottom: "0.5rem" }}>
+            Using: <strong>{AVAILABLE_MODELS.find(model => model.id === selectedModel)?.name}</strong>
+          </p>
+          {/* Display model parameters if available */}
+          {(() => {
+            const selectedModelConfig = AVAILABLE_MODELS.find(model => model.id === selectedModel);
+            if (selectedModel === 'gpt5') {
+              return (
+                <div style={{ 
+                  display: "flex", 
+                  gap: "0.75rem", 
+                  justifyContent: "center", 
+                  flexWrap: "wrap",
+                  marginTop: "0.5rem"
+                }}>
+                  <span style={{
+                    backgroundColor: "#e3f2fd",
+                    color: "#1565c0",
+                    padding: "0.375rem 0.75rem",
+                    borderRadius: "0.5rem",
+                    fontSize: "0.8rem",
+                    fontWeight: "600",
+                    border: "1px solid #bbdefb",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.375rem"
+                  }}>
+                    🧠 <span style={{ textTransform: "capitalize" }}>{reasoningEffort}</span> Reasoning
+                  </span>
+                  
+                </div>
+              );
+            }
+            return null;
+          })()}
+        </div>
         <button
           onClick={generateReport}
           disabled={loading || !bulletPoints.trim()}

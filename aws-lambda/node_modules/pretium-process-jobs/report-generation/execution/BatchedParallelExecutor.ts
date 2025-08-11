@@ -53,10 +53,19 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
       console.log(`📝 Summary prompt length: ${fullSummaryPrompt.length} characters`);
       
       // Add timeout safeguard for summary generation
-      const summaryPromise = llmProvider.generateContent(fullSummaryPrompt, {
+      const summaryOptions: any = {
         temperature: 0.7,
         maxTokens: 12000  // Increased to prevent content truncation
-      });
+      };
+      
+      // Add reasoning effort for GPT-5
+      if (params.options?.reasoningEffort) {
+        summaryOptions.reasoningEffort = params.options.reasoningEffort;
+        summaryOptions.mode = params.mode;
+        console.log(`🧠 Summary generation using reasoning effort: ${params.options.reasoningEffort}`);
+      }
+      
+      const summaryPromise = llmProvider.generateContent(fullSummaryPrompt, summaryOptions);
 
       // Set a timeout of 180 seconds for summary generation (increased due to larger content from embeddings)
       const timeoutPromise = new Promise((_, reject) => {
@@ -343,10 +352,21 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
     // Process the batch
     const llmStartTime = Date.now();
     console.log(`🤖 [BATCH ${batchIndex + 1}] Starting LLM generation...`);
-    const response = await llmProvider.generateContent(fullPrompt, {
+    
+    // Prepare LLM options with reasoning effort if available
+    const llmOptions: any = {
       temperature: 0.7,
       maxTokens: 10000,
-    });
+    };
+    
+    // Add reasoning effort for GPT-5
+    if (params.options?.reasoningEffort) {
+      llmOptions.reasoningEffort = params.options.reasoningEffort;
+      llmOptions.mode = params.mode;
+      console.log(`🧠 [BATCH ${batchIndex + 1}] Using reasoning effort: ${params.options.reasoningEffort}`);
+    }
+    
+    const response = await llmProvider.generateContent(fullPrompt, llmOptions);
     const llmEndTime = Date.now();
     console.log(`✅ [BATCH ${batchIndex + 1}] LLM generation took ${llmEndTime - llmStartTime}ms`);
 

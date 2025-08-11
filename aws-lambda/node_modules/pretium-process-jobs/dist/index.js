@@ -20082,308 +20082,6 @@ __export(process_jobs_exports, {
 module.exports = __toCommonJS(process_jobs_exports);
 var import_supabase_js = __toESM(require_main5());
 
-// report-generation/execution/ParallelExecutor.ts
-var ParallelExecutor = class {
-  async execute(params) {
-    const { images, bulletPoints, projectData, llmProvider, promptStrategy, grouping, options } = params;
-    console.log(`\u{1F504} Parallel Executor: Processing ${images.length} images in ${grouping} mode`);
-    try {
-      let content = "";
-      const metadata = {};
-      if (grouping === "grouped") {
-        const result = await this.processGroupedImages(images, params);
-        content = result.content;
-        Object.assign(metadata, result.metadata);
-      } else {
-        const result = await this.processUngroupedImages(images, params);
-        content = result.content;
-        Object.assign(metadata, result.metadata);
-      }
-      console.log("\u{1F4DD} Generating final summary sequentially...");
-      const summarySystemPrompt = promptStrategy.getSummarySystemPrompt(grouping);
-      const summaryTaskPrompt = promptStrategy.generateSummaryPrompt(content, {
-        mode: params.mode,
-        // Use actual mode from params
-        grouping,
-        bulletPoints,
-        projectData,
-        options
-      });
-      const fullSummaryPrompt = `${summarySystemPrompt}
-
-${summaryTaskPrompt}`;
-      const summaryResponse = await llmProvider.generateContent(fullSummaryPrompt, {
-        temperature: 0.7,
-        maxTokens: 8e3
-      });
-      if (summaryResponse.error) {
-        throw new Error(`Summary generation failed: ${summaryResponse.error}`);
-      }
-      return {
-        content: summaryResponse.content,
-        metadata: {
-          ...metadata,
-          finalSummaryGenerated: true,
-          originalContentLength: content.length,
-          finalContentLength: summaryResponse.content.length,
-          executionFlow: "parallel_report_writing -> sequential_summary"
-        }
-      };
-    } catch (error) {
-      console.error("Parallel Executor Error:", error);
-      throw error;
-    }
-  }
-  async processGroupedImages(images, params) {
-    const { llmProvider, promptStrategy, projectData, options } = params;
-    const groupedImages = this.groupImages(images);
-    const groupNames = Object.keys(groupedImages);
-    console.log(`\u{1F4E6} Processing ${groupNames.length} groups: ${groupNames.join(", ")}`);
-    const groupPromises = groupNames.map(async (groupName) => {
-      const groupImages = groupedImages[groupName];
-      const imagePromises = groupImages.map(async (image) => {
-        const systemPrompt = promptStrategy.getImageSystemPrompt();
-        const taskPrompt = await promptStrategy.generateImagePrompt(image, {
-          mode: params.mode || "brief",
-          // Use actual mode from params
-          grouping: "grouped",
-          projectData,
-          projectId: params.projectId,
-          supabase: params.supabase,
-          options
-        });
-        const fullPrompt = `${systemPrompt}
-
-${taskPrompt}`;
-        const response = await llmProvider.generateContent(fullPrompt, {
-          temperature: 0.7,
-          maxTokens: 2e3
-        });
-        if (response.error) {
-          return `[ERROR: Failed to process image ${image.number} - ${response.error}]`;
-        }
-        return response.content;
-      });
-      const imageResults = await Promise.all(imagePromises);
-      const groupContent = imageResults.join("\n\n");
-      return {
-        groupName,
-        content: promptStrategy.generateGroupHeader(groupName) + groupContent
-      };
-    });
-    const groupResults = await Promise.all(groupPromises);
-    const content = groupResults.map((result) => result.content).join("\n\n");
-    return {
-      content,
-      metadata: {
-        groupsProcessed: groupNames.length,
-        totalImages: images.length,
-        executionType: "parallel-grouped"
-      }
-    };
-  }
-  async processUngroupedImages(images, params) {
-    const { llmProvider, promptStrategy, projectData, options } = params;
-    console.log(`\u{1F4E6} Processing ${images.length} ungrouped images in parallel`);
-    const imagePromises = images.map(async (image) => {
-      const systemPrompt = promptStrategy.getImageSystemPrompt();
-      const taskPrompt = await promptStrategy.generateImagePrompt(image, {
-        mode: params.mode,
-        // Use actual mode from params
-        grouping: "ungrouped",
-        projectData,
-        projectId: params.projectId,
-        supabase: params.supabase,
-        options
-      });
-      const fullPrompt = `${systemPrompt}
-
-${taskPrompt}`;
-      const response = await llmProvider.generateContent(fullPrompt, {
-        temperature: 0.7,
-        maxTokens: 2e3
-      });
-      if (response.error) {
-        return `[ERROR: Failed to process image ${image.number} - ${response.error}]`;
-      }
-      return response.content;
-    });
-    const imageResults = await Promise.all(imagePromises);
-    const content = imageResults.join("\n\n");
-    return {
-      content,
-      metadata: {
-        imagesProcessed: images.length,
-        executionType: "parallel-ungrouped"
-      }
-    };
-  }
-  groupImages(images) {
-    const groups = {};
-    images.forEach((image) => {
-      const groupName = image.group?.[0] || "UNGROUPED";
-      if (!groups[groupName]) {
-        groups[groupName] = [];
-      }
-      groups[groupName].push(image);
-    });
-    return groups;
-  }
-};
-
-// report-generation/execution/SequentialExecutor.ts
-var SequentialExecutor = class {
-  async execute(params) {
-    const { images, bulletPoints, projectData, llmProvider, promptStrategy, grouping, options } = params;
-    console.log(`\u{1F504} Sequential Executor: Processing ${images.length} images in ${grouping} mode (Note: Parallel is preferred for report writing)`);
-    try {
-      let content = "";
-      const metadata = {};
-      if (grouping === "grouped") {
-        const result = await this.processGroupedImagesSequentially(images, params);
-        content = result.content;
-        Object.assign(metadata, result.metadata);
-      } else {
-        const result = await this.processUngroupedImagesSequentially(images, params);
-        content = result.content;
-        Object.assign(metadata, result.metadata);
-      }
-      console.log("\u{1F4DD} Generating final summary sequentially...");
-      const summarySystemPrompt = promptStrategy.getSummarySystemPrompt(grouping);
-      const summaryTaskPrompt = promptStrategy.generateSummaryPrompt(content, {
-        mode: params.mode,
-        // Use actual mode from params
-        grouping,
-        bulletPoints,
-        projectData,
-        options
-      });
-      const fullSummaryPrompt = `${summarySystemPrompt}
-
-${summaryTaskPrompt}`;
-      const summaryResponse = await llmProvider.generateContent(fullSummaryPrompt, {
-        temperature: 0.7,
-        maxTokens: 8e3
-      });
-      if (summaryResponse.error) {
-        throw new Error(`Summary generation failed: ${summaryResponse.error}`);
-      }
-      return {
-        content: summaryResponse.content,
-        metadata: {
-          ...metadata,
-          finalSummaryGenerated: true,
-          originalContentLength: content.length,
-          finalContentLength: summaryResponse.content.length,
-          executionFlow: "sequential_report_writing -> sequential_summary"
-        }
-      };
-    } catch (error) {
-      console.error("Sequential Executor Error:", error);
-      throw error;
-    }
-  }
-  async processGroupedImagesSequentially(images, params) {
-    const { llmProvider, promptStrategy, projectData, options } = params;
-    const groupedImages = this.groupImages(images);
-    const groupNames = Object.keys(groupedImages);
-    console.log(`\u{1F4E6} Processing ${groupNames.length} groups sequentially: ${groupNames.join(", ")}`);
-    const groupContents = [];
-    let totalImagesProcessed = 0;
-    for (const groupName of groupNames) {
-      const groupImages = groupedImages[groupName];
-      const groupImageContents = [];
-      for (const image of groupImages) {
-        console.log(`\u{1F5BC}\uFE0F Processing image ${image.number} in group ${groupName}`);
-        const systemPrompt = promptStrategy.getImageSystemPrompt();
-        const taskPrompt = await promptStrategy.generateImagePrompt(image, {
-          mode: params.mode,
-          // Use actual mode from params
-          grouping: "grouped",
-          projectData,
-          projectId: params.projectId,
-          supabase: params.supabase,
-          options
-        });
-        const fullPrompt = `${systemPrompt}
-
-${taskPrompt}`;
-        const response = await llmProvider.generateContent(fullPrompt, {
-          temperature: 0.7,
-          maxTokens: 2e3
-        });
-        if (response.error) {
-          groupImageContents.push(`[ERROR: Failed to process image ${image.number} - ${response.error}]`);
-        } else {
-          groupImageContents.push(response.content);
-        }
-        totalImagesProcessed++;
-      }
-      const groupContent = promptStrategy.generateGroupHeader(groupName) + groupImageContents.join("\n\n");
-      groupContents.push(groupContent);
-    }
-    const content = groupContents.join("\n\n");
-    return {
-      content,
-      metadata: {
-        groupsProcessed: groupNames.length,
-        totalImages: totalImagesProcessed,
-        executionType: "sequential-grouped"
-      }
-    };
-  }
-  async processUngroupedImagesSequentially(images, params) {
-    const { llmProvider, promptStrategy, projectData, options } = params;
-    console.log(`\u{1F4E6} Processing ${images.length} ungrouped images sequentially`);
-    const imageContents = [];
-    for (let i2 = 0; i2 < images.length; i2++) {
-      const image = images[i2];
-      console.log(`\u{1F5BC}\uFE0F Processing image ${i2 + 1}/${images.length}: ${image.number}`);
-      const systemPrompt = promptStrategy.getImageSystemPrompt();
-      const taskPrompt = await promptStrategy.generateImagePrompt(image, {
-        mode: params.mode,
-        // Use actual mode from params
-        grouping: "ungrouped",
-        projectData,
-        projectId: params.projectId,
-        supabase: params.supabase,
-        options
-      });
-      const fullPrompt = `${systemPrompt}
-
-${taskPrompt}`;
-      const response = await llmProvider.generateContent(fullPrompt, {
-        temperature: 0.7,
-        maxTokens: 2e3
-      });
-      if (response.error) {
-        imageContents.push(`[ERROR: Failed to process image ${image.number} - ${response.error}]`);
-      } else {
-        imageContents.push(response.content);
-      }
-    }
-    const content = imageContents.join("\n\n");
-    return {
-      content,
-      metadata: {
-        imagesProcessed: images.length,
-        executionType: "sequential-ungrouped"
-      }
-    };
-  }
-  groupImages(images) {
-    const groups = {};
-    images.forEach((image) => {
-      const groupName = image.group?.[0] || "UNGROUPED";
-      if (!groups[groupName]) {
-        groups[groupName] = [];
-      }
-      groups[groupName].push(image);
-    });
-    return groups;
-  }
-};
-
 // report-generation/execution/BatchedParallelExecutor.ts
 var BatchedParallelExecutor = class {
   constructor() {
@@ -20424,11 +20122,17 @@ var BatchedParallelExecutor = class {
 
 ${summaryTaskPrompt}`;
       console.log(`\u{1F4DD} Summary prompt length: ${fullSummaryPrompt.length} characters`);
-      const summaryPromise = llmProvider.generateContent(fullSummaryPrompt, {
+      const summaryOptions = {
         temperature: 0.7,
         maxTokens: 12e3
         // Increased to prevent content truncation
-      });
+      };
+      if (params.options?.reasoningEffort) {
+        summaryOptions.reasoningEffort = params.options.reasoningEffort;
+        summaryOptions.mode = params.mode;
+        console.log(`\u{1F9E0} Summary generation using reasoning effort: ${params.options.reasoningEffort}`);
+      }
+      const summaryPromise = llmProvider.generateContent(fullSummaryPrompt, summaryOptions);
       const timeoutPromise = new Promise((_2, reject) => {
         setTimeout(() => reject(new Error("Summary generation timed out after 6 minutes")), 36e4);
       });
@@ -20628,10 +20332,16 @@ ${batchPrompt}`;
     console.log(`\u{1F4CB} [BATCH ${batchIndex + 1}] Full prompt length: ${fullPrompt.length} characters`);
     const llmStartTime = Date.now();
     console.log(`\u{1F916} [BATCH ${batchIndex + 1}] Starting LLM generation...`);
-    const response = await llmProvider.generateContent(fullPrompt, {
+    const llmOptions = {
       temperature: 0.7,
       maxTokens: 1e4
-    });
+    };
+    if (params.options?.reasoningEffort) {
+      llmOptions.reasoningEffort = params.options.reasoningEffort;
+      llmOptions.mode = params.mode;
+      console.log(`\u{1F9E0} [BATCH ${batchIndex + 1}] Using reasoning effort: ${params.options.reasoningEffort}`);
+    }
+    const response = await llmProvider.generateContent(fullPrompt, llmOptions);
     const llmEndTime = Date.now();
     console.log(`\u2705 [BATCH ${batchIndex + 1}] LLM generation took ${llmEndTime - llmStartTime}ms`);
     if (response.error) {
@@ -20796,11 +20506,17 @@ var BatchedParallelWithParallelSummaryExecutor = class {
 
 ${summaryTaskPrompt}`;
     console.log(`\u{1F4DD} [SUMMARY CHUNK ${chunkIndex + 1}] Summary prompt length: ${fullSummaryPrompt.length} characters`);
-    const response = await llmProvider.generateContent(fullSummaryPrompt, {
+    const summaryOptions = {
       temperature: 0.7,
       maxTokens: 6e3
       // Increased to prevent content truncation
-    });
+    };
+    if (params.options?.reasoningEffort) {
+      summaryOptions.reasoningEffort = params.options.reasoningEffort;
+      summaryOptions.mode = params.mode;
+      console.log(`\u{1F9E0} [SUMMARY CHUNK ${chunkIndex + 1}] Using reasoning effort: ${params.options.reasoningEffort}`);
+    }
+    const response = await llmProvider.generateContent(fullSummaryPrompt, summaryOptions);
     if (response.error) {
       console.error(`\u274C [SUMMARY CHUNK ${chunkIndex + 1}] Summary error: ${response.error}`);
       return { index: chunkIndex, content: `[ERROR: Failed to process summary chunk ${chunkIndex + 1} - ${response.error}]` };
@@ -20830,11 +20546,17 @@ ${summaryTaskPrompt}`;
     const fullFinalPrompt = `${finalSystemPrompt}
 
 ${finalTaskPrompt}`;
-    const response = await llmProvider.generateContent(fullFinalPrompt, {
+    const finalOptions = {
       temperature: 0.7,
       maxTokens: 8e3
       // Increased to prevent content truncation
-    });
+    };
+    if (params.options?.reasoningEffort) {
+      finalOptions.reasoningEffort = params.options.reasoningEffort;
+      finalOptions.mode = params.mode;
+      console.log(`\u{1F9E0} Final formatting using reasoning effort: ${params.options.reasoningEffort}`);
+    }
+    const response = await llmProvider.generateContent(fullFinalPrompt, finalOptions);
     if (response.error) {
       console.error(`\u274C Final formatting error: ${response.error}`);
       return content;
@@ -20948,10 +20670,14 @@ ${currentChunk.trim()}` : currentChunk.trim();
   combineSummaryResultsInOrder(summaryResults, params) {
     const { options } = params;
     const groupOrder = options?.groupOrder || [];
-    if (groupOrder.length === 0) {
+    if (!Array.isArray(groupOrder) || groupOrder.length === 0) {
+      console.log(`\u{1F4CB} No group order specified, combining ${summaryResults.length} content chunks in sequence`);
       return summaryResults.filter(Boolean).join("\n\n");
     }
-    console.log(`\u{1F4CB} Applying group order: ${JSON.stringify(groupOrder)}`);
+    if (!groupOrder.every((item) => typeof item === "object" && item !== null && "groupName" in item && "order" in item)) {
+      console.warn(`\u26A0\uFE0F Invalid groupOrder structure, falling back to sequential combination`);
+      return summaryResults.filter(Boolean).join("\n\n");
+    }
     const groupContentMap = /* @__PURE__ */ new Map();
     const ungroupedContent = [];
     summaryResults.forEach((content, index) => {
@@ -21129,10 +20855,16 @@ ${batchPrompt}`;
     console.log(`\u{1F4CB} [BATCH ${batchIndex + 1}] Full prompt length: ${fullPrompt.length} characters`);
     const llmStartTime = Date.now();
     console.log(`\u{1F916} [BATCH ${batchIndex + 1}] Starting LLM generation...`);
-    const response = await llmProvider.generateContent(fullPrompt, {
+    const llmOptions = {
       temperature: 0.7,
       maxTokens: 1e4
-    });
+    };
+    if (params.options?.reasoningEffort) {
+      llmOptions.reasoningEffort = params.options.reasoningEffort;
+      llmOptions.mode = params.mode;
+      console.log(`\u{1F9E0} [BATCH ${batchIndex + 1}] Using reasoning effort: ${params.options.reasoningEffort}`);
+    }
+    const response = await llmProvider.generateContent(fullPrompt, llmOptions);
     const llmEndTime = Date.now();
     console.log(`\u2705 [BATCH ${batchIndex + 1}] LLM generation took ${llmEndTime - llmStartTime}ms`);
     if (response.error) {
@@ -27965,6 +27697,136 @@ var GPT4oProvider = class {
   }
 };
 
+// report-generation/llm/GPT5Provider.ts
+var GPT5Provider = class {
+  constructor() {
+    this.apiKey = process.env.OPENAI_API_KEY || "";
+    if (!this.apiKey) {
+      console.warn("\u26A0\uFE0F OPENAI_API_KEY not found in environment variables");
+    }
+  }
+  async generateContent(prompt, options) {
+    try {
+      console.log(`\u{1F916} GPT-5: Starting content generation (prompt: ${prompt.length} chars)`);
+      console.log(`\u{1F527} GPT-5 Options:`, {
+        reasoningEffort: options?.reasoningEffort || "medium",
+        temperature: options?.temperature || 0.7,
+        maxTokens: options?.maxTokens || 3e3,
+        mode: options?.mode || "brief"
+      });
+      const startTime = Date.now();
+      const apiCallStartTime = Date.now();
+      const openai = new OpenAI({ apiKey: this.apiKey });
+      const config = this.getConfigurationForReasoningEffort(options?.reasoningEffort || "medium");
+      console.log(`\u{1F916} GPT-5: Making API call...`);
+      const response = await openai.chat.completions.create({
+        model: "gpt-5o",
+        // Use GPT-5o as the model name
+        messages: [
+          {
+            role: "system",
+            content: this.getSystemPrompt(options?.mode || "brief", options?.reasoningEffort || "medium")
+          },
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        temperature: config.temperature,
+        max_tokens: config.maxTokens,
+        stream: true
+        // Enable streaming
+      });
+      const apiCallEndTime = Date.now();
+      console.log(`\u{1F916} GPT-5: API call initiated in ${apiCallEndTime - apiCallStartTime}ms`);
+      let content = "";
+      let chunkCount = 0;
+      const streamingStartTime = Date.now();
+      for await (const chunk of response) {
+        const delta = chunk.choices[0]?.delta;
+        if (delta?.content) {
+          content += delta.content;
+          chunkCount++;
+          if (chunkCount % 10 === 0) {
+            console.log(`\u{1F916} GPT-5 Streaming: ${content.length} characters received (${chunkCount} chunks processed)`);
+          }
+        }
+      }
+      const streamingEndTime = Date.now();
+      const totalTime = Date.now() - startTime;
+      console.log(`\u{1F916} GPT-5: Streaming completed in ${streamingEndTime - streamingStartTime}ms (${chunkCount} chunks processed, ${content.length} chars generated)`);
+      console.log(`\u{1F916} GPT-5: Total generation time: ${totalTime}ms`);
+      return {
+        content,
+        metadata: {
+          model: "gpt-5",
+          reasoningEffort: options?.reasoningEffort || "medium",
+          mode: options?.mode || "brief",
+          temperature: config.temperature,
+          maxTokens: config.maxTokens,
+          streaming: true,
+          processingTime: totalTime,
+          chunkCount,
+          contentLength: content.length
+        }
+      };
+    } catch (error) {
+      console.error(`\u274C GPT-5 API Error `, error);
+      return {
+        content: "",
+        error: error instanceof Error ? error.message : "Unknown GPT-5 API error"
+      };
+    }
+  }
+  getConfigurationForReasoningEffort(reasoningEffort) {
+    switch (reasoningEffort) {
+      case "low":
+        return {
+          temperature: 0.3,
+          // Lower temperature for more focused, consistent output
+          maxTokens: 1500,
+          // Fewer tokens for faster processing
+          systemPrompt: "low"
+        };
+      case "medium":
+        return {
+          temperature: 0.7,
+          // Balanced temperature for good creativity and consistency
+          maxTokens: 2e3,
+          // Standard token limit
+          systemPrompt: "medium"
+        };
+      case "high":
+        return {
+          temperature: 0.9,
+          // Higher temperature for more creative, thorough analysis
+          maxTokens: 3e3,
+          // More tokens for comprehensive analysis
+          systemPrompt: "high"
+        };
+      default:
+        return {
+          temperature: 0.7,
+          maxTokens: 2e3,
+          systemPrompt: "medium"
+        };
+    }
+  }
+  getSystemPrompt(mode, reasoningEffort) {
+    const basePrompt = "You are a professional engineering inspector with expertise in building assessment and technical documentation.";
+    const reasoningInstructions = {
+      low: "Provide clear, concise observations with basic analysis. Focus on speed and efficiency.",
+      medium: "Provide balanced analysis with moderate detail. Balance thoroughness with processing speed.",
+      high: "Provide comprehensive, detailed analysis with deep technical insights. Take time to thoroughly examine all aspects."
+    };
+    const modeInstructions = {
+      brief: "Generate concise, focused reports with key findings and essential details.",
+      elaborate: "Generate comprehensive, detailed reports with thorough analysis and extensive documentation."
+    };
+    return `${basePrompt} ${reasoningInstructions[reasoningEffort] || reasoningInstructions.medium} ${modeInstructions[mode] || modeInstructions.brief}`;
+  }
+};
+
 // report-generation/prompts/BriefPromptStrategy.ts
 var BriefPromptStrategy = class {
   //#######################################
@@ -28566,11 +28428,10 @@ var ReportGenerator = class {
     this.llmProviders = /* @__PURE__ */ new Map();
     this.llmProviders.set("grok4", new Grok4Provider());
     this.llmProviders.set("gpt4o", new GPT4oProvider());
+    this.llmProviders.set("gpt5", new GPT5Provider());
   }
   initializeStrategies() {
     this.executionStrategies = /* @__PURE__ */ new Map();
-    this.executionStrategies.set("parallel", new ParallelExecutor());
-    this.executionStrategies.set("sequential", new SequentialExecutor());
     this.executionStrategies.set("batched-parallel", new BatchedParallelExecutor());
     this.executionStrategies.set("batched-parallel-with-parallel-summary", new BatchedParallelWithParallelSummaryExecutor());
     this.promptStrategies = /* @__PURE__ */ new Map();
@@ -28740,15 +28601,18 @@ async function processGenerateReportWithNewGenerator(supabase, job) {
       groupOrder,
       selectedModel,
       isUngroupedMode,
-      mode
+      reportStyle,
       // 'brief' or 'elaborate' from user selection
+      executionStrategy
+      // 'batched-parallel' or 'batched-parallel-with-parallel-summary' from user selection
     } = job.input_data;
-    console.log(`\u{1F680} ReportGenerator: Starting ${mode} report generation...`);
+    console.log(`\u{1F680} ReportGenerator: Starting ${reportStyle} report generation with ${executionStrategy} execution...`);
     console.log(`\u{1F4CB} Job data:`, {
       reportId,
       projectId,
       selectedModel,
-      mode,
+      reportStyle,
+      executionStrategy,
       isUngroupedMode,
       imageCount: imagesWithNumbering?.length || 0
     });
@@ -28756,14 +28620,15 @@ async function processGenerateReportWithNewGenerator(supabase, job) {
     if (reportError || !reportData) {
       throw new Error(`Report not found: ${reportId}`);
     }
-    const displayMode = mode === "parallel-summary" ? "parallel summary" : mode;
+    const displayStyle = reportStyle === "brief" ? "brief" : "elaborate";
+    const displayExecution = executionStrategy === "batched-parallel-with-parallel-summary" ? "parallel summary" : "standard";
     await supabase.from("reports").update({
-      generated_content: `Starting ${displayMode} report generation with ${selectedModel}...
+      generated_content: `Starting ${displayStyle} report generation with ${displayExecution} execution using ${selectedModel}...
 
 [PROCESSING IN PROGRESS...]`
     }).eq("id", reportId);
     await supabase.from("reports").update({
-      generated_content: `Starting ${displayMode} report generation with ${selectedModel}
+      generated_content: `Starting ${displayStyle} report generation with ${displayExecution} execution using ${selectedModel}
 
 [PROCESSING IN PROGRESS...]`
     }).eq("id", reportId);
@@ -28785,26 +28650,17 @@ async function processGenerateReportWithNewGenerator(supabase, job) {
     console.log(`\u{1F527} Initializing ReportGenerator...`);
     const generator = new ReportGenerator();
     console.log(`\u2705 ReportGenerator initialized successfully`);
-    let executionStrategy;
-    let reportMode;
-    if (mode === "parallel-summary") {
-      executionStrategy = "batched-parallel-with-parallel-summary";
-      reportMode = "brief";
-    } else {
-      executionStrategy = "batched-parallel";
-      reportMode = mode;
-    }
     const config = ReportGenerator.custom(
-      reportMode,
-      // 'brief' or 'elaborate' (or 'brief' for parallel-summary)
+      reportStyle,
+      // 'brief' or 'elaborate'
       selectedModel,
       // User's model choice
       executionStrategy,
-      // Use appropriate execution strategy
+      // User's execution strategy choice
       actualMode
       // Use actual mode determined from image data
     );
-    console.log(`\u{1F527} Using execution strategy: ${executionStrategy} for ${mode} mode`);
+    console.log(`\u{1F527} Using execution strategy: ${executionStrategy} for ${reportStyle} style`);
     console.log(`\u{1F3A8} ReportGenerator Config:`, {
       mode: config.mode,
       model: config.model,
@@ -28812,16 +28668,16 @@ async function processGenerateReportWithNewGenerator(supabase, job) {
       grouping: config.grouping
     });
     await supabase.from("reports").update({
-      generated_content: `1. Starting ${mode} report generation with ${selectedModel}
+      generated_content: `1. Starting ${reportStyle} report generation with ${executionStrategy} execution using ${selectedModel}
 Processing ${resizedImages.length} images in ${actualMode} mode...
 
 [PROCESSING IN PROGRESS...]`
     }).eq("id", reportId);
     console.log(`\u{1F3AF} Starting report generation with ReportGenerator...`);
     const result = await generator.generateReport({
-      mode: config.mode || mode,
+      mode: config.mode || reportStyle,
       model: config.model || selectedModel,
-      execution: config.execution || "parallel",
+      execution: config.execution || executionStrategy,
       grouping: config.grouping || (isUngroupedMode ? "ungrouped" : "grouped"),
       images: resizedImages,
       bulletPoints,
@@ -28839,7 +28695,8 @@ Processing ${resizedImages.length} images in ${actualMode} mode...
       options: {
         contractName,
         location,
-        groupOrder
+        groupOrder,
+        reasoningEffort: selectedModel === "gpt5" ? job.input_data.reasoningEffort || "medium" : void 0
       }
     });
     console.log(`\u{1F4CA} Report generation result:`, {
@@ -28850,17 +28707,17 @@ Processing ${resizedImages.length} images in ${actualMode} mode...
     if (!result.success) {
       throw new Error(`ReportGenerator failed: ${result.error}`);
     }
-    console.log(`\u2705 ReportGenerator ${job.input_data.mode} report generation completed successfully`);
+    console.log(`\u2705 ReportGenerator ${reportStyle} report generation with ${executionStrategy} execution completed successfully`);
     return {
       success: true,
-      message: `ReportGenerator ${job.input_data.mode} report generated successfully using ${config.model}`,
+      message: `ReportGenerator ${reportStyle} report with ${executionStrategy} execution generated successfully using ${config.model}`,
       metadata: result.metadata
     };
   } catch (error) {
-    console.error(`\u274C ReportGenerator ${job.input_data.mode} report generation failed:`, error);
+    console.error(`\u274C ReportGenerator ${job.input_data.reportStyle} report generation with ${job.input_data.executionStrategy} execution failed:`, error);
     try {
       await supabase.from("reports").update({
-        generated_content: `Error generating ${job.input_data.mode} report: ${error.message}
+        generated_content: `Error generating ${job.input_data.reportStyle} report with ${job.input_data.executionStrategy} execution: ${error.message}
 
 [PROCESSING FAILED]`
       }).eq("id", job.input_data.reportId);

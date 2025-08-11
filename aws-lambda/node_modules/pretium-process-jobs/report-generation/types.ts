@@ -1,6 +1,6 @@
 // Report Generation Types
 export type ReportMode = 'brief' | 'elaborate';
-export type LLMModel = 'grok4' | 'gpt4o';
+export type LLMModel = 'grok4' | 'gpt4o' | 'gpt5';
 export type ExecutionType = 'parallel' | 'sequential' | 'batched-parallel' | 'batched-parallel-with-parallel-summary';
 export type GroupingMode = 'grouped' | 'ungrouped';
 
@@ -19,6 +19,7 @@ export interface ReportConfig {
     contractName?: string;
     location?: string;
     groupOrder?: string[];
+    reasoningEffort?: 'low' | 'medium' | 'high';
   };
 }
 
@@ -61,7 +62,12 @@ export interface ExecutionParams {
   promptStrategy: PromptStrategy;
   grouping: GroupingMode;
   mode: ReportMode; // Add mode to execution params
-  options?: any;
+  options?: {
+    contractName?: string;
+    location?: string;
+    groupOrder?: string[];
+    reasoningEffort?: 'low' | 'medium' | 'high';
+  };
 }
 
 export interface ExecutionResult {

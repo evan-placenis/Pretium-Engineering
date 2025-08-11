@@ -1,11 +1,11 @@
 // Report Generator - Flexible report generation with decorator pattern
 import { ReportConfig, ReportResult, ExecutionStrategy, LLMProvider, ReportMode, GroupingMode, LLMModel, ExecutionType } from './types.ts';
-import { ParallelExecutor } from './execution/ParallelExecutor.ts';
-import { SequentialExecutor } from './execution/SequentialExecutor.ts';
+
 import { BatchedParallelExecutor } from './execution/BatchedParallelExecutor.ts';
 import { BatchedParallelWithParallelSummaryExecutor } from './execution/BatchedParallelWithParallelSummaryExecutor.ts';
 import { Grok4Provider } from './llm/Grok4Provider.ts';
 import { GPT4oProvider } from './llm/GPT4oProvider.ts';
+import { GPT5Provider } from './llm/GPT5Provider.ts';
 import { BriefPromptStrategy } from './prompts/BriefPromptStrategy.ts';
 import { ElaboratePromptStrategy } from './prompts/ElaboratePromptStrategy.ts';
 import { OpenAI } from 'openai'; //maybe turn in a dynamic import later once it is working
@@ -23,12 +23,12 @@ export class ReportGenerator {
     this.llmProviders = new Map();
     this.llmProviders.set('grok4', new Grok4Provider());
     this.llmProviders.set('gpt4o', new GPT4oProvider());
+    this.llmProviders.set('gpt5', new GPT5Provider());
   }
 
   private initializeStrategies(): void {
     this.executionStrategies = new Map();
-    this.executionStrategies.set('parallel', new ParallelExecutor());
-    this.executionStrategies.set('sequential', new SequentialExecutor());
+
     this.executionStrategies.set('batched-parallel', new BatchedParallelExecutor());
     this.executionStrategies.set('batched-parallel-with-parallel-summary', new BatchedParallelWithParallelSummaryExecutor());
 

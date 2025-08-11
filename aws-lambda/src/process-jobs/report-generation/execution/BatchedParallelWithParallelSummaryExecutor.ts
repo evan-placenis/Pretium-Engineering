@@ -147,11 +147,20 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     const fullSummaryPrompt = `${summarySystemPrompt}\n\n${summaryTaskPrompt}`;
     console.log(`📝 [SUMMARY CHUNK ${chunkIndex + 1}] Summary prompt length: ${fullSummaryPrompt.length} characters`);
     
-         // Process the summary chunk with increased maxTokens to prevent content truncation
-     const response = await llmProvider.generateContent(fullSummaryPrompt, {
-       temperature: 0.7,
-       maxTokens: 6000  // Increased to prevent content truncation
-     }) as any;
+    // Process the summary chunk with increased maxTokens to prevent content truncation
+    const summaryOptions: any = {
+      temperature: 0.7,
+      maxTokens: 6000  // Increased to prevent content truncation
+    };
+    
+    // Add reasoning effort for GPT-5
+    if (params.options?.reasoningEffort) {
+      summaryOptions.reasoningEffort = params.options.reasoningEffort;
+      summaryOptions.mode = params.mode;
+      console.log(`🧠 [SUMMARY CHUNK ${chunkIndex + 1}] Using reasoning effort: ${params.options.reasoningEffort}`);
+    }
+    
+    const response = await llmProvider.generateContent(fullSummaryPrompt, summaryOptions) as any;
     
     if (response.error) {
       console.error(`❌ [SUMMARY CHUNK ${chunkIndex + 1}] Summary error: ${response.error}`);
@@ -191,10 +200,19 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     const fullFinalPrompt = `${finalSystemPrompt}\n\n${finalTaskPrompt}`;
     
          // Process final formatting with increased maxTokens to prevent content truncation
-     const response = await llmProvider.generateContent(fullFinalPrompt, {
-       temperature: 0.7,
-       maxTokens: 8000  // Increased to prevent content truncation
-     }) as any;
+    const finalOptions: any = {
+      temperature: 0.7,
+      maxTokens: 8000  // Increased to prevent content truncation
+    };
+    
+    // Add reasoning effort for GPT-5
+    if (params.options?.reasoningEffort) {
+      finalOptions.reasoningEffort = params.options.reasoningEffort;
+      finalOptions.mode = params.mode;
+      console.log(`🧠 Final formatting using reasoning effort: ${params.options.reasoningEffort}`);
+    }
+    
+    const response = await llmProvider.generateContent(fullFinalPrompt, finalOptions) as any;
     
     if (response.error) {
       console.error(`❌ Final formatting error: ${response.error}`);
@@ -355,14 +373,19 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     const { options } = params;
     const groupOrder = options?.groupOrder || [];
     
-    // If no group order is specified, just join the results in index order
-    if (groupOrder.length === 0) {
+    if (!Array.isArray(groupOrder) || groupOrder.length === 0) {
+      // If no group order specified, just combine results in order
+      console.log(`📋 No group order specified, combining ${summaryResults.length} content chunks in sequence`);
       return summaryResults.filter(Boolean).join('\n\n');
     }
     
-    console.log(`📋 Applying group order: ${JSON.stringify(groupOrder)}`);
+    // Validate that groupOrder has the expected structure
+    if (!groupOrder.every(item => typeof item === 'object' && item !== null && 'groupName' in item && 'order' in item)) {
+      console.warn(`⚠️ Invalid groupOrder structure, falling back to sequential combination`);
+      return summaryResults.filter(Boolean).join('\n\n');
+    }
     
-    // Create a map of group names to their content chunks
+    // Create a map to group content by group name
     const groupContentMap = new Map<string, string[]>();
     const ungroupedContent: string[] = [];
     
@@ -371,7 +394,7 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
       if (!content) return;
       
       // Try to identify which group this content belongs to
-      const groupName = this.identifyGroupFromContent(content, groupOrder);
+      const groupName = this.identifyGroupFromContent(content, groupOrder as Array<{ groupName: string; order: number }>);
       
       if (groupName) {
         if (!groupContentMap.has(groupName)) {
@@ -388,7 +411,7 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     const orderedContent: string[] = [];
     
     // Add content in group order
-    groupOrder.forEach(({ groupName, order }) => {
+    (groupOrder as Array<{ groupName: string; order: number }>).forEach(({ groupName, order }) => {
       const groupContent = groupContentMap.get(groupName);
       if (groupContent && groupContent.length > 0) {
         orderedContent.push(...groupContent);
@@ -623,10 +646,21 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     // Process the batch
     const llmStartTime = Date.now();
     console.log(`🤖 [BATCH ${batchIndex + 1}] Starting LLM generation...`);
-    const response = await llmProvider.generateContent(fullPrompt, {
+    
+    // Prepare LLM options with reasoning effort if available
+    const llmOptions: any = {
       temperature: 0.7,
       maxTokens: 10000,
-    });
+    };
+    
+    // Add reasoning effort for GPT-5
+    if (params.options?.reasoningEffort) {
+      llmOptions.reasoningEffort = params.options.reasoningEffort;
+      llmOptions.mode = params.mode;
+      console.log(`🧠 [BATCH ${batchIndex + 1}] Using reasoning effort: ${params.options.reasoningEffort}`);
+    }
+    
+    const response = await llmProvider.generateContent(fullPrompt, llmOptions);
     const llmEndTime = Date.now();
     console.log(`✅ [BATCH ${batchIndex + 1}] LLM generation took ${llmEndTime - llmStartTime}ms`);
 
@@ -684,8 +718,6 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     }
   }
 
-
-
   private chunkArray<T>(array: T[], size: number): T[][] {
     const chunks: T[][] = [];
     for (let i = 0; i < array.length; i += size) {
@@ -693,4 +725,4 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
     }
     return chunks;
   }
-} 
+}

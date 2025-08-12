@@ -1,162 +1,244 @@
-import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
-import { createServerSupabaseClient } from '@/lib/supabase';
-import { ReportImage } from '@/lib/supabase';
+import { NextRequest } from 'next/server';
+import { OpenAI } from 'openai';
+import { SectionModel } from './models/SectionModel';
+import { SectionTools } from './tools/SectionTools';
+import { ChatCompletionTool } from 'openai/resources/chat/completions.mjs';
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createServerSupabaseClient();
+// Define the tools available to the model
+const SECTION_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "list_sections",
+      description: "Return all sections with ids and numbers for disambiguation.",
+      parameters: { type: "object", properties: {}, additionalProperties: false }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "rename_section",
+      description: "Rename an existing section.",
+      parameters: {
+        type: "object",
+        properties: {
+          section_id: { type: "string" },
+          new_title: { type: "string" }
+        },
+        required: ["section_id", "new_title"],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_section_body",
+      description: "Update the body content of a section.",
+      parameters: {
+        type: "object",
+        properties: {
+          section_id: { type: "string" },
+          body_md: { type: "string" }
+        },
+        required: ["section_id", "body_md"],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "insert_section",
+      description: "Insert a new section after the specified section.",
+      parameters: {
+        type: "object",
+        properties: {
+          section_id: { type: "string" },
+          title: { type: "string" },
+          body_md: { type: "string" }
+        },
+        required: ["section_id", "title"],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_section",
+      description: "Delete an existing section.",
+      parameters: {
+        type: "object",
+        properties: {
+          section_id: { type: "string" }
+        },
+        required: ["section_id"],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "move_section",
+      description: "Move a section to be a child of another section.",
+      parameters: {
+        type: "object",
+        properties: {
+          section_id: { type: "string" },
+          new_parent_id: { type: "string" },
+          position: { type: "number" }
+        },
+        required: ["section_id", "new_parent_id"],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "find_sections",
+      description: "Search for sections by title or content.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string" }
+        },
+        required: ["query"],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "replace_text",
+      description: "Replace text in a section using regex.",
+      parameters: {
+        type: "object",
+        properties: {
+          section_id: { type: "string" },
+          find: { type: "string" },
+          replace: { type: "string" },
+          flags: { type: "string" }
+        },
+        required: ["section_id", "find", "replace"],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "insert_image_ref",
+      description: "Insert an image reference in a section.",
+      parameters: {
+        type: "object",
+        properties: {
+          section_id: { type: "string" },
+          image_number: { type: "number" },
+          group: { type: "string" }
+        },
+        required: ["section_id", "image_number"],
+        additionalProperties: false
+      }
+    }
+  }
+];
 
 export async function POST(req: NextRequest) {
   try {
-    const { 
-      reportId, 
-      message, 
-      reportContent, 
-      projectName, 
-      bulletPoints,
-      images 
-    } = await req.json();
+    const { messages, reportMarkdown } = await req.json();
 
-    console.log('Received chat request:', { reportId, message, projectName, imagesCount: images?.length || 0 });
-
-    if (!message) {
-      return NextResponse.json(
-        { error: 'Message is required' },
-        { status: 400 }
-      );
+    if (!reportMarkdown) {
+      return new Response(JSON.stringify({
+        error: "reportMarkdown is required"
+      }), { status: 400 });
     }
 
-    if (!reportContent) {
-      return NextResponse.json(
-        { error: 'Report content is required' },
-        { status: 400 }
-      );
-    }
+    // Parse the report into our section model
+    const sections = await SectionModel.fromMarkdown(reportMarkdown);
+    const model = new SectionModel(sections);
+    const tools = new SectionTools(model);
 
-    // Use images passed in the request (from the current edit session)
-    let imagesToUse: ReportImage[] = [];
-    
-    if (images && images.length > 0) {
-      console.log('✅ Images provided for visual analysis:', images.length, 'images');
-      console.log('Image URLs:', images.map((img: any) => img.url));
-      console.log('Image descriptions:', images.map((img: any) => img.description));
-      imagesToUse = images;
-    } else {
-      console.log('⚡ Fast mode: No images sent (speeds up response)');
-    }
+    // Initialize conversation state
+    let currentMessages = [...messages];
+    const maxSteps = 6; // Prevent infinite loops
 
-    // Create the chat prompt following the generate-report-simple pattern
-    const prompt = `
-    #ROLE AND CONTEXT:
-    You are a senior engineering report assistant at Pretium, a professional engineering consulting firm. 
-    You are helping the user modify and improve their existing engineering report for the project: ${projectName || 'a project'}.
-
-    #CURRENT REPORT CONTENT:
-    The user is currently working on this report:
-    ${reportContent}
-
-    #ORIGINAL BULLET POINTS:
-    This report was originally based on these observations:
-    ${bulletPoints || 'Not provided'}
-
-    #USER REQUEST:
-    The user has asked: "${message}"
-
-    #INSTRUCTIONS:
-    - You are an expert assistant helping to modify, improve, or answer questions about this engineering report
-    - You can see the current report content ${imagesToUse.length > 0 ? 'and associated images' : '(images available but not loaded for faster response)'}
-    ${imagesToUse.length > 0 ? 
-      '- IMPORTANT: You can see and analyze the images provided. Reference them in your response' :
-      '- NOTE: Images are available but not loaded for this request. If you need to see images, ask the user to rephrase their question mentioning "images" or "photos"'
-    }
-    - If the user asks for changes, provide the complete updated report content
-    - Maintain the professional engineering tone and format (two-column layout with [IMAGE:X] placeholders)
-    - Keep the same section structure (GENERAL, SITE / STAGING AREA, ROOF SECTIONS, DEFICIENCY SUMMARY, etc.)
-    - If you reference images, use the [IMAGE:X] format where X is the photo number
-    - Provide specific, actionable changes when requested
-
-    #RESPONSE FORMAT:
-    Respond with a JSON object containing:
-    {
-      "message": "Your conversational response explaining what you did or answering their question",
-      "updatedContent": "The complete updated report content (only if making changes, otherwise null)"
-    }
-
-    #GUIDELINES:
-    - Be helpful and professional
-    - If making changes, provide the COMPLETE updated report, not just the changed sections
-    - Maintain the existing [IMAGE:X] references and positioning
-    - Use plain text format for the report (no markdown)
-    - Keep section headers in UPPERCASE with colons
-    `;
-
-    console.log('Generated chat prompt');
-
-    // Prepare messages for OpenAI, including images if available
-    const messages: OpenAI.ChatCompletionMessageParam[] = [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: prompt },
-          // Add each image with its description if available
-          ...imagesToUse.flatMap((img, index) => [
-            {
-              type: 'text' as const,
-              text: `\n\nCurrent Photo ${index + 1} (${img.tag?.toUpperCase() || 'OVERVIEW'}): ${img.description || 'No description provided'}`
-            },
-            {
-              type: 'image_url' as const,
-              image_url: {
-                url: img.url,
-                detail: 'auto' as const,
-              },
-            }
-          ])
-        ],
-      },
-    ];
-
-    console.log('Sending request to OpenAI with', Array.isArray(messages[0]?.content) ? messages[0].content.length : 1, 'content items');
-
-    // Call OpenAI API
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: messages,
-      temperature: 0.7,
-      response_format: { type: "json_object" }
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY
     });
 
-    // Extract and parse the response
-    const responseContent = response.choices[0]?.message.content || '';
-    console.log('Received response from OpenAI');
-    
-    let parsedResponse;
-    try {
-      parsedResponse = JSON.parse(responseContent);
-    } catch (error) {
-      console.error('Error parsing OpenAI response:', error);
-      parsedResponse = {
-        message: "I had trouble processing your request. Could you try rephrasing?",
-        updatedContent: null
-      };
+    // Add system message explaining tool usage
+    currentMessages.unshift({
+      role: "system",
+      content: `You are a helpful assistant that edits structured documents. When users refer to sections by number (e.g., "section 1" or "section 2.1"), always:
+
+1. First call list_sections() to get the mapping between section numbers and their stable IDs
+2. Then use the stable ID in subsequent operations (rename_section, set_section_body, etc.)
+
+For any request that involves editing, changing, adding, deleting, or modifying the report in any way, you MUST use the available tools. Do not describe the changes or return edited text directly—always call the tools to perform the edits, and they will return the updated state. If the user asks for something not requiring tools, respond normally.
+
+Example for rename:
+User: "Rename section 1 to Overview"
+Assistant should:
+1. Call list_sections() to find section 1's ID
+2. Use that ID with rename_section()
+
+Example for delete:
+User: "Delete section 2"
+Assistant should:
+1. Call list_sections() to get ID of section 2
+2. Call delete_section({ section_id: '<id>' })
+
+Never try to use section numbers directly as IDs - they can change when sections are moved or reordered. Always get the stable UUID first.`
+    });
+
+    for (let step = 0; step < maxSteps; step++) {
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4",
+        messages: currentMessages,
+        tools: SECTION_TOOLS as ChatCompletionTool[],
+        tool_choice: "auto"
+      });
+
+      const message = completion.choices[0].message;
+
+      // If no tool calls, we're done
+      if (!message.tool_calls?.length) {
+        return new Response(JSON.stringify({
+          message: message.content,
+          updatedMarkdown: model.toMarkdown(),
+          sections: model.getState()
+        }));
+      }
+
+      // Add assistant's message with tool calls to conversation first
+      currentMessages.push(message);
+
+      // Then execute each tool call and add their results
+      for (const call of message.tool_calls) {
+        const { name, arguments: args } = call.function;
+        const result = await tools.applyTool(name, JSON.parse(args));
+        
+        // Add tool result to conversation
+        currentMessages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          content: JSON.stringify(result)
+        });
+      }
     }
 
-    return NextResponse.json({
-      message: parsedResponse.message,
-      updatedContent: parsedResponse.updatedContent
-    });
-  } catch (error: any) {
-    console.error('Error in chat API:', error);
-    return NextResponse.json(
-      { error: error.message || 'Failed to process chat request' },
-      { status: 500 }
-    );
+    return new Response(JSON.stringify({
+      error: "Exceeded maximum number of tool calls"
+    }), { status: 400 });
+
+  } catch (error) {
+    console.error('Error in chat route:', error);
+    return new Response(JSON.stringify({
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }), { status: 500 });
   }
-} 
+}

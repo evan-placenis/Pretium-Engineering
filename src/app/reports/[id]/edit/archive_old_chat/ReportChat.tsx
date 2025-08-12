@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { useChatMessages } from '@/app/reports/[id]/edit/hooks/chat-utils';
+import { useChatMessages } from '@/app/reports/[id]/edit/archive_old_chat/chat-utils';
 import { Project, Report, ReportImage } from '@/lib/supabase';
 
 // Add TypeScript declarations for Web Speech API

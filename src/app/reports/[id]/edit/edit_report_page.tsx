@@ -5,11 +5,13 @@ import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Project, Report, ChatMessage, ReportImage } from '@/lib/supabase';
 import { createWordDocumentWithImages} from '@/lib/word-utils';
-import { useChatMessages } from '@/app/reports/[id]/edit/hooks/chat-utils';
-import { ReportEditor, EnhancedReportChat } from './components';
+//import { useChatMessages } from '@/app/reports/[id]/edit/hooks/chat-utils';
+import { ReportEditor, StructuredReportChat } from './components';
 import { EmbeddingTestPanel } from './components/EmbeddingTestPanel';
 import Breadcrumb from '@/components/Breadcrumb';
 import './report_style.css';
+import { useOperations } from './hooks/useOperations';
+import { Section } from './operations/types';
 
 const SECTION_TEMPLATES: Record<string, string> = {
   locationPlan: '[SECTION:LOCATION_PLAN]\n',
@@ -252,6 +254,13 @@ interface SectionSelection {
 const removeSectionTag = (content: string, tag: string) =>
   content.replace(new RegExp(tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\s\n]*', 'g'), '');
 
+// Placeholder - implement based on your Section model
+function toMarkdown(sections: Section[]): string {
+  // Convert sections tree to markdown string
+  // Example: recursively build headers and body
+  return sections.map(sec => `# ${sec.number} ${sec.title}\n${sec.bodyMd}\n${toMarkdown(sec.children)}`).join('\n');
+}
+
 export default function EditReportPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [project, setProject] = useState<Project | null>(null);
@@ -260,8 +269,6 @@ export default function EditReportPage() {
   const [deliveredAt, setDeliveredAt] = useState('');
   const [reportImages, setReportImages] = useState<ReportImage[]>([]);
   const [processedContent, setProcessedContent] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveStatus, setSaveStatus] = useState('');
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadStatus, setDownloadStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -277,6 +284,7 @@ export default function EditReportPage() {
     observations: true,
     stagingArea: false
   });
+
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
@@ -285,6 +293,25 @@ export default function EditReportPage() {
   const eventSourceRef = useRef<EventSource | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const nonSpecialContentRef = useRef('');
+
+  const { 
+    sections, 
+    applyOperation, 
+    undo, 
+    redo, 
+    canUndo, 
+    canRedo, 
+    isLoading: opsLoading,
+    error: operationError,
+    operations,
+    currentVersion,
+    syncFromMarkdown
+  } = useOperations({ 
+    reportId,
+    onSectionsChange: (newSections) => {
+      setContent(toMarkdown(newSections));
+    }
+  });
 
   // Check if user is authenticated and handle streaming
   useEffect(() => {
@@ -439,38 +466,6 @@ export default function EditReportPage() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  const saveReport = async () => {
-    if (!report) return;
-    
-    setIsSaving(true);
-    setSaveStatus('Saving...');
-    
-    try {
-      const { error } = await supabase
-        .from('reports')
-        .update({ 
-          generated_content: content,
-          title: reportTitle.trim() || null,
-          delivered_at: deliveredAt || null,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', reportId);
-      
-      if (error) throw error;
-      setSaveStatus('Saved');
-      
-      setTimeout(() => {
-        setSaveStatus('');
-      }, 3000);
-    } catch (error: any) {
-      console.error('Error saving report:', error);
-      setSaveStatus('Failed to save');
-      setError(error.message);
-    } finally {
-      setIsSaving(false);
-    }
-  };
 
   const handleDownload = async () => {
     if (!report || !project) return;
@@ -677,21 +672,6 @@ export default function EditReportPage() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <button
-            onClick={saveReport}
-            disabled={isSaving}
-            style={{
-              background: isSaving ? '#666' : '#4CAF50',
-              border: 'none',
-              borderRadius: '4px',
-              padding: '0.5rem 1rem',
-              color: 'white',
-              cursor: isSaving ? 'not-allowed' : 'pointer',
-              fontSize: '1rem'
-            }}
-          >
-            {isSaving ? 'Saving...' : saveStatus || 'Save'}
-          </button>
-          <button
             onClick={handleDownload}
             disabled={isDownloading}
             style={{
@@ -886,7 +866,7 @@ export default function EditReportPage() {
             width: '500px',
             flexShrink: 0
           }}>
-            <EnhancedReportChat
+            <StructuredReportChat
               reportId={reportId}
               content={content}
               project={project}
@@ -894,6 +874,16 @@ export default function EditReportPage() {
               user={user}
               reportImages={reportImages}
               setContent={setContent}
+              sections={sections}
+              applyOperation={applyOperation}
+              undo={undo}
+              redo={redo}
+              canUndo={canUndo}
+              canRedo={canRedo}
+              operations={operations}
+              isLoadingOperations={opsLoading}
+              operationError={operationError}
+              syncFromMarkdown={syncFromMarkdown}
             />
           </div>
         )}

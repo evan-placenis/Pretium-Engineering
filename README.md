@@ -49,6 +49,7 @@ A comprehensive engineering report generation system that processes site inspect
 - **Knowledge Integration**: Connect reports to project specifications and requirements
 - **Enhanced Chatbot**: AI-powered chat assistant for report editing and questions
 - **AWS Lambda Deployment**: Scalable serverless architecture
+- **Operation-Based Editing**: Robust document editing with undo/redo support
 
 ## Environment Variables
 
@@ -67,6 +68,92 @@ A comprehensive engineering report generation system that processes site inspect
 - `AWS_ACCESS_KEY_ID` - AWS access key for Lambda deployment
 - `AWS_SECRET_ACCESS_KEY` - AWS secret key for Lambda deployment
 - `AWS_REGION` - AWS region for Lambda deployment
+
+## Operation-Based Editing System
+
+The report editor uses an operation-based model for robust document manipulation and version control.
+
+### Core Operations
+
+Each edit is represented as an atomic operation:
+
+- **Rename Section**: Change a section's title
+- **Set Section Body**: Update a section's content
+- **Insert Section**: Add a new section after an existing one
+- **Delete Section**: Remove a section and its children
+- **Move Section**: Relocate a section within the document tree
+
+### Features
+
+#### 1. Robust Undo/Redo
+
+- Each operation has an explicit inverse
+- Clean rollback to any previous state
+- Operation history with metadata
+
+#### 2. Knowledge Integration
+
+- Operations can include citations and references
+- Links to project specifications and codes
+- Automatic citation formatting
+
+#### 3. Structured Editing
+
+- Section-based document model
+- Stable UUIDs for reliable references
+- Hierarchical document structure
+
+#### 4. Future Enhancements
+
+**Operation Metadata**
+
+- Reason tracking for changes
+- Tool call references
+- Knowledge reference linking
+
+**Batched Operations**
+
+- Atomic transaction groups
+- Related change bundling
+- Logical undo/redo units
+
+**Advanced Validation**
+
+- Pre-operation validation
+- Section ID verification
+- Relationship checking
+- Circular reference prevention
+
+**UI Enhancements**
+
+- Operation history timeline
+- Visual diff previews
+- Inline citation display
+- Change confirmation dialogs
+
+### Database Schema
+
+```sql
+-- Operations table
+CREATE TABLE report_ops (
+  id UUID PRIMARY KEY,
+  report_id UUID REFERENCES reports(id),
+  version INTEGER,
+  op_json JSONB,
+  actor UUID,
+  timestamp TIMESTAMPTZ,
+  reason TEXT,
+  tool_call_id TEXT
+);
+
+-- Snapshots for fast rollback
+CREATE TABLE report_snapshots (
+  report_id UUID REFERENCES reports(id),
+  version INTEGER,
+  snapshot_json JSONB,
+  created_at TIMESTAMPTZ
+);
+```
 
 ## Enhanced Chatbot Features
 

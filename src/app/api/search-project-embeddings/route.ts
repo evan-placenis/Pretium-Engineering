@@ -1,18 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase';
-import OpenAI from 'openai';
+import { createServiceRoleClient } from '@/lib/supabase';
+import { OpenAI } from 'openai';
 
 // Initialize OpenAI client
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Initialize Supabase client
-const supabase = createServerSupabaseClient();
-
 export async function POST(req: NextRequest) {
+  const { query, projectId, limit = 5 } = await req.json();
+
+  if (!query || !projectId) {
+    return NextResponse.json({ error: 'Missing query or projectId' }, { status: 400 });
+  }
+
   try {
-    const { projectId, query, limit = 5 } = await req.json();
+    const supabase = createServiceRoleClient();
 
     console.log('Searching project embeddings:', { projectId, query, limit });
 

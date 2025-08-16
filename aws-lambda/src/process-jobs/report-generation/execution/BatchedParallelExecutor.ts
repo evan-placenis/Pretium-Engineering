@@ -1,6 +1,9 @@
 // Batched Parallel Execution Strategy with Max 3 Agents
 // STREAMING IS ALWAYS ENABLED for real-time progress updates
-import { ExecutionStrategy, ExecutionParams, ExecutionResult, GroupingMode } from '../types.ts';
+import { v4 as uuidv4 } from 'uuid';
+import { ExecutionStrategy, ExecutionParams, ExecutionResult, GroupingMode, ImageReference, Section } from '../../types';
+import { getRelevantKnowledgeChunks } from '../report-knowledge/guards';
+import { SectionModel } from './SectionModel';
 
 export class BatchedParallelExecutor implements ExecutionStrategy {
   private readonly BATCH_SIZE = 5;
@@ -9,8 +12,13 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
   private reportId: string = '';
 
   async execute(params: ExecutionParams): Promise<ExecutionResult> {
-    const { images, bulletPoints, projectData, llmProvider, promptStrategy, grouping, options } = params;
+    const { images, bulletPoints, projectData, llmProvider, promptStrategy, grouping, options, projectId } = params;
     
+    // Guard clause to ensure projectId is present
+    if (!projectId) {
+      throw new Error('projectId is required to execute the report generation.');
+    }
+
     // Store supabase and reportId for real-time updates
     this.supabase = params.supabase;
     this.reportId = params.reportId || ''; // Use the correct reportId
@@ -18,35 +26,61 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
     console.log(`🔄 Batched Parallel Executor: Processing ${images.length} images in ${grouping} mode with max ${this.MAX_PARALLEL_AGENTS} agents`);
 
     try {
-      let content = '';
+      const batches = this.chunkArray(images, this.BATCH_SIZE);
+      const allSections: Section[] = [];
       const metadata: any = {};
+      
+      await this.updateReportContent({
+        type: 'status',
+        message: `🤖 IMAGE AGENT: Analyzing ${images.length} observations in ${batches.length} batches...`,
+      });
 
-      // STEP 1: Process images in batches with limited parallel agents
-      if (grouping === 'grouped') {
-        const result = await this.processGroupedImagesBatched(images, params);
-        content = result.content;
-        Object.assign(metadata, result.metadata);
-      } else {
-        const result = await this.processUngroupedImagesBatched(images, params);
-        content = result.content;
-        Object.assign(metadata, result.metadata);
+      const allPromises: Promise<void>[] = [];
+      const activePromises: Promise<void>[] = [];
+
+      for (const batch of batches) {
+        // If the pool is full, wait for the *fastest* active task to finish, opening up a slot.
+        if (activePromises.length >= this.MAX_PARALLEL_AGENTS) {
+          await Promise.race(activePromises);
+        }
+
+        const promise = this.processBatch(batch, params).then(async (batchSections) => {
+          if (batchSections.length > 0) {
+            allSections.push(...batchSections);
+            const streamingPayload = this.prepareStreamingPayload(allSections);
+            await this.updateReportContent({
+              type: 'intermediateResult',
+              message: `IMAGE AGENT: Analyzed ${allSections.length} of ${images.length} observations...`,
+              payload: streamingPayload,
+            });
+          }
+        });
+
+        // Wrap the promise to remove it from the active pool upon completion.
+        const wrappedPromise = promise.finally(() => {
+          const index = activePromises.indexOf(wrappedPromise);
+          if (index !== -1) {
+            activePromises.splice(index, 1);
+          }
+        });
+
+        activePromises.push(wrappedPromise);
+        allPromises.push(wrappedPromise);
       }
+      
+      // Wait for any remaining promises to complete before moving to the summary step.
+      await Promise.all(allPromises);
+
+      await this.updateReportContent({
+        type: 'status',
+        message: `IMAGE AGENT COMPLETE: Produced ${allSections.length} initial sections. Moving to summary agent...`,
+      });
 
       // STEP 2: Generate final summary sequentially
-      console.error('[DEBUG] STARTING SUMMARY PHASE');
-      console.log('📝 Generating final summary sequentially (STREAMING ENABLED)...');
-      
-      // Update report to indicate summary has started
-      await this.updateReportContent(content + '\n\n📝 SUMMARY PHASE: Starting final review and formatting...', false);
+      console.log('📝 Generating final summary sequentially...');
       
       const summarySystemPrompt = promptStrategy.getSummarySystemPrompt(grouping);
-      const summaryTaskPrompt = promptStrategy.generateSummaryPrompt(content, {
-        mode: params.mode,
-        grouping,
-        bulletPoints,
-        projectData,
-        options
-      });
+      const summaryTaskPrompt = promptStrategy.generateSummaryPrompt('', {}, allSections);
       
       const fullSummaryPrompt = `${summarySystemPrompt}\n\n${summaryTaskPrompt}`;
 
@@ -74,33 +108,49 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
 
       const summaryResponse = await Promise.race([summaryPromise, timeoutPromise]) as any;
 
-      console.error(`[DEBUG] SUMMARY RESPONSE: hasError=${!!summaryResponse.error}, hasContent=${!!summaryResponse.content}, contentLength=${summaryResponse.content?.length || 0}`);
-
       if (summaryResponse.error) {
         console.error(`[ERROR] SUMMARY ERROR: ${summaryResponse.error}`);
         throw new Error(`Summary generation failed: ${summaryResponse.error}`);
       }
 
-      if (!summaryResponse.content || summaryResponse.content.trim().length === 0) {
-        console.error(`[ERROR] SUMMARY EMPTY: No content returned`);
-        throw new Error(`Summary generation returned empty content`);
+      let summaryContent = summaryResponse.content || '';
+      let finalSections: Section[] = [];
+      try {
+        const parsedJson = JSON.parse(summaryContent);
+        if (parsedJson.sections) {
+          const model = SectionModel.fromJSON(parsedJson);
+          finalSections = model.getState().sections;
+          summaryContent = JSON.stringify(model.toJSON());
+          console.log('Parsed and auto-numbered JSON sections for summary');
+        } else {
+          console.warn("Summary JSON is missing 'sections' property.");
+          finalSections = allSections; // Fallback to initial sections
+        }
+      } catch (e: any) {
+        console.error('Failed to parse final summaryContent as JSON:', e.message, "Returning raw sections from batches.");
+        finalSections = allSections; // Fallback to initial sections if summary parsing fails
       }
+      
+      console.error(`[DEBUG] EXECUTION COMPLETE: Report generation finished.`);
 
-      console.error(`[DEBUG] SUMMARY SUCCESS: Updating report with ${summaryResponse.content.length} characters`);
-      
-      // Update report with final summary content
-      await this.updateReportContent(summaryResponse.content, true);
-      
-      console.error(`[DEBUG] SUMMARY COMPLETE: Report updated successfully`);
+      const groupedSections = this.createGroupedHierarchy(finalSections);
+      await this.supabase.from('reports').update({ sections_json: { sections: groupedSections } }).eq('id', this.reportId);
+
+      // Final success message
+      await this.updateReportContent({
+        type: 'status',
+        message: '✅ Report Generation Complete',
+      });
 
       return {
-        content: summaryResponse.content,
+        content: summaryContent,
+        sections: groupedSections,
         metadata: {
           ...metadata,
           finalSummaryGenerated: true,
-          originalContentLength: content.length,
-          finalContentLength: summaryResponse.content.length,
-          executionFlow: 'batched_parallel_report_writing -> sequential_summary'
+          initialSectionCount: allSections.length,
+          finalSectionCount: finalSections.length,
+          executionFlow: 'image_agent -> summary_agent'
         }
       };
 
@@ -110,37 +160,8 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
       // Try to update the report with error information while preserving existing content
       try {
         if (this.supabase && this.reportId) {
-          // Get current content first
-          const { data: currentReport } = await this.supabase
-            .from('reports')
-            .select('generated_content')
-            .eq('id', this.reportId)
-            .single();
-          
-          let currentContent = currentReport?.generated_content || '';
-          
-          // Remove processing marker if it exists
-          currentContent = currentContent.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, '\n\n❌ REPORT GENERATION FAILED');
-          currentContent = currentContent.replace(/\n\[PROCESSING IN PROGRESS\.\.\.\]/g, '\n\n❌ REPORT GENERATION FAILED');
-          currentContent = currentContent.replace(/\[PROCESSING IN PROGRESS\.\.\.\]/g, '\n\n❌ REPORT GENERATION FAILED');
-          
-          // Only append error message if there's existing content to preserve
-          if (currentContent.trim().length > 0) {
-            const errorMessage = `\n\n❌ REPORT GENERATION FAILED\n\nError: ${error}\n\nYour content has been preserved. You can continue editing or try generating again.`;
-            const updatedContent = currentContent + errorMessage;
-            
-            await this.supabase
-              .from('reports')
-              .update({ generated_content: updatedContent })
-              .eq('id', this.reportId);
-          } else {
-            // If no existing content, just show the error
-            const errorMessage = `❌ REPORT GENERATION FAILED\n\nError: ${error}\n\nPlease try generating again.`;
-            await this.supabase
-              .from('reports')
-              .update({ generated_content: errorMessage })
-              .eq('id', this.reportId);
-          }
+          const errorMessage = `❌ REPORT GENERATION FAILED\n\nError: ${error instanceof Error ? error.message : String(error)}\n\nPlease try generating again.`;
+          await this.updateReportContent({ type: 'status', message: errorMessage });
           console.log('📝 Updated report with error message');
         }
       } catch (updateError) {
@@ -151,253 +172,130 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
     }
   }
 
-  private async processGroupedImagesBatched(images: any[], params: ExecutionParams): Promise<{ content: string; metadata: any }> {
-    const { llmProvider, promptStrategy, projectData, options } = params;
-    
-    // Group images by their group
-    const groupedImages = this.groupImages(images);
-    const groupNames = Object.keys(groupedImages);
-    
-    console.log(`📦 Processing ${groupNames.length} groups: ${groupNames.join(', ')}`);
+  private prepareStreamingPayload(sections: Section[]): Section[] {
+    // This function now performs the same grouping as the final step
+    // to ensure the streaming data has the same shape as the final data.
+    const groupMap = new Map<string, Section[]>();
 
-    // Process each group in batches
-    const allGroupResults: string[] = [];
-    const groupPromises: Promise<{ groupName: string; content: string }>[] = [];
-
-    for (const groupName of groupNames) {
-      const groupImages = groupedImages[groupName];
-      
-      // Process this group in batches
-      const groupResult = this.processGroupInBatches(groupImages, groupName, params);
-      groupPromises.push(groupResult);
-      
-      // Limit concurrent groups to MAX_PARALLEL_AGENTS
-      if (groupPromises.length >= this.MAX_PARALLEL_AGENTS) {
-        // Wait for each group individually and update after each one completes
-        for (let j = 0; j < groupPromises.length; j++) {
-          const completedResult = await groupPromises[j];
-          allGroupResults.push(completedResult.content);
-          
-          // Update report content after each individual group completes
-          const currentContent = allGroupResults.join('\n\n');
-          await this.updateReportContent(currentContent, false);
-        }
-        
-        groupPromises.length = 0; // Clear array
+    // Step 1: Group sections by title
+    sections.forEach(section => {
+      const title = section.title ? section.title.trim() : 'Untitled';
+      if (!groupMap.has(title)) {
+        groupMap.set(title, []);
       }
-    }
-
-    // Wait for remaining groups
-    if (groupPromises.length > 0) {
-      // Wait for each remaining group individually and update after each one completes
-      for (let j = 0; j < groupPromises.length; j++) {
-        const completedResult = await groupPromises[j];
-        allGroupResults.push(completedResult.content);
-        
-        // Update report content after each individual group completes
-        const currentContent = allGroupResults.join('\n\n');
-        await this.updateReportContent(currentContent, false);
-      }
-    }
-
-    const content = allGroupResults.join('\n\n');
-
-    // Update report with content from image processing (not final yet)
-    await this.updateReportContent(content, false);
-
-    return {
-      content,
-      metadata: {
-        groupsProcessed: groupNames.length,
-        totalImages: images.length,
-        batchSize: this.BATCH_SIZE,
-        maxParallelAgents: this.MAX_PARALLEL_AGENTS,
-        executionType: 'batched-parallel-grouped'
-      }
-    };
-  }
-
-  private async processUngroupedImagesBatched(images: any[], params: ExecutionParams): Promise<{ content: string; metadata: any }> {
-    const { llmProvider, promptStrategy, projectData, options } = params;
-    
-    console.log(`📦 Processing ${images.length} ungrouped images in batches of ${this.BATCH_SIZE}`);
-
-    // Split images into batches
-    const batches = this.chunkArray(images, this.BATCH_SIZE);
-    const allBatchResults: string[] = [];
-    const activePromises: Promise<string>[] = [];
-
-    for (let i = 0; i < batches.length; i++) {
-      const batch = batches[i];
-      
-      // Wait if we've reached the parallel limit
-      if (activePromises.length >= this.MAX_PARALLEL_AGENTS) {
-        console.log(`🔄 Waiting for ${activePromises.length} batches to complete before starting batch ${i + 1} (parallel limit: ${this.MAX_PARALLEL_AGENTS})`);
-        
-        // Wait for each batch individually and update after each one completes
-        for (let j = 0; j < activePromises.length; j++) {
-          const completedResult = await activePromises[j];
-          allBatchResults.push(completedResult);
-          
-          // Update report content after each individual batch completes
-          const currentContent = allBatchResults.join('\n\n');
-          await this.updateReportContent(currentContent, false);
-        }
-        
-        activePromises.length = 0; // Clear array
-        console.log(`✅ Completed batch group, starting next set of ${this.MAX_PARALLEL_AGENTS} batches`);
-      }
-      
-      // Start this batch (only after waiting if needed)
-      console.log(`🚀 Starting batch ${i + 1}/${batches.length} (${activePromises.length + 1} active)`);
-      const batchResult = this.processBatch(batch, i, batches.length, params);
-      activePromises.push(batchResult);
-    }
-
-          // Wait for remaining batches
-      if (activePromises.length > 0) {
-        console.log(`🔄 Waiting for final ${activePromises.length} batches to complete`);
-        
-        // Wait for each remaining batch individually and update after each one completes
-        for (let j = 0; j < activePromises.length; j++) {
-          const completedResult = await activePromises[j];
-          allBatchResults.push(completedResult);
-          
-          // Update report content after each individual batch completes
-          const currentContent = allBatchResults.join('\n\n');
-          await this.updateReportContent(currentContent, false);
-        }
-      }
-
-    const content = allBatchResults.join('\n\n');
-
-    // Update report with content from image processing (not final yet)
-    await this.updateReportContent(content, false);
-
-    return {
-      content,
-      metadata: {
-        batchesProcessed: batches.length,
-        totalImages: images.length,
-        batchSize: this.BATCH_SIZE,
-        maxParallelAgents: this.MAX_PARALLEL_AGENTS,
-        executionType: 'batched-parallel-ungrouped'
-      }
-    };
-  }
-
-  private async processGroupInBatches(groupImages: any[], groupName: string, params: ExecutionParams): Promise<{ groupName: string; content: string }> {
-    const { llmProvider, promptStrategy, projectData, options } = params;
-    
-    // Split group images into batches
-    const batches = this.chunkArray(groupImages, this.BATCH_SIZE);
-    const batchResults: string[] = [];
-    const activePromises: Promise<string>[] = [];
-
-    for (let i = 0; i < batches.length; i++) {
-      const batch = batches[i];
-      
-      // Wait if we've reached the parallel limit
-      if (activePromises.length >= this.MAX_PARALLEL_AGENTS) {
-        console.log(`🔄 [GROUP: ${groupName}] Waiting for ${activePromises.length} batches to complete before starting batch ${i + 1} (parallel limit: ${this.MAX_PARALLEL_AGENTS})`);
-        const completedResults = await Promise.all(activePromises);
-        batchResults.push(...completedResults);
-        activePromises.length = 0; // Clear array
-        console.log(`✅ [GROUP: ${groupName}] Completed batch group, starting next set of ${this.MAX_PARALLEL_AGENTS} batches`);
-      }
-      
-      // Start this batch (only after waiting if needed)
-      console.log(`🚀 [GROUP: ${groupName}] Starting batch ${i + 1}/${batches.length} (${activePromises.length + 1} active)`);
-      const batchResult = this.processBatch(batch, i, batches.length, params);
-      activePromises.push(batchResult);
-    }
-
-    // Wait for remaining batches
-    if (activePromises.length > 0) {
-      console.log(`🔄 [GROUP: ${groupName}] Waiting for final ${activePromises.length} batches to complete`);
-      const remainingResults = await Promise.all(activePromises);
-      batchResults.push(...remainingResults);
-    }
-
-    const groupContent = batchResults.join('\n\n');
-    return {
-      groupName,
-      content: promptStrategy.generateGroupHeader(groupName) + groupContent
-    };
-  }
-// kinda like main function
-  private async processBatch(batch: any[], batchIndex: number, totalBatches: number, params: ExecutionParams): Promise<string> {
-    const { llmProvider, promptStrategy, projectData, options } = params;
-    
-    const batchStartTime = Date.now();
-    console.log(`📦 [BATCH ${batchIndex + 1}] Starting batch ${batchIndex + 1}/${totalBatches} with ${batch.length} images (STREAMING ENABLED)`);
-
-    // Get batch prompt from prompt strategy
-    const promptStartTime = Date.now();
-    const batchPrompt = await promptStrategy.generateBatchPrompt(batch, batchIndex, totalBatches, {
-      grouping: params.grouping,
-      projectId: params.projectId,
-      supabase: params.supabase,
-      projectData,
-      options
+      groupMap.get(title)!.push(section);
     });
-    const promptEndTime = Date.now();
-    console.log(`📝 [BATCH ${batchIndex + 1}] Prompt generation took ${promptEndTime - promptStartTime}ms`);
 
-    // Create the full prompt with system prompt
-    const systemPrompt = promptStrategy.getImageSystemPrompt();
-    const fullPrompt = `${systemPrompt}\n\n${batchPrompt}`;
-    console.log(`📋 [BATCH ${batchIndex + 1}] Full prompt length: ${fullPrompt.length} characters`);
+    // Step 2: Create a new parent section for each group
+    const parentSections: Section[] = [];
+    for (const [title, children] of groupMap.entries()) {
+      const parentSection: Section = {
+        id: uuidv4(),
+        title: title,
+        number: '',
+        children: children.map(child => ({
+          id: child.id || uuidv4(), // Reuse ID if available
+          number: '',
+          bodyMd: child.bodyMd,
+          images: child.images,
+        })),
+      };
+      parentSections.push(parentSection);
+    }
 
-    // Process the batch
-    const llmStartTime = Date.now();
-    console.log(`🤖 [BATCH ${batchIndex + 1}] Starting LLM generation...`);
+    // Step 3: Renumber the structure for display
+    const model = new SectionModel(parentSections);
+    // model.autoNumberSections(); // DO NOT re-number during streaming to keep it fast.
+    return model.getState().sections;
+  }
+
+  private createGroupedHierarchy(sections: Section[]): Section[] {
+    const groupMap = new Map<string, Section[]>();
+
+    // Step 1: Group sections by title
+    sections.forEach(section => {
+      const title = section.title ? section.title.trim() : 'Untitled';
+      if (!groupMap.has(title)) {
+        groupMap.set(title, []);
+      }
+      groupMap.get(title)!.push(section);
+    });
+
+    // Step 2: Create a new parent section for each group
+    const parentSections: Section[] = [];
+    for (const [title, children] of groupMap.entries()) {
+      // Create a new parent section
+      const parentSection: Section = {
+        id: uuidv4(),
+        title: title,
+        number: '',
+        children: children.map(child => ({
+          id: uuidv4(),
+          number: '',
+          bodyMd: child.bodyMd,
+          images: child.images || [],
+        })),
+      };
+      parentSections.push(parentSection);
+    }
+
+    // Step 3: Renumber the final hierarchical structure
+    const model = new SectionModel(parentSections);
+    model.autoNumberSections();
+    return model.getState().sections;
+  }
+
+  private async processBatch(batch: any[], params: ExecutionParams): Promise<Section[]> {
+    const { llmProvider, promptStrategy, projectData, grouping, projectId, supabase } = params;
+
+    // Guard clause to ensure projectId is present for type safety
+    if (!projectId || !supabase) {
+      console.error('processBatch called without projectId or supabase client.');
+      return [];
+    }
+
+    const observations = batch.map(img => {
+      const imageTag = `[IMAGE:${img.number}:${img.group?.[0] || ''}]`;
+      const description = img.description || '';
+      const sectionTitle = img.group?.[0] ? `(Section Title: ${img.group[0]})` : '(Section Title: N/A - choose section title)';
+      return `${sectionTitle} Description: ${description} Image: ${imageTag}`.trim();
+    });
+
+    const queryForSpecs = observations.join('\n');
+    const specificationsText = await getRelevantKnowledgeChunks(supabase, projectId, queryForSpecs);
+    const specifications = [specificationsText]; // Wrap in an array
     
-    // Prepare LLM options with reasoning effort if available
-    const llmOptions: any = {
+    console.log(`📝 Retrieved ${specificationsText.length} characters of specs for this batch.`);
+
+    const imageAgentSystemPrompt = promptStrategy.getImageSystemPrompt();
+    const imageAgentUserPrompt = promptStrategy.generateUserPrompt(observations, specifications, [], grouping);
+    const fullImageAgentPrompt = `${imageAgentSystemPrompt}\n\n${imageAgentUserPrompt}`;
+
+    const imageAgentResponse = await llmProvider.generateContent(fullImageAgentPrompt, {
       temperature: 0.7,
-      maxTokens: 10000,
-    };
-    
-    // Add reasoning effort for GPT-5
-    if (params.options?.reasoningEffort) {
-      llmOptions.reasoningEffort = params.options.reasoningEffort;
-      llmOptions.mode = params.mode;
-      console.log(`🧠 [BATCH ${batchIndex + 1}] Using reasoning effort: ${params.options.reasoningEffort}`);
-    }
-    
-    const response = await llmProvider.generateContent(fullPrompt, llmOptions);
-    const llmEndTime = Date.now();
-    console.log(`✅ [BATCH ${batchIndex + 1}] LLM generation took ${llmEndTime - llmStartTime}ms`);
-
-    if (response.error) {
-      console.error(`❌ [BATCH ${batchIndex + 1}] LLM error: ${response.error}`);
-      return `[ERROR: Failed to process batch ${batchIndex + 1} - ${response.error}]`;
-    }
-
-    const batchEndTime = Date.now();
-    console.log(`🎉 [BATCH ${batchIndex + 1}] Total batch processing time: ${batchEndTime - batchStartTime}ms`);
-    console.log(`📄 [BATCH ${batchIndex + 1}] Response length: ${response.content.length} characters`);
-
-    return response.content;
-  }
-
-  private groupImages(images: any[]): Record<string, any[]> {
-    const groups: Record<string, any[]> = {};
-    
-    images.forEach(image => {
-      const groupName = image.group?.[0] || 'UNGROUPED';
-      if (!groups[groupName]) {
-        groups[groupName] = [];
-      }
-      groups[groupName].push(image);
+      maxTokens: 12000
     });
 
-    return groups;
+    if (imageAgentResponse.error) {
+      console.error(`Image agent failed for a batch: ${imageAgentResponse.error}`);
+      return []; // Return empty array for the failed batch
+    }
+    
+    try {
+      const parsed = JSON.parse(imageAgentResponse.content);
+      if (parsed.sections && Array.isArray(parsed.sections)) {
+        return parsed.sections;
+      }
+      console.error("No 'sections' property found in image agent response for a batch.");
+      return [];
+    } catch (e: any) {
+      console.error(`Failed to parse image agent response for a batch: ${e.message}.`);
+      return [];
+    }
   }
 
-  private async updateReportContent(content: string, isComplete: boolean = false) {
-    console.error(`[DEBUG] UPDATE REPORT: isComplete=${isComplete}, contentLength=${content.length}, reportId=${this.reportId}`);
+  private async updateReportContent(log: { type: 'status' | 'intermediateResult', message: string, payload?: any }) {
+    console.error(`[STATUS UPDATE] ${log.message}`);
     
     if (!this.supabase || !this.reportId) {
       console.error('[ERROR] UPDATE ERROR: Missing supabase or reportId');
@@ -405,35 +303,13 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
     }
     
     try {
-      let fullContent = content;
-      
-      if (isComplete) {
-        // Remove any existing processing marker (handle various line break patterns)
-        let cleanedContent = content;
-        cleanedContent = cleanedContent.replace(/\n\n\[PROCESSING IN PROGRESS\.\.\.\]/g, '');
-        cleanedContent = cleanedContent.replace(/\n\[PROCESSING IN PROGRESS\.\.\.\]/g, '');
-        cleanedContent = cleanedContent.replace(/\[PROCESSING IN PROGRESS\.\.\.\]/g, '');
-        
-        // Just use the cleaned content without adding a completion message
-        fullContent = cleanedContent;
-        console.error(`[DEBUG] UPDATE COMPLETE: Final content length: ${fullContent.length}`);
-      } else {
-        // Add processing marker for in-progress updates
-        const status = '[PROCESSING IN PROGRESS...]';
-        fullContent = `${content}\n\n${status}`;
-      }
-      
-      console.error(`[DEBUG] UPDATE DB: Updating report ${this.reportId} with ${fullContent.length} characters`);
-      
       const { error } = await this.supabase
         .from('reports')
-        .update({ generated_content: fullContent })
+        .update({ generated_content: JSON.stringify(log) })
         .eq('id', this.reportId);
         
       if (error) {
         console.error(`[ERROR] UPDATE DB ERROR: ${error.message}`);
-      } else {
-        console.error(`[DEBUG] UPDATE DB SUCCESS: Report updated`);
       }
         
     } catch (error) {
@@ -448,55 +324,6 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
     }
     return chunks;
   }
-} 
+}
 
 
-/*
-1. execute(params) - Main Orchestrator
-Purpose: Main entry point that coordinates the entire report generation process
-What it does:
-Routes to grouped vs ungrouped processing
-Runs image analysis agents (parallel)
-Runs summary agent (sequential)
-Returns final formatted report
-2. processGroupedImagesBatched(images, params) - Grouped Image Handler
-Purpose: Handles images that are organized into groups (e.g., "Roofing", "Foundation")
-What it does:
-Groups images by their group name
-Processes each group in parallel (max 3 groups at once)
-Combines all group results
-Returns raw observations from all groups
-3. processUngroupedImagesBatched(images, params) - Ungrouped Image Handler
-Purpose: Handles images that aren't organized into groups
-What it does:
-Splits all images into batches of 5
-Processes batches in parallel (max 3 batches at once)
-Combines all batch results
-Returns raw observations from all images
-4. processGroupInBatches(groupImages, groupName, params) - Group Batch Processor
-Purpose: Processes a single group's images in batches
-What it does:
-Takes images from one group
-Splits them into batches of 5
-Processes each batch sequentially
-Adds group header to results
-5. processBatch(batch, batchIndex, totalBatches, params) - Individual Batch Processor
-Purpose: Processes a single batch of 5 images with one LLM call
-What it does:
-Takes 5 images
-Gets spec knowledge for each image
-Creates prompt for all 5 images
-Calls LLM once for the entire batch
-Returns observations for all 5 images
-6. groupImages(images) - Image Grouper
-Purpose: Organizes images by their group names
-What it does:
-Creates a map of group names to image arrays
-Handles images without groups (puts in "UNGROUPED")
-7. chunkArray(array, size) - Array Splitter
-Purpose: Splits arrays into smaller chunks
-What it does:
-Takes an array and chunk size
-Returns array of smaller arrays
-Used to split images into batches of 5
-*/

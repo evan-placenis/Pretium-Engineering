@@ -1,6 +1,6 @@
 // GPT-5 LLM Provider with reasoning effort support
-import { LLMProvider, LLMResponse } from '../types.ts';
 import { OpenAI } from 'openai';
+import { LLMProvider, LLMResponse } from '../../types';
 
 export interface GPT5Options {
   reasoningEffort?: 'low' | 'medium' | 'high';

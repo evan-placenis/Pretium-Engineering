@@ -1,6 +1,6 @@
 // GPT-4o LLM Provider
-import { LLMProvider, LLMResponse } from '../types.ts';
 import { OpenAI } from 'openai';
+import { LLMProvider, LLMResponse } from '../../types';
 
 export class GPT4oProvider implements LLMProvider {
   private apiKey: string;

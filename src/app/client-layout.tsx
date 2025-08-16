@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 
 export default function ClientLayout({
   children,
@@ -16,61 +16,25 @@ export default function ClientLayout({
   const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Memoized session check to prevent excessive calls
-  const checkUser = useCallback(async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        setUser(session.user);
-      } else if (!pathname.startsWith('/auth/')) {
-        router.push('/auth/login');
-      }
-    } catch (error) {
-      console.error('Error checking session:', error);
-      if (!pathname.startsWith('/auth/')) {
-        router.push('/auth/login');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [pathname, router]);
-
   useEffect(() => {
-    // Only check session once on mount, not on every pathname change
-    checkUser();
-
-    // Set up auth state listener to handle auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('Auth state changed:', event, session?.user?.email);
-        
-        if (event === 'SIGNED_IN' && session?.user) {
-          setUser(session.user);
-          setIsLoading(false);
-        } else if (event === 'SIGNED_OUT') {
-          setUser(null);
-          setIsLoading(false);
-          if (!pathname.startsWith('/auth/')) {
-            router.push('/auth/login');
-          }
-        } else if (event === 'TOKEN_REFRESHED' && session?.user) {
-          setUser(session.user);
-        }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        setUser(session.user);
+      } else {
+        setUser(null);
       }
-    );
+      setIsLoading(false);
+    });
 
-    // Cleanup subscription
-    return () => subscription.unsubscribe();
-  }, []); // Empty dependency array - only run once on mount
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
 
   const handleSignOut = async () => {
-    try {
-      await supabase.auth.signOut();
-      router.push('/auth/login');
-    } catch (error) {
-      console.error('Error signing out:', error);
-      router.push('/auth/login');
-    }
+    await supabase.auth.signOut();
+    router.push('/auth/login');
+    router.refresh();
   };
 
   // Don't show navigation on auth pages or edit report page
@@ -78,7 +42,6 @@ export default function ClientLayout({
     return <>{children}</>;
   }
 
-  // Show loading state while checking authentication
   if (isLoading) {
     return (
       <div className="loading-container">
@@ -108,7 +71,7 @@ export default function ClientLayout({
 
   return (
     <>
-      <nav className="navbar">
+      <nav className="navbar" key={user ? user.id : 'no-user'}>
         <div className="container navbar-container">
           <div className="navbar-brand">
             <span>Pretium</span>

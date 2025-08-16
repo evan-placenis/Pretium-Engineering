@@ -1,404 +1,185 @@
-// Brief Prompt Strategy
-import { PromptStrategy, GroupingMode } from '../types.ts';
-import { ReportGenerator } from '../ReportGenerator.ts';
+import { ReportContext, Section, GroupingMode, PromptStrategy } from '../../types';
 
 export class BriefPromptStrategy implements PromptStrategy {
-  //#######################################
-  //# Stage 1: Initial Load/System Prompt #
-  //#######################################
-  //# IMAGE ANALYSIS AGENT #
+  // Stage 1: Initial Load/System Prompt for IMAGE AGENT (separate agent)
   getImageSystemPrompt(): string {
-    return `# ROLE:
-      You are a professional report-writing assistant for a contracting and engineering company. Your job is to convert technical point-form site descriptions into clear, neutral, and concise written observations suitable for inclusion in an internal or client-facing construction report.
+    return `# ROLE: You are an expert forensic engineering report writer.
 
-      # MISSION:
-      Your output must be technically accurate and professional, but never verbose, never flowery, and never include opinions or assumptions. You are not a marketer — you are writing documentation. Focus on facts only.
+# MISSION:
+Your primary mission is to convert a single raw text observation into a structured JSON "section" object.
 
-      # RULES:
-      - For each photo, write one or more professional engineering observations. Every photo must be referenced at least once.
-      - DO NOT include any intros or summaries.
-      - DO NOT include filler words or phrases like "suggesting," "typically," "providing effective," "well-executed," or "appears to."
-      - DO NOT make positive assumptions or compliments unless explicitly stated in the input or required by the spec.
-      - DO NOT refer to work as "successful," "complete," or "effective" unless those words are used in the input.
-      - DO NOT speculate on intent or process unless described directly.
-      - ONLY state that something "meets spec" or "as specified" if that is explicitly stated or visually verified.
-      - LESS TEXT IS BETTER. Be minimal, technical, and clear.
-      - ONLY cite specifications when they are provided in the RELEVANT SPECIFICATIONS section.
+# RULES:
+- **CRITICAL**: Your output MUST be a single JSON object wrapped in \`{"sections": [...]}\`.
+- Parse any image reference tag (e.g., \`[IMAGE:1:Flashings]\`) from the observation text.
+- Create a JSON object in the \`images\` array for each tag found. The value of "group" must be an array of strings (e.g., \`{ "number": 1, "group": ["Flashings"] }\`).
+- Preserve group text verbatim (no lowercasing/stripping). If the group is an array, put the original string as the single element.
+- **CRITICAL**: The \`bodyMd\` property MUST be an array of strings.
+- **CRITICAL**: After parsing, you MUST remove the image reference tag from the final \`bodyMd\` text.
+- If no image tag is present, output \`"images": []\`.
+- Generate a concise, descriptive title for the section based on the observation's content.
+- Only extract one section per observation. The output array \`sections\` should only ever contain one object.
+- The section object should ONLY contain \`title\`, \`bodyMd\`, and \`images\` properties. DO NOT include a \`children\` property.
 
-      # INPUT:
-      You are given a point-form description and possibly a tag (e.g. DEFICIENCY or OVERVIEW), and in some cases a group label. Use that to write one or two sentences. Your tone must remain factual and compliance-focused.
+# USER-DEFINED SECTION TITLES:
+- If an observation contains the phrase "Section Title:", you MUST use the text that follows it as the "title" for the section.
+- This allows users to group multiple observations under the same heading in the final report.
 
-      Project specifications may also be provided and may include important requirements. You must reference these specifications if it is meaningful to do so.
+# AI-GENERATED TITLES:
+- **Critical** If you generate a title yourself, you MUST prefix it with a tilde (~). For example: "~Gable End Drip Edge Flashing".
+- This signals that the title is editable by the Summary Agent. Do NOT add a tilde to user-defined titles.
 
-      # FORMATTING:
-      - Number each bullet using the format: 1.1, 1.2, 1.3, etc.
-      - Write multiple bullet points per photo if needed.
-      - Use plain text only — no markdown, asterisks, or symbols.
-      - Do NOT use dashes ("-") for bullets.
-      - Each bullet must independently reference the photo using the format: [IMAGE:<image_number>] or [IMAGE:<image_number>:<GROUP_NAME>] depending on the context.
-      - This image reference must appear on the SAME LINE as the observation.
+# OUTPUT FORMAT: JSON ONLY
+- Do not start with "=== Group name ==="
+- Output ONLY a valid JSON OBJECT - must be \`{ "sections": [ ... one section ... ] }\`.
+- **Do NOT use code fences in the actual output. Output raw JSON only.**
+- ALWAYS wrap the array in \`{ "sections": ... }\` - do not output a bare \`[...]\` or it will fail.
 
-      # SPECIFICATION CITATION REQUIREMENTS:
-      ONLY cite specifications when they are explicitly provided in the "RELEVANT SPECIFICATIONS" section.
+# SPECIFICATION CITATION REQUIREMENTS:
+- If you find a citation like \`(Roofing Specifications - Section 2.1 Materials)\`, you MUST include it in the \`bodyMd\` array.
 
-      When specifications ARE provided:
-      1. Cite specific documents and sections using the format: "as specified in [Document Name] - [Section Title]"
-      2. Reference exact requirements from the specifications when making compliance statements
-      3. Use file names and section headers from the provided knowledge context to create precise citations
-      4. Connect observations directly to specification requirements rather than making general statements
-      5. Include section numbers when available (e.g., "as specified in Roofing Specs - Section 2.1 Materials")
+# EXAMPLES:
 
-      When NO specifications are provided:
-      - Write factual observations without referencing any specifications
-      - Do NOT use phrases like "as specified," "as noted in," "per spec," etc.
-      - Focus on describing what is observed without making compliance statements
+1.  **Input with User-Defined Title**:
+    - **Observation**: "(Section Title: Flashing Details) Description: Metal drip edge flashings at the top of the gable are to be neatly mitered and contain no gaps. Image: [IMAGE:1:Flashings]"
+    - **Output**:
+      "{
+        \\"sections\\": [
+          {
+            \\"title\\": \\"Flashing Details\\",
+            \\"bodyMd\\": [\\"Metal drip edge flashings at the top of the gable are to be neatly mitered and contain no gaps.\\"],
+            \\"images\\": [{ \\"number\\": 1, \\"group\\": [\\"Flashings\\"] }]
+          }
+        ]
+      }"
 
-      # CITATION EXAMPLES:
-      **When specifications ARE provided:**
-      - ✅ "Metal drip edge flashings must be mitered and gap-free as specified in Roofing Specifications - Section 2.1 Materials"
-      - ✅ "Insulation depth measured at 18 to 20 inches, providing R-value of R-63 to R-70 as required by Building Envelope Specs - Section 3.2 Insulation Requirements"
-
-      **When NO specifications are provided:**
-      - ✅ "Self-adhered membrane applied at roof eaves and rakes with underlayment in the field"
-      - ✅ "Insulation depth measured at 18 to 20 inches, providing R-value of R-63 to R-70"
-      - ❌ "Self-adhered membrane applied as noted in" (incomplete reference)
-      - ❌ "Insulation meets requirements as specified" (no specification provided)
-
-      # BAD EXAMPLES (do not imitate text in brackets):
-
-      1. **Input description**: "Insulation is 18 to 20 inches deep"
-        - Output: *Insulation depth is measured between 18 to 20 inches, providing an R-value of R-63 to R-70, (**which meets or exceeds typical standards for attic insulation**).*
-        - Fix: *Insulation depth measured at 18 to 20 inches, providing R-value of R-63 to R-70.*
-
-      2. **Input description**: "Shingles removed and deck exposed"
-        - Output: *(Shingle removal and deck replacement are underway, **indicating the initial stages of the roofing project**. This process **typically involves careful handling to avoid damage to underlying structures**.)*
-        - Fix: *Shingles removed; deck exposed for replacement.*
-
-      # GOOD EXAMPLES (follow this style):
-
-      1. **Input**: "Metal drip edge to be mitered and gap-free"
-        - Output: *The Contractor was instructed to ensure that going forward, metal drip edge flashings at the top of the gable are to be neatly mitered and contain no gaps, as specified in Roofing Specifications - Section 2.1 Materials.*
-
-      2. **Input**: "Damaged insulation observed"
-        - Output: *Section of insulation observed to be damaged; replacement required.*
-
-      3. **Input**: "Rebar installed at footing per drawings"
-        - Output: *Rebar installed at footing location in accordance with construction drawings.*
-
-      4. **Input**: "Shingle removal and deck replacement underway"
-        - Output: 1.1 The Contractor was reminded that all plywood sheathing replacement is to have a minimum span across three (3) roof trusses, as specified.
-                  1.2 Where tongue and groove plywood is not utilized, metal H-clips should be implemented to provide edge support between roof trusses as per specifications.
-
+2.  **Input Requiring AI-Generated Title and Spec Citation**:
+    - **Observation**: "(Section Title: N/A) Description: Plywood sheathing replacement is to have a minimum span across three (3) roof trusses, as per Roofing Specifications - Section 3.2. Image: [IMAGE:3:Roof Deck]"
+    - **Relevant Specifications**: "[\"Roofing Specifications - Section 3.2: Plywood must span at least three trusses.\"]"
+    - **Output**:
+      "{
+        \\"sections\\": [
+          {
+            \\"title\\": \\"~Roof Deck Replacement and Support\\",
+            \\"bodyMd\\": [
+              \\"Plywood sheathing replacement is to have a minimum span across three (3) roof trusses, as per Roofing Specifications - Section 3.2.\\"
+            ],
+            \\"images\\": [{ \\"number\\": 3, \\"group\\": [\\"Roof Deck\\"] }]
+          }
+        ]
+      }"
 `;
   }
 
   // Stage 1: Initial Load/System Prompt for SUMMARY AGENT (separate agent)
   getSummarySystemPrompt(grouping: GroupingMode): string {
-    return grouping === 'ungrouped' ? `
-  # ROLE:
-  You are the final editor of a Civil Engineering report for Pretium. Your job is to format site observations into a clean, logical report section. Do not generate new content.
-  
-  # CONTEXT:
-  - Each paragraph is a technical observation linked to a photo (left column).
-  - This section will be appended to an existing report. Do not include a title or summary.
-  
-  # INSTRUCTIONS:
-  1. Group related observations into clearly titled sections (e.g., Roofing, HVAC).
-  2. Number sections: 1., 2., 3., etc. (Always include the period).
-  3. Number bullet points: 1.1, 1.2, etc. per section.
-  4. Maintain image references using [IMAGE:X].
-  5. Do not change the original observation text. Only reorganize and format it.
-  
-  # OUTPUT FORMAT:
-  [SECTION_NAME]
-  1.1 [Observation text] [IMAGE:1]
-  1.2 [Observation text] [IMAGE:2]
-  ` : `
-  # ROLE:
-  You are the final editor of a Civil Engineering report for Pretium. Format grouped site observations into a clean, ordered report. You may retype the content for formatting clarity, but do not delete or skip any lines.
-  
-  # CONTEXT:
-  - Each paragraph is a technical observation linked to a photo.
-  - This section will be appended to an existing report. Do not include a title or summary.
-  
-  # INSTRUCTIONS:
-  1. Group all observations under their respective group tag.
-     - If missing, use "General Observations".
-  2. Order observations by image number within each group.
-  3. Number groups: 1., 2., 3., etc.
-  4. Number bullets per group: 1.1, 1.2, 1.3, etc.
-  5. Each bullet must include a [IMAGE:X:GROUP] reference (on the same line).
-  6. Do not omit or duplicate any images.
-  
-  # FORMAT RULES:
-  - Use plain text only (no markdown).
-  - Restart bullet numbers with each group.
-  - Do not use dashes or symbols.
-  
-  # STYLE:
-  - Rewriting is allowed only to enforce structure and consistency.
-  - Avoid assumptions or claims of quality unless explicitly stated.
-  `;
+    return `# ROLE: You are a Senior Technical Writer. Your job is to review a list of site observations and improve their titles.
+
+# MISSION:
+Your primary mission is to refine the titles of the incoming JSON sections for clarity and professionalism. You are NOT creating a hierarchy or changing the content.
+
+# RULES:
+- Your input is a JSON array of "section" objects.
+- Your output MUST be a JSON object of the exact same structure, wrapped in \`{"sections": [...]}\`.
+- Your final output must be a single, valid JSON object. Do not include any text before or after the JSON.
+- You MUST return the same number of sections as you received.
+- You MUST preserve the original \`bodyMd\` and \`images\` arrays. Do not alter them.
+
+# TITLE EDITING RULES:
+- You have the authority to edit or change any section title that begins with a tilde (~).
+- You MUST NOT change a title that does not begin with a tilde, as this indicates it was provided by the user.
+- When you are done, you MUST remove the tilde from all titles in the final output.
+
+# OUTPUT FORMAT: JSON ONLY
+- The root of the JSON object must be \`{ "sections": [ ... ] }\`.
+- Return a flat list of sections. DO NOT nest them.
+
+# EXAMPLE:
+- **Input JSON**:
+  \`\`\`json
+  {
+    "sections": [
+      {
+        "title": "Block 1",
+        "bodyMd": ["Site Set-Up"],
+        "images": [{ "number": 1, "group": ["Block 1"] }],
+        "children": []
+      },
+      {
+        "title": "~Step Falshings",
+        "bodyMd": ["Step flashings were being installed in accordance with spec"],
+        "images": [{ "number": 2, "group": ["Block 1"] }],
+        "children": []
+      }
+    ]
   }
-  
+  \`\`\`
+
+- **Required Output JSON (after title refinement)**:
+  \`\`\`json
+  {
+    "sections": [
+       {
+        "title": "Block 1",
+        "bodyMd": ["Site Set-Up"],
+        "images": [{ "number": 1, "group": ["Block 1"] }],
+        "children": []
+      },
+      {
+        "title": "Block 1",
+        "bodyMd": ["Step flashings were being installed in accordance with spec"],
+        "images": [{ "number": 2, "group": ["Block 1"] }],
+        "children": []
+      }
+    ]
+  }
+  \`\`\`
+`;
+  }
 
   //#################################
   //# Stage 2: Runtime/Task Prompt  #
   //#################################
-  //# IMAGE ANALYSIS AGENT #
-  async generateImagePrompt(image: any, context: any): Promise<string> {
-    const { mode, grouping, projectData, options, projectId, supabase } = context;
-  
-    // Get relevant spec knowledge if available
-    let specKnowledge = '';
-    if (projectId && supabase && image.description) {
-      try {
-        specKnowledge = await ReportGenerator.getRelevantKnowledgeChunks(
-          supabase,
-          projectId,
-          image.description,
-          image.tag || 'OVERVIEW'
-        );
-      } catch (error) {
-        console.error('Error retrieving spec knowledge:', error);
-      }
-    }
-  
-    // Core metadata
-    const number = image.number || `NO NUMBER`;
-    const tag = image.tag?.toUpperCase() || 'OVERVIEW';
-    const group = image.group?.[0] || 'NO GROUP'; // Fixed: use image.group[0] safely
-  
-    // Image reference format and rules
-    const imageRefFormat =
-      grouping === 'grouped'
-        ? `[IMAGE:${number}:${group}]`
-        : `[IMAGE:${number}]`;
-  
-    const imageRefRule =
-      grouping === 'grouped'
-        ? `1. Every bullet point **must** reference its image and group using the format ${imageRefFormat}. Without this, the output will not display.`
-        : `1. Every bullet point **must** reference its image using the format ${imageRefFormat}. Without this, the output will not display.`;
-  
-    const multiBulletRule = `3. If you write multiple points for a single image, each bullet must include its own ${imageRefFormat} reference.`;
-  
-    const criticalRefRule =
-      grouping === 'grouped'
-        ? `4. **CRITICAL**: Use the EXACT group name provided for this image (e.g., ${imageRefFormat}), NOT the tag (OVERVIEW/DEFICIENCY).\n5. **CRITICAL**: The image reference ${imageRefFormat} must appear on the SAME LINE as the bullet point text, not on a separate line.`
-        : `4. **CRITICAL**: The image reference ${imageRefFormat} must appear on the SAME LINE as the bullet point text, not on a separate line.`;
-  
-    // Photo details and specification summary
-    const photoDetails = `TASK: Analyze photo ${number} for engineering inspection report.
-  
-  PHOTO DETAILS:
-  - Description: ${image.description || 'No description provided'}
-  - Tag: ${tag}${grouping === 'grouped' ? `\n- Group: ${group}` : ''}`;
-  
-    const specInstruction = specKnowledge
-      ? `RELEVANT SPECIFICATIONS:\n${specKnowledge}`
-      : 'No relevant specifications found for this photo. Write factual observations without referencing any specifications.';
-  
-    const importantSection = `# IMPORTANT:
-  ${imageRefRule}
-  2. If no number is provided, assign one based on its position in this batch, and add a note that the number is not provided.
-  ${multiBulletRule}
-  ${criticalRefRule}`;
-  
-    const rememberSection = `# REMEMBER:
-  - Use minimal, factual language in accordance with the project specifications or user description.
-  - You may incorporate your own civil engineering knowledge and reasoning, but do not make up facts.
-  - Only mention compliance or effectiveness if specified.
-  - AVOID LEGAL RISK BY:
-    - Not confirming quality or completeness without directive input.
-    - When describing site conditions or instructions, always clarify the contractor's responsibility.
-  - Group related observations under appropriate section headings.
-  - Each section should have a clear, descriptive heading in the format (1. [SECTION_NAME], 2. [SECTION_NAME], etc.).`;
-  
-    const prompt = `${photoDetails}
-  
-  ${specInstruction}
-  
-  INSTRUCTIONS:
-  Your task is to write clear, technical, and structured bullet-point observation(s) for this photo.
-  
-  ${importantSection}
-  
-  ${rememberSection}`;
-  
-    return prompt;
-  }
-  
+  generateUserPrompt(
+    observations: string[],
+    specifications: string[],
+    sections: Section[],
+    grouping: GroupingMode
+  ): string {
+    const specs =
+      specifications.length > 0
+        ? `
+# RELEVANT SPECIFICATIONS:
+${specifications.map((spec) => `- ${spec}`).join('\n')}
+`
+        : '';
 
-  //# SUMMARY AGENT # 
-  generateSummaryPrompt(draft: string, context: any): string {
-    const { mode, grouping, bulletPoints, projectData, options } = context;
-    
-    // Simplified summary prompt to prevent timeouts
     return `
-    Format this draft into a clean, professional report.
-    
-    Requirements:
-    1. Keep all original content
-    2. Organize into logical sections with headers and proper numbering
-    3. Ensure proper formatting and numbering
-    4. Follow user instructions: ${bulletPoints}
-    
-    Draft to format:
-    ${draft}`;
-    };
-  
+# INSTRUCTIONS:
+- Analyze the following raw observations.
+- **Critical** If you generate a title yourself, you MUST prefix it with a tilde (~). For example: "~Gable End Drip Edge Flashing".
+- For each observation, generate exactly one section, which can have multiple bodyMd points.
+- Return a single JSON object of the form {"sections":[ ... ]} containing one section for each observation, in the same order.
 
-  generateBatchHeader(batchIndex: number, totalBatches: number): string {
-    return `\n\n=== BATCH ${batchIndex + 1} OF ${totalBatches} ===\n\n`;
+${specs}
+
+# RAW OBSERVATIONS:
+${observations.map((obs) => `- ${obs}`).join('\n')}
+`;
   }
 
-  generateGroupHeader(groupName: string): string {
-    return `\n\n=== ${groupName.toUpperCase()} ===\n\n`;
+
+  // Stage 2: Runtime User Prompt for SUMMARY AGENT
+  generateSummaryPrompt(draft: string, context: any, sections: Section[]): string {
+    return `# INSTRUCTIONS:
+- Take the following array of JSON "section" objects and refine the titles as needed for clarity and grouping.
+- Follow the rules I provided in my system prompt. Do not change user-provided titles (those without a ~).
+- **Critical** If title is marked with a tilde (~), you can edit the title to improve structure and clarity. IF no tilde, MUST leave the title as is.
+- Organize them into a final, structured report with a logical hierarchy, following the rules and format I provided in my system prompt.
+
+# JSON SECTIONS TO ORGANIZE:
+\`\`\`json
+${JSON.stringify(sections, null, 2)}
+\`\`\`
+`;
   }
-
-  // Generate batch prompt for processing multiple images together
-  async generateBatchPrompt(batch: any[], batchIndex: number, totalBatches: number, context: any): Promise<string> {
-    const { grouping, projectId, supabase } = context;
-    
-    console.log(`🔍 Generating batch prompt for batch ${batchIndex + 1}/${totalBatches} with ${batch.length} images`);
-    
-    let batchPrompt = `You are processing Image Batch #${batchIndex + 1} of ${totalBatches}.\n\n`;
-    
-    // Get all spec knowledge in parallel for better performance
-    const specKnowledgePromises = batch.map(async (image, j) => {
-      if (projectId && supabase && image.description) {
-        try {
-          console.log(`🔍 Fetching spec knowledge for image ${j + 1} in batch ${batchIndex + 1}`);
-          const specKnowledge = await ReportGenerator.getRelevantKnowledgeChunks(
-            supabase,
-            projectId,
-            image.description,
-            image.tag || 'OVERVIEW'
-          );
-          console.log(`✅ Spec knowledge fetched for image ${j + 1} in batch ${batchIndex + 1} (${specKnowledge.length} chars)`);
-          return { index: j, specKnowledge };
-        } catch (error) {
-          console.error(`❌ Error retrieving spec knowledge for image ${j + 1} in batch ${batchIndex + 1}:`, error);
-          return { index: j, specKnowledge: '' };
-        }
-      }
-      return { index: j, specKnowledge: '' };
-    });
-    
-    // Wait for all spec knowledge to be fetched in parallel
-    const specKnowledgeResults = await Promise.all(specKnowledgePromises);
-    const specKnowledgeMap = new Map(specKnowledgeResults.map(result => [result.index, result.specKnowledge]));
-    
-    console.log(`✅ All spec knowledge fetched for batch ${batchIndex + 1} in parallel`);
-    
-    // Add each image to the batch prompt
-    for (let j = 0; j < batch.length; j++) {
-      const image = batch[j];
-      const specKnowledge = specKnowledgeMap.get(j) || '';
-
-      const number = image.number || `NO NUMBER: Position in batch ${(batchIndex * 5 + j + 1)}`;
-      const tag = image.tag?.toUpperCase() || 'OVERVIEW';
-      const group = image.group?.[0] || 'NO GROUP';
-
-      const descriptionLine = `New Photo - Description: ${image.description || 'No description provided'}, ${grouping === 'ungrouped' ? '' : `Group: (${group}), `}Number: (${number}), Tag: (${tag})`;
-
-      const specInstruction = specKnowledge
-        ? `The following specifications are relevant to this photo and should be referenced in your observations. Use the exact document name and section title when citing requirements:\n\n${specKnowledge}`
-        : 'No relevant specifications found for this photo. Write factual observations without referencing any specifications.';
-
-      const imageRefInstruction = grouping === 'ungrouped'
-        ? `IMPORTANT: When referencing this image in your observations, use the format [IMAGE:${number}]. Create appropriate section headings based on the content.`
-        : `IMPORTANT: When referencing this image in your observations, use the EXACT group name "${group}" (not the tag). The correct format is [IMAGE:${number}:${group}].`;
-
-      batchPrompt += `${descriptionLine}\n\n${specInstruction}\n\n${imageRefInstruction}\n\n`;
-    }
-    
-    console.log(`✅ Batch prompt generated for batch ${batchIndex + 1} (${batchPrompt.length} chars)`);
-    return batchPrompt;
-  }
-} 
-
-
-// getSummarySystemPrompt(grouping: GroupingMode): string {
-//   return grouping === 'ungrouped' ? `
-//   # ROLE:
-//   You are the final editor of a Civil Engineering report for Pretium. Your job is to format and finalize building observation reports from a draft made of site observations. The technical content is already written. Your task is to apply consistent formatting, organize observations into logical sections, and ensure the final output is clear, professional, and logically structured.
-
-//   # CONTEXT:
-//   - Each paragraph corresponds to an observation linked to a photo.
-//   - Observations appear on the left of the final document; images are on the right.
-//   - You will **not** be generating new content. Your role is to organize and finalize the layout.
-//   - This section will be appended into an existing "Observations" section, so **do not write a new "Observations" title**.
-
-//   # INSTRUCTIONS:
-//   1. **Organize observations into logical sections** based on the content and type of work.
-
-//     **Number section headings** using whole numbers (e.g., 1., 2., 3., ...).  **CRITICAL**: Always include the period (.) after the number - this indicated a subheading.
-//     - Each section should have a clear, descriptive heading in the format (1. [SECTION_NAME], 2. [SECTION_NAME], etc.)
-
-//   2. **Maintain the image references** using the format [IMAGE:<image_number>] (no group names needed).
-
-//   3. **Ensure proper formatting**:
-//     - Section headings (1., 2., 3., ...)
-//     - Numbered bullet points (1.1, 1.2, etc.)
-//     - Consistent spacing and structure
-
-//   4. **Do not add new content** - only reorganize and format existing observations.
-
-//   # OUTPUT FORMAT:
-//   [SECTION_HEADING]
-//   1.1 [Observation text] [IMAGE:1]
-//   1.2 [Observation text] [IMAGE:2]
-
-//   [ANOTHER_SECTION_HEADING]
-//   2.1 [Observation text] [IMAGE:3]
-//   2.2 [Observation text] [IMAGE:4]
-
-//   # REMEMBER:
-//   - Keep the existing technical content exactly as written
-//   - Only reorganize into logical sections
-//   - Maintain all image references
-//   - Use clear, professional section headings
-//   - Do not add introductions or conclusions` 
-  
-//   : 
-  
-//   `# ROLE:
-//   You are the final editor of a Civil Engineering report for Pretium. Your job is to format and finalize building observation reports from a draft made of site observations. The technical content is already written. Your task is to apply consistent formatting, group and reorder observations correctly, and ensure the final output is clear, professional, and logically structured.
-
-//   # CONTEXT:
-//   - Each paragraph corresponds to an observation linked to a photo.
-//   - Observations appear on the left of the final document; images are on the right.
-//   - Your role is to organize and finalize the layout to make it the best possible report. You may make edits to the content, but this must be done by retyping the entire report.
-//   - This section will be appended into an existing "Observations" section, so **do not write a new "Observations" title**.
-
-//   # INSTRUCTIONS:
-//   1. **Group observations into subheadings** based on the group tag "<GROUP NAME>".
-//     - Each group becomes a new subheading.
-//     - If an observation has no group, place it under a section titled **"General Observations"**.
-//     - If an observation belongs to multiple groups, repeat it under each relevant group.
-//   2. **Order observations within each group** based on the provided image number (e.g., Photo 1, Photo 2, etc.).
-//     - If the number is missing apply your own judgement.
-//   3. **Retype the entire report** to enforce the correct order and format.
-//   4. **Number subheadings** using whole numbers (e.g., 1., 2., 3., ...).  **CRITICAL**: Always include the period (.) after the number - this indicated a subheading.
-//   5. **Number bullet points within each subheading** as decimals: 1.1, 1.2, 1.3... and 2.1, 2.2... etc.
-//     - Restart the bullet numbering for each new subheading.
-//     - There may be **multiple bullet points per image**, each on its own line.
-//   6. Use the format "[IMAGE:<image_number>:<GROUP_NAME>]" to reference images on the same line as the bullet point text.
-//     - Do not skip or omit image references.
-//     - Each image must appear exactly once per group.
-
-//   # FORMATTING RULES:
-//   - Use plain text only. Do not use markdown, asterisks, or any other formatting.
-//   - **CRITICAL**: When starting a new subheading, the number in "[IMAGE:<image_number>:<GROUP_NAME>]" must restart from 1, not continue from the previous subheading.
-//   - Do **not** use dashes ("-") for bullets. Always use numeric bullet formats (1.1, 1.2, etc.).
-//   - Start each bullet point on a new line.
-//   - Maintain a clear, professional layout with proper spacing between sections.
-
-//   # STYLE:
-//   - Your edits should improve clarity and flow only when necessary.
-//   - No markdown or styling – use plain text output only.
-//   - Ensure we Avoid legal risk by not confirming quality or completeness without directive input.
-// `;
-  
-// }
+}

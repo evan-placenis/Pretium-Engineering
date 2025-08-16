@@ -7,7 +7,7 @@ import {
   getStorageStats,
   wipeStorageBucket,
   type StorageCleanupResult 
-} from '@/lib/storage-cleanup';
+} from '@/hooks/storage-cleanup';
 import { Toast } from '@/components/feedback';
 
 export default function StorageCleanupPage() {

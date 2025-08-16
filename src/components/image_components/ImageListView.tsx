@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { ImageZoomModal, DescriptionInput } from './index';
-import { TagValue, getAllTagOptions, getTagLabel, getTagBadgeClass } from '@/lib/tagConfig';
+import { TagValue, getAllTagOptions, getTagLabel, getTagBadgeClass } from '@/hooks/tagConfig';
 import { supabase } from '@/lib/supabase';
 
 /**

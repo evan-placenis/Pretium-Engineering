@@ -3,17 +3,20 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { supabase, Project, Report, ReportImage } from '@/lib/supabase';
-import { createWordDocumentWithImages } from '@/lib/word-utils';
-import { extractStorageRelativePath, extractStorageBucketName } from '@/lib/utils';
+import { supabase, Project, Report } from '@/lib/supabase';
+import { ReportImage } from '@/types/reportImage';
+import { createWordDocumentWithImages } from '@/hooks/word-utils';
+import { extractStorageRelativePath, extractStorageBucketName } from '@/hooks/utils';
 import Breadcrumb from '@/components/Breadcrumb';
+import { SectionModel } from '@/lib/jsonTreeModels/SectionModel';
+import { Section } from '@/lib/jsonTreeModels/types/section';
 
 interface ReportViewProps {
   id: string;
 }
 
 export default function ReportView({ id }: ReportViewProps) {
-  const [report, setReport] = useState<Report | null>(null);
+  const [report, setReport] = useState<Report & { sections_json?: { sections: Section[] } } | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [images, setImages] = useState<ReportImage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -132,7 +135,13 @@ export default function ReportView({ id }: ReportViewProps) {
       const filename = `${project?.project_name || 'Report'}_${new Date().toISOString().split('T')[0]}.docx`;
       
       // Use the working Word document function with actual images
-      await createWordDocumentWithImages(report.generated_content, images, filename, project);
+      let sections: Section[];
+      if (report.sections_json && report.sections_json.sections) {
+        sections = report.sections_json.sections;
+      } else {
+        sections = await SectionModel.fromMarkdown(report.generated_content || '');
+      }
+      await createWordDocumentWithImages(sections, images, filename, project);
       
     } catch (error) {
       console.error('Error generating Word document:', error);

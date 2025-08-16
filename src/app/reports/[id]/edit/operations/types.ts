@@ -1,11 +1,5 @@
-export interface Section {
-  id: string;           // Stable UUID
-  number: string;       // "1", "1.2", etc.
-  title: string;        // "Roofing"
-  bodyMd: string;       // Markdown/bullets/text with [IMAGE:x:GROUP] refs
-  children: Section[];
-}
-
+import { Section } from "@/lib/jsonTreeModels/types/section";
+export * from "@/lib/jsonTreeModels/types/section";
 
 export interface BaseOperation {
   id: string;          // UUID for the operation

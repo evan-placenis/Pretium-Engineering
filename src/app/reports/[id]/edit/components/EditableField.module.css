@@ -1,0 +1,58 @@
+.editableTarget {
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+}
+
+.editableTarget:hover {
+  background-color: #f0f0f0;
+}
+
+/* Base styles for all inputs */
+.baseInput {
+  appearance: none;
+  border: none;
+  outline: none;
+  background-color: transparent;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+  line-height: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Style for single-line headers */
+.headerStyle {
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-bottom: 2px solid #007bff;
+  background-color: #f8f9fa;
+  border-radius: 4px 4px 0 0;
+}
+
+.headerStyle:focus {
+  box-shadow: 0 2px 4px rgba(0, 123, 255, 0.1);
+}
+
+/* Style for multi-line sub-points */
+.subpointStyle {
+  resize: none;
+  overflow: hidden;
+  min-height: 50px; /* Slightly taller */
+  padding: 0.5rem;
+  border: 1px solid #d1d5db;
+  background-color: #f9fafb;
+  border-radius: 3px;
+  transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+  vertical-align: baseline; /* Helps align with the number */
+}
+
+.subpointStyle:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}

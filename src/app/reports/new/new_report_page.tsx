@@ -762,16 +762,20 @@ export default function NewReport() {
         rotation: img.rotation,
         number: img.number
       })));
-      const { error: imagesError } = await supabase.from('report_images').insert(imagesWithNumbering.map(img => ({
-        report_id: reportData.id,
-        url: img.url,
-        tag: img.tag,
-        description: img.description,
-        number: img.number, // Preserve the number field for proper ordering
-        group: img.group, // Add group information
-        rotation: img.rotation || 0, // Preserve rotation information
-        user_id: user.id // Add user tracking
-      })));
+      const { error: imagesError } = await supabase.from('report_images').insert(imagesWithNumbering.map(img => {
+        const fileName = img.url.split('/').pop()
+        return {
+          report_id: reportData.id,
+          url: img.url,
+          storage_path: `${reportData.id}/${fileName}`,
+          tag: img.tag,
+          description: img.description,
+          number: img.number, // Preserve the number field for proper ordering
+          group: img.group, // Add group information
+          rotation: img.rotation || 0, // Preserve rotation information
+          user_id: user.id // Add user tracking
+        }
+      }));
 
       if (imagesError) {
         console.error('Error inserting report images:', imagesError);
@@ -812,32 +816,50 @@ export default function NewReport() {
         }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to generate report');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.reportContent) {
+          const { error: updateError } = await supabase
+            .from('reports')
+            .update({ generated_content: data.reportContent })
+            .eq('id', reportData.id);
+          if (updateError) throw updateError;
+
+          try {
+            const parsedJson = JSON.parse(data.reportContent);
+            if (typeof parsedJson === 'object' && parsedJson.sections) {
+              const { error: jsonError } = await supabase
+                .from('reports')
+                .update({ sections_json: parsedJson })
+                .eq('id', reportData.id);
+              if (jsonError) console.error('Failed to save sections_json:', jsonError);
+            }
+          } catch (e) {
+            console.log('Generated content not JSON, skipping sections_json save');
+          }
+
+          router.push(`/reports/${reportData.id}/edit?streaming=true&model=${selectedModel}`);
+        } else if (data.jobId) {
+          setDebugInfo({
+            jobId: data.jobId,
+            message: data.message,
+            modelUsed: selectedModel
+          });
+          
+          // Clear saved form data after successful job queuing
+          clearSavedFormData();
+          
+          // Redirect to the report editor to show progress
+          router.push(`/reports/${reportData.id}/edit?streaming=true&jobId=${data.jobId}&model=${selectedModel}`);
+        } else {
+          throw new Error(data.error || 'Report generation failed');
+        }
+      } else {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Report generation failed');
       }
 
-      const responseData = await response.json();
-      console.log('Job queued successfully:', responseData);
 
-      if (!responseData.success) {
-        throw new Error(responseData.error || 'Failed to queue report generation job');
-      }
-
-      // Store debug information if available (for job tracking)
-      if (responseData && typeof responseData === 'object' && 'jobId' in responseData) {
-        setDebugInfo({
-          jobId: responseData.jobId,
-          message: responseData.message,
-          modelUsed: selectedModel
-        });
-      }
-
-      // Clear saved form data after successful job queuing
-      clearSavedFormData();
-
-      // Redirect to the report editor to show progress
-      router.push(`/reports/${reportData.id}/edit?jobId=${responseData.jobId}&streaming=true&model=${selectedModel}`);
     } catch (error: any) {
       console.error('Error generating report:', error);
       setError(error.message || 'An error occurred while generating the report');

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase, Project } from '@/lib/supabase';
 import { useViewPreference } from '@/hooks/useViewPreference';
-import { getBuildingImage } from '@/lib/image-utils';
+import { getBuildingImage } from '@/hooks/image-utils';
 
 
 export default function Dashboard() {

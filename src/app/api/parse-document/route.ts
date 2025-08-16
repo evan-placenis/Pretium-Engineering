@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { getServiceSupabase } from '@/lib/supabase';
 import { embeddingService } from '../../projects/[id]/hooks/embedding-service';
+
+interface DocumentInfo {
+  title: string;
+  author: string;
+  subject: string;
+  creator: string;
+  producer: string;
+}
 
 // Simple test endpoint
 export async function GET() {
@@ -23,7 +31,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create server-side Supabase client
-    const supabase = createServerSupabaseClient();
+    const supabase = getServiceSupabase();
 
     // Download file from Supabase storage
     const { data: fileData, error: downloadError } = await supabase.storage
@@ -45,7 +53,7 @@ export async function POST(request: NextRequest) {
     const fileExtension = fileName.toLowerCase().split('.').pop();
     let rawText = '';
     let numPages = 1;
-    let documentInfo = null;
+    let documentInfo: DocumentInfo | null = null;
 
     if (fileExtension === 'docx') {
       // Parse DOCX file using mammoth

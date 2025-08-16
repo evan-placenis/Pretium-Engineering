@@ -1,13 +1,13 @@
 // Report Generator - Flexible report generation with decorator pattern
-import { ReportConfig, ReportResult, ExecutionStrategy, LLMProvider, ReportMode, GroupingMode, LLMModel, ExecutionType } from './types.ts';
+import { ReportConfig, ReportResult, ExecutionStrategy, LLMProvider, ReportMode, GroupingMode, LLMModel, ExecutionType } from '../types';
 
-import { BatchedParallelExecutor } from './execution/BatchedParallelExecutor.ts';
-import { BatchedParallelWithParallelSummaryExecutor } from './execution/BatchedParallelWithParallelSummaryExecutor.ts';
-import { Grok4Provider } from './llm/Grok4Provider.ts';
-import { GPT4oProvider } from './llm/GPT4oProvider.ts';
-import { GPT5Provider } from './llm/GPT5Provider.ts';
-import { BriefPromptStrategy } from './prompts/BriefPromptStrategy.ts';
-import { ElaboratePromptStrategy } from './prompts/ElaboratePromptStrategy.ts';
+import { BatchedParallelExecutor } from './execution/BatchedParallelExecutor';
+import { BatchedParallelWithParallelSummaryExecutor } from './execution/BatchedParallelWithParallelSummaryExecutor';
+import { Grok4Provider } from './llm/Grok4Provider';
+import { GPT4oProvider } from './llm/GPT4oProvider';
+import { GPT5Provider } from './llm/GPT5Provider';
+import { BriefPromptStrategy } from './prompts/BriefPromptStrategy';
+import { ElaboratePromptStrategy } from './prompts/ElaboratePromptStrategy';
 import { OpenAI } from 'openai'; //maybe turn in a dynamic import later once it is working
 export class ReportGenerator {
   private llmProviders!: Map<string, LLMProvider>;
@@ -68,6 +68,7 @@ export class ReportGenerator {
       return {
         success: true,
         content: result.content,
+        sections: result.sections,
         metadata: {
           model: config.model,
           mode: config.mode,
@@ -82,6 +83,7 @@ export class ReportGenerator {
       return {
         success: false,
         content: '',
+        sections: [],
         error: error instanceof Error ? error.message : 'Unknown error',
         metadata: {
           model: config.model,
@@ -122,101 +124,4 @@ export class ReportGenerator {
   static custom(mode: ReportMode, model: LLMModel, execution: ExecutionType = 'parallel', grouping: GroupingMode = 'ungrouped'): Partial<ReportConfig> {
     return { mode, model, execution, grouping };
   }
-
-  // Utility function for spec knowledge retrieval (moved from old system)
-  static async getRelevantKnowledgeChunks(supabase: any, projectId: string, imageDescription: string, imageTag: string): Promise<string> {
-    try {
-      console.log('🔍 Searching for relevant knowledge:', { imageDescription, imageTag })
-      
-      // Create a search query based on the image description and tag
-      const searchQuery = `${imageDescription} ${imageTag}`
-      
-      // Generate embedding for the query using OpenAI
-      const openai = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY!,
-      })
-      
-      const embeddingResponse = await openai.embeddings.create({
-        model: 'text-embedding-3-large',
-        input: searchQuery,
-      })
-      
-      const queryEmbedding = embeddingResponse.data[0].embedding
-      
-      // Search in database using cosine similarity
-      const { data, error } = await supabase.rpc('search_embeddings', {
-        query_embedding: queryEmbedding,
-        project_id: projectId,
-        match_threshold: 0.5, // Moderate threshold for relevant specs
-        match_count: 2 // Limit to 2 most relevant chunks
-      })
-      
-      if (error) {
-        console.error('Database search error:', error)
-        return ''
-      }
-      
-      const results = data || []
-      console.log(`Found ${results.length} relevant knowledge chunks`)
-      
-      if (results.length === 0) {
-        return '' // No relevant knowledge found
-      }
-      
-      // Get additional metadata for results
-      const enhancedResults = await Promise.all(
-        results.map(async (result: any) => {
-          try {
-            // Get knowledge document info
-            const { data: knowledgeData } = await supabase
-              .from('project_knowledge')
-              .select('file_name')
-              .eq('id', result.knowledge_id)
-              .single()
-            
-            return {
-              content: result.content_chunk,
-              similarity: result.similarity,
-              fileName: knowledgeData?.file_name || 'Unknown file',
-              documentSource: result.document_source || 'Unknown Document',
-              sectionTitle: result.section_title || 'General Content'
-            }
-          } catch (error) {
-            console.error('Error fetching knowledge metadata:', error)
-            return {
-              content: result.content_chunk,
-              similarity: result.similarity,
-              fileName: 'Unknown file',
-              documentSource: result.document_source || 'Unknown Document',
-              sectionTitle: result.section_title || 'General Content'
-            }
-          }
-        })
-      )
-      
-      // Format the relevant knowledge as context with enhanced citations
-      const relevantKnowledge = enhancedResults.map((result: any, index: number) => {
-        const similarity = (result.similarity * 100).toFixed(1)
-        
-        // Create a clean document name (remove file extension and clean up)
-        const documentName = result.documentSource
-          .replace(/\.[^/.]+$/, '') // Remove file extension
-          .replace(/[-_]/g, ' ') // Replace dashes/underscores with spaces
-          .replace(/\b\w/g, (l: string) => l.toUpperCase()) // Title case
-        
-        // Create citation format that matches the prompt requirements
-        const citation = `${documentName} - ${result.sectionTitle}`
-        
-        return `[Specification ${index + 1} - ${similarity}% relevant from ${citation}]:\n${result.content}`
-      }).join('\n\n')
-      
-      console.log('📋 Relevant knowledge found and formatted')
-      return `\n\nRELEVANT SPECIFICATIONS:\n${relevantKnowledge}\n\nIMPORTANT: When referencing these specifications in your observations, use the exact document name and section title provided in the citations above.`
-      
-    } catch (error) {
-      console.error('Error getting relevant knowledge chunks:', error)
-      return '' // Return empty string if search fails
-    }
-  }
-
 } 

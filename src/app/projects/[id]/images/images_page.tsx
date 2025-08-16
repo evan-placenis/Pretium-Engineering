@@ -54,6 +54,15 @@ async function resizeImageForUpload(file: File, maxWidth: number = 1024, maxHeig
             type: 'image/jpeg',
             lastModified: file.lastModified 
           });
+          // const formatBytes = (bytes: number, decimals = 2) => {
+          //   if (bytes === 0) return '0 Bytes';
+          //   const k = 1024;
+          //   const dm = decimals < 0 ? 0 : decimals;
+          //   const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+          //   const i = Math.floor(Math.log(bytes) / Math.log(k));
+          //   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+          // };
+          // console.log(`[RESIZE LOG] ${file.name}: ${formatBytes(file.size)} -> ${formatBytes(resizedFile.size)}`);
           resolve(resizedFile);
         } else {
           // Fallback to original file if resizing fails
@@ -72,22 +81,17 @@ async function resizeImageForUpload(file: File, maxWidth: number = 1024, maxHeig
 }
 
 /**
- * Process and resize multiple images
+ * Process and resize multiple images concurrently
  */
 async function resizeImagesForUpload(files: File[]): Promise<File[]> {
-  const resizedFiles: File[] = [];
-  
-  for (const file of files) {
-    try {
-      const resizedFile = await resizeImageForUpload(file);
-      resizedFiles.push(resizedFile);
-    } catch (error) {
+  const resizePromises = files.map(file => {
+    return resizeImageForUpload(file).catch(error => {
       console.warn(`Failed to resize ${file.name}, using original:`, error);
-      resizedFiles.push(file); // Fallback to original
-    }
-  }
-  
-  return resizedFiles;
+      return file; // Fallback to original
+    });
+  });
+
+  return Promise.all(resizePromises);
 }
 
 // Extend ImageItem to include group property for project images
@@ -270,40 +274,38 @@ export default function ProjectImagesPage() {
    * Upload a single file to Supabase Storage and database
    */
   const uploadSingleFile = async (file: File, dateTaken: string, useFilenameAsDescription: boolean, groupName: string) => {
-    // Generate unique filename to prevent conflicts
-    const fileExt = file.name.split('.').pop();
+    const resizedFile = await resizeImageForUpload(file);
+
+    const fileExt = resizedFile.name.split('.').pop();
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
-    const filePath = `${projectId}/${fileName}`;//project-images/${projectId}/${fileName}`;
+    const filePath = `${projectId}/${fileName}`;
     
-    // Upload file to Supabase Storage
     const { error: uploadError } = await supabase.storage
       .from('project-images')
-      .upload(filePath, file);
+      .upload(filePath, resizedFile);
       
     if (uploadError) throw uploadError;
     
-    // Get the public URL for the uploaded file
     const { data: { publicUrl } } = supabase.storage
       .from('project-images')
       .getPublicUrl(filePath);
     
-    // Prepare description (use filename if requested)
     let description = '';
     if (useFilenameAsDescription) {
-      description = file.name.replace(/\.[^/.]+$/, '');
+      description = resizedFile.name.replace(/\.[^/.]+$/, '');
     }
     
-    // Insert image record into database
     const { data: imageData, error: insertError } = await supabase
       .from('project_images')
       .insert({
         project_id: projectId,
         url: publicUrl,
+        storage_path: filePath,
         description: description,
         tag: null,
         user_id: user.id,
         created_at: dateTaken ? new Date(dateTaken).toISOString() : new Date().toISOString(),
-        group: [groupName] // Store group name as array for consistency
+        group: [groupName],
       })
       .select()
       .single();
@@ -316,7 +318,7 @@ export default function ProjectImagesPage() {
   /**
    * Shared function to upload files to Supabase Storage and database
    * Handles the common upload logic for both new uploads and adding to groups
-   * Processes files in batches of 10 to avoid server overload
+   * Processes files in batches of 5 for concurrent upload
    */
   const uploadFilesToProject = async (
     files: File[], 
@@ -329,46 +331,42 @@ export default function ProjectImagesPage() {
     setUploadLoading(true);
     setError(null);
     
-    const BATCH_SIZE = 10;
+    const BATCH_SIZE = 5;
     const totalFiles = files.length;
     const totalBatches = Math.ceil(totalFiles / BATCH_SIZE);
-    let uploadedCount = 0;
     
     try {
-      // Process files in batches
+      const batchPromises: Promise<void>[] = [];
       for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
         const startIndex = batchIndex * BATCH_SIZE;
         const endIndex = Math.min(startIndex + BATCH_SIZE, totalFiles);
         const batchFiles = files.slice(startIndex, endIndex);
-        
-        // Update progress
-        setUploadProgress({
-          current: uploadedCount,
-          total: totalFiles,
-          batch: batchIndex + 1,
-          totalBatches
-        });
-        
-        // Process this batch in parallel
-        const batchPromises = batchFiles.map(async (file) => {
-          const result = await uploadSingleFile(file, dateTaken, useFilenameAsDescription, groupName);
-          uploadedCount++;
-          return result;
-        });
-        
-        // Wait for this batch to complete
-        await Promise.all(batchPromises);
-        
-        // Small delay between batches to prevent server overload
-        if (batchIndex < totalBatches - 1) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
+
+        const batchPromise = (async () => {
+          const filePromises = batchFiles.map(file => 
+            uploadSingleFile(file, dateTaken, useFilenameAsDescription, groupName)
+          );
+          
+          const results = await Promise.all(filePromises);
+
+          setUploadProgress(prev => {
+            const newCount = (prev?.current || 0) + results.length;
+            return {
+              current: newCount,
+              total: totalFiles,
+              batch: batchIndex + 1,
+              totalBatches
+            };
+          });
+        })();
+
+        batchPromises.push(batchPromise);
       }
       
-      // Refresh the image list to show new uploads
+      await Promise.all(batchPromises);
+      
       await loadImages();
       
-      // Show success message based on context
       const isAddingToGroup = groupName !== '';
       const message = isAddingToGroup 
         ? `Successfully added ${files.length} photo${files.length !== 1 ? 's' : ''} to "${groupName}"`
@@ -379,7 +377,7 @@ export default function ProjectImagesPage() {
     } catch (error: any) {
       console.error('Upload error:', error);
       setError('Failed to upload images: ' + error.message);
-      throw error; // Re-throw so calling functions can handle cleanup
+      throw error; 
     } finally {
       setUploadLoading(false);
       setUploadProgress(null);
@@ -391,21 +389,10 @@ export default function ProjectImagesPage() {
    */
   const handleUpload = async (files: File[], dateTaken: string, useFilenameAsDescription: boolean, groupName: string) => {
     try {
-      setUploadLoading(true);
-      setUploadProgress({ current: 0, total: files.length, batch: 1, totalBatches: 1 });
-      
-      // Resize images before upload for better performance
-      console.log(`🖼️ Resizing ${files.length} images for optimal upload...`);
-      const resizedFiles = await resizeImagesForUpload(files);
-      console.log(`✅ Image resizing complete`);
-      
-      await uploadFilesToProject(resizedFiles, dateTaken, useFilenameAsDescription, groupName);
+      await uploadFilesToProject(files, dateTaken, useFilenameAsDescription, groupName);
       setShowUploadModal(false);
     } catch (error) {
-      // Error already handled in uploadFilesToProject
-    } finally {
-      setUploadLoading(false);
-      setUploadProgress(null);
+      // Error is logged in uploadFilesToProject
     }
   };
 
@@ -429,29 +416,19 @@ export default function ProjectImagesPage() {
       // First, get the image data to find the storage path
       const { data: imageData, error: fetchError } = await supabase
         .from('project_images')
-        .select('url')
+        .select('storage_path')
         .eq('id', imageId)
         .single();
         
       if (fetchError) throw fetchError;
       
       // Extract the file path from the URL
-      const url = new URL(imageData.url);
-      const pathParts = url.pathname.split('/');
-      // Find the index of 'project-images' and get everything after it
-      const projectImagesIndex = pathParts.findIndex(part => part === 'project-images');
-      let storagePath;
-      if (projectImagesIndex !== -1) {
-        storagePath = pathParts.slice(projectImagesIndex + 1).join('/');
-      } else {
-        // Fallback: try to extract from the end if the above doesn't work
-        storagePath = pathParts.slice(-2).join('/');
-      }
+      const filePath = imageData.storage_path;
       
       // Delete the file from Supabase Storage
       const { error: storageError } = await supabase.storage
         .from('project-images')
-        .remove([storagePath]);
+        .remove([filePath]);
         
       if (storageError) {
         console.warn('Failed to delete storage file:', storageError);
@@ -478,22 +455,11 @@ export default function ProjectImagesPage() {
    */
   const handleAddPhotosToGroup = async (files: File[], dateTaken: string, useFilenameAsDescription: boolean) => {
     try {
-      setUploadLoading(true);
-      setUploadProgress({ current: 0, total: files.length, batch: 1, totalBatches: 1 });
-      
-      // Resize images before upload for better performance
-      console.log(`🖼️ Resizing ${files.length} images for optimal upload...`);
-      const resizedFiles = await resizeImagesForUpload(files);
-      console.log(`✅ Image resizing complete`);
-      
-      await uploadFilesToProject(resizedFiles, dateTaken, useFilenameAsDescription, selectedGroupForAdd);
+      await uploadFilesToProject(files, dateTaken, useFilenameAsDescription, selectedGroupForAdd);
       setShowAddPhotosModal(false);
       setSelectedGroupForAdd('');
     } catch (error) {
-      // Error already handled in uploadFilesToProject
-    } finally {
-      setUploadLoading(false);
-      setUploadProgress(null);
+      // Error is logged in uploadFilesToProject
     }
   };
 

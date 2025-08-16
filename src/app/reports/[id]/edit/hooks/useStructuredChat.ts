@@ -1,30 +1,32 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase, ChatMessage, Project, Report } from '@/lib/supabase';
+import { Section } from '@/lib/jsonTreeModels/types/section';
 
 export interface StructuredChatState {
   chatMessages: ChatMessage[];
   chatMessage: string;
   isSendingMessage: boolean;
   isInitialized: boolean;
+  isLoadingHistory: boolean;
   setChatMessage: (message: string) => void;
-  sendChatMessage: () => Promise<string | null>;
+  sendChatMessage: () => Promise<void>;
   initializeChat: () => Promise<void>;
   chatContainerRef: React.RefObject<HTMLDivElement>;
-  syncFromMarkdown?: (markdown: string) => Promise<void>;
 }
 
 export const useStructuredChat = (
   reportId: string,
-  content: string,
+  sections: Section[],
   project: Project | null,
   report: Report | null,
   user: any,
-  syncFromMarkdown?: (markdown: string) => Promise<void>
+  onChatComplete?: (updatedSections: Section[]) => void
 ): StructuredChatState => {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatMessage, setChatMessage] = useState('');
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const lastMessageTime = useRef<number>(0);
   const hasInitializedRef = useRef<boolean>(false);
@@ -32,7 +34,10 @@ export const useStructuredChat = (
   // Fetch initial chat messages
   useEffect(() => {
     const fetchChatMessages = async () => {
-      if (!reportId) return;
+      if (!reportId) {
+        setIsLoadingHistory(false);
+        return;
+      }
 
       try {
         const { data: chatData, error: chatError } = await supabase
@@ -48,6 +53,8 @@ export const useStructuredChat = (
         }
       } catch (error) {
         console.error('Error fetching chat messages:', error);
+      } finally {
+        setIsLoadingHistory(false);
       }
     };
 
@@ -84,27 +91,24 @@ export const useStructuredChat = (
 
   // Initialize chat with system prompt
   const initializeChat = useCallback(async (): Promise<void> => {
-    if (!project?.id || isInitialized || hasInitializedRef.current) return;
+    if (!project?.id || isInitialized || hasInitializedRef.current || isLoadingHistory) return;
 
+    setIsSendingMessage(true);
     try {
       hasInitializedRef.current = true;
-      // Check if there are existing chat messages first
       const existingMessages = chatMessages.length > 0;
       
-      // Send an initialization message
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          messages: [{
-            role: 'user',
-            content: existingMessages ? 
+          userMessage: existingMessages ? 
               'Silent initialization - do not generate welcome message' :
-              'Initialize chat assistant'
-          }],
-          reportMarkdown: content || 'Report generation in progress...'
+              'This is your first message to the user. Greet the user and briefly introduce yourself as an AI assistant for editing this report. Keep your response to a single, friendly paragraph.',
+          reportId: reportId,
+          projectId: project.id
         }),
       });
 
@@ -129,15 +133,25 @@ export const useStructuredChat = (
             setChatMessages(prev => [...prev, savedMessage as ChatMessage]);
           }
         }
+        
+        // IMPORTANT: The backend now manages state. We need to trigger a refresh on the frontend.
+        // For now, we assume another mechanism (like the operations hook) will handle this.
+        if(data.updatedSections) {
+            console.log("Received updated sections from init, calling onChatComplete.");
+            onChatComplete?.(data.updatedSections);
+        }
+
         setIsInitialized(true);
       }
     } catch (error) {
       console.error('Error initializing chat:', error);
+    } finally {
+      setIsSendingMessage(false);
     }
-  }, [project?.id, isInitialized, chatMessages.length, content, reportId]);
+  }, [project?.id, isInitialized, chatMessages.length, reportId, isLoadingHistory, onChatComplete]);
 
-  const sendChatMessage = useCallback(async (): Promise<string | null> => {
-    if (!chatMessage.trim() || !user || !reportId) return null;
+  const sendChatMessage = useCallback(async (): Promise<void> => {
+    if (!chatMessage.trim() || !user || !reportId || !project?.id) return;
     
     // Rate limiting: prevent sending messages too quickly
     const now = Date.now();
@@ -155,7 +169,7 @@ export const useStructuredChat = (
         created_at: new Date().toISOString()
       } as ChatMessage]);
       
-      return null;
+      return;
     }
     
     lastMessageTime.current = now;
@@ -182,32 +196,16 @@ export const useStructuredChat = (
         setChatMessages(prev => [...prev, savedUserMessage as ChatMessage]);
       }
       
-      // Prepare conversation history
-      let conversationHistory = chatMessages.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }));
-      
-      // Keep only recent messages if conversation is long
-      if (conversationHistory.length > 20) {
-        conversationHistory = conversationHistory.slice(-20);
-      }
-
-      // Add the current message
-      conversationHistory.push({
-        role: 'user',
-        content: currentMessage
-      });
-
-      // Call structured chat API
+      // Call the new stateless API
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          messages: conversationHistory,
-          reportMarkdown: content
+          userMessage: currentMessage,
+          reportId: reportId,
+          projectId: project.id
         }),
       });
       
@@ -237,14 +235,14 @@ export const useStructuredChat = (
         }
       }
       
-      // Return updated markdown if provided
-      if (data.updatedMarkdown && data.updatedMarkdown !== content) {
-        console.log('Updated markdown:', data.updatedMarkdown.slice(0, 100) + '...');
-        if (syncFromMarkdown) await syncFromMarkdown(data.updatedMarkdown);
-        return data.updatedMarkdown;
+      // IMPORTANT: The backend now manages state. We need to trigger a refresh on the frontend.
+      // This is a key part of the new architecture. We are no longer returning sections.
+      // We assume another hook will listen for database changes and update the UI.
+      if (data.updatedSections) {
+        console.log("Received updated sections, calling onChatComplete to refresh UI.");
+        onChatComplete?.(data.updatedSections);
       }
-      
-      return null;
+
     } catch (error: any) {
       console.error('Error in chat:', error);
       
@@ -271,22 +269,21 @@ export const useStructuredChat = (
         console.error('Error saving error message:', dbError);
       }
       
-      return null;
+      return;
     } finally {
       setIsSendingMessage(false);
-      console.log('sendChatMessage completed');
     }
-  }, [chatMessage, user, reportId, chatMessages, content, syncFromMarkdown]);
+  }, [chatMessage, user, reportId, project?.id, onChatComplete]);
 
   return {
     chatMessages,
     chatMessage,
     isSendingMessage,
     isInitialized,
+    isLoadingHistory,
     setChatMessage,
     sendChatMessage,
     initializeChat,
     chatContainerRef,
-    syncFromMarkdown
   };
 };

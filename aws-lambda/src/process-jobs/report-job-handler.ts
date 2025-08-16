@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // ReportGenerator Integration - Replace MCP with new decorator pattern
 import { ReportGenerator } from './report-generation/ReportGenerator';
+import { ReportImage } from './types';
 
 export async function processGenerateReportWithNewGenerator(supabase: any, job: any): Promise<any> {
   try {
@@ -40,23 +41,9 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
       throw new Error(`Report not found: ${reportId}`);
     }
 
-    // Update initial processing status
-    const displayStyle = reportStyle === 'brief' ? 'brief' : 'elaborate';
-    const displayExecution = executionStrategy === 'batched-parallel-with-parallel-summary' ? 'parallel summary' : 'standard';
-    await supabase
-      .from('reports')
-      .update({ 
-        generated_content: `Starting ${displayStyle} report generation with ${displayExecution} execution using ${selectedModel}...\n\n[PROCESSING IN PROGRESS...]`
-      })
-      .eq('id', reportId);
-
-    // Update progress: Images resized
-    await supabase
-      .from('reports')
-      .update({ 
-        generated_content: `Starting ${displayStyle} report generation with ${displayExecution} execution using ${selectedModel}\n\n[PROCESSING IN PROGRESS...]`
-      })
-      .eq('id', reportId);
+    // The executor will handle all status updates from now on.
+    const initialMessage = `Starting ${reportStyle} report generation with ${executionStrategy} execution using ${selectedModel}...`;
+    await supabase.from('reports').update({ generated_content: initialMessage }).eq('id', reportId);
 
     // Get project data
     const { data: projectData, error: projectError } = await supabase
@@ -80,7 +67,7 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
     }));
 
     // Determine the actual mode based on the image data, not the frontend parameter
-    const hasGroups = resizedImages.some(img => img.group && img.group.length > 0);
+    const hasGroups = resizedImages.some((img: Partial<ReportImage>) => img.group && img.group.length > 0);
     const actualMode = hasGroups ? 'grouped' : 'ungrouped';
 
     // Initialize ReportGenerator
@@ -104,14 +91,6 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
       execution: config.execution,
       grouping: config.grouping
     });
-
-    // Update progress: Starting report generation
-    await supabase
-      .from('reports')
-      .update({ 
-        generated_content: `1. Starting ${reportStyle} report generation with ${executionStrategy} execution using ${selectedModel}\nProcessing ${resizedImages.length} images in ${actualMode} mode...\n\n[PROCESSING IN PROGRESS...]`
-      })
-      .eq('id', reportId);
 
     // Generate report using the new system
     console.log(`🎯 Starting report generation with ReportGenerator...`);
@@ -148,8 +127,16 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
       throw new Error(`ReportGenerator failed: ${result.error}`);
     }
 
-    // The executor handles all content updates, so we don't need to update here
-    // The final content is already in result.content and has been updated by the executor
+    // Save the final, complete report to the database
+    console.log('✅ Report generation complete, saving final result to database...');
+    await supabase
+      .from('reports')
+      .update({
+        sections_json: { sections: result.sections },
+        generated_content: '✅ Report Generation Complete', // Final status update
+      })
+      .eq('id', reportId);
+    console.log('✅ Final report saved successfully.');
 
     console.log(`✅ ReportGenerator ${reportStyle} report generation with ${executionStrategy} execution completed successfully`);
     return { 
@@ -166,7 +153,7 @@ export async function processGenerateReportWithNewGenerator(supabase: any, job: 
       await supabase
         .from('reports')
         .update({ 
-          generated_content: `Error generating ${job.input_data.reportStyle} report with ${job.input_data.executionStrategy} execution: ${error.message}\n\n[PROCESSING FAILED]`
+          generated_content: `❌ Error generating report: ${error.message}`
         })
         .eq('id', job.input_data.reportId);
     } catch (updateError) {

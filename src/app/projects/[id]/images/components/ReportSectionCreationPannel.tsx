@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { SectionModel } from '@/lib/jsonTreeModels/SectionModel';
 
 /**
  * Props for the ReportSectionCreationPannel component
@@ -109,7 +110,7 @@ export default function ReportSectionCreationPannel({
 
     // Get existing groups from localStorage
     const existingData = localStorage.getItem(`report-groups-${projectId}`);
-    let allGroupsData = [];
+    let allGroupsData: { id: string; group: string[] }[] = [];
     
     if (existingData) {
       try {

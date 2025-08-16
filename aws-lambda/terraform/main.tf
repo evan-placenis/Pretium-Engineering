@@ -126,6 +126,35 @@ resource "aws_security_group" "lambda" {
   }
 }
 
+# VPC Endpoint for SQS
+resource "aws_vpc_endpoint" "sqs" {
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.${var.aws_region}.sqs"
+  vpc_endpoint_type   = "Interface"
+  private_dns_enabled = true
+
+  subnet_ids         = [aws_subnet.private.id]
+  security_group_ids = [aws_security_group.lambda.id]
+
+  tags = {
+    Name = "${var.project_name}-sqs-vpc-endpoint"
+  }
+}
+
+# SQS Queue
+resource "aws_sqs_queue" "job_queue" {
+  name                       = "${var.project_name}-job-queue"
+  delay_seconds              = 0
+  max_message_size           = 262144
+  message_retention_seconds  = 345600 # 4 days
+  receive_wait_time_seconds  = 10
+  visibility_timeout_seconds = 960 # 16 minutes (longer than lambda timeout)
+
+  tags = {
+    Name = "${var.project_name}-job-queue"
+  }
+}
+
 # IAM Roles and Policies
 resource "aws_iam_role" "lambda_execution" {
   name = "${var.project_name}-lambda-execution-role"
@@ -152,6 +181,32 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
 resource "aws_iam_role_policy_attachment" "lambda_vpc" {
   role       = aws_iam_role.lambda_execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
+resource "aws_iam_policy" "sqs_access" {
+  name        = "${var.project_name}-sqs-access-policy"
+  description = "Allows Lambda to access SQS for job processing"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "sqs:SendMessage",
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes"
+        ],
+        Resource = aws_sqs_queue.job_queue.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_sqs" {
+  role       = aws_iam_role.lambda_execution.name
+  policy_arn = aws_iam_policy.sqs_access.arn
 }
 
 # CloudWatch Log Groups
@@ -217,7 +272,7 @@ resource "aws_lambda_function" "trigger_processor" {
     variables = {
       SUPABASE_URL              = var.supabase_url
       SUPABASE_SERVICE_ROLE_KEY = var.supabase_service_role_key
-      PROCESS_JOBS_FUNCTION_URL = aws_lambda_function_url.process_jobs.function_url
+      JOB_QUEUE_URL             = aws_sqs_queue.job_queue.url
       NODE_ENV                 = var.environment
     }
   }
@@ -259,6 +314,14 @@ resource "aws_lambda_function_url" "trigger_processor" {
     expose_headers    = ["*"]
     max_age          = 86400
   }
+}
+
+# Lambda Event Source Mapping for SQS
+resource "aws_lambda_event_source_mapping" "job_processor_sqs_trigger" {
+  event_source_arn = aws_sqs_queue.job_queue.arn
+  function_name    = aws_lambda_function.process_jobs.arn
+  batch_size       = 1 # Process one job at a time
+  enabled          = true
 }
 
 # EventBridge removed - jobs are triggered immediately by frontend

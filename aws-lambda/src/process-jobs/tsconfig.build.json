@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": ".",
+    "target": "es2020",
+    "module": "commonjs",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "sourceMap": true
+  },
+  "include": [
+    "index.ts",
+    "report-job-handler.ts",
+    "report-generation/**/*.ts",
+    "report-knowledge/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

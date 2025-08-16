@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { ImageItem } from '@/components/image_components/ImageListView';
-import { TagValue } from '@/lib/tagConfig';
+import { TagValue } from '@/hooks/tagConfig';
 
 interface UseImageManagementProps {
   projectId?: string;

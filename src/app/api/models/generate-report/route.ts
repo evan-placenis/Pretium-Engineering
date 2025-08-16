@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { enqueueJob } from '@/lib/queue';
+import { createServiceRoleClient } from '../../../../lib/supabase';
+import { enqueueJob } from '@/hooks/queue';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const supabase = createServiceRoleClient();
 
 export async function POST(request: NextRequest) {
   try {

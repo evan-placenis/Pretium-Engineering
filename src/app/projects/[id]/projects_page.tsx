@@ -4,13 +4,13 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { Project, Report } from '@/lib/supabase';
-import { handleExcelUpload, validateProjectData } from '@/lib/utils';
+import { handleExcelUpload, validateProjectData } from '@/hooks/utils';
 import * as XLSX from 'xlsx';
 import { useViewPreference } from '@/hooks/useViewPreference';
 import KnowledgeUpload from './components/KnowledgeUpload';
 import KnowledgeViewer from './components/KnowledgeViewer';
 import Breadcrumb from '@/components/Breadcrumb';
-import { getReportImage } from '@/lib/image-utils';
+import { getReportImage } from '@/hooks/image-utils';
 
 export default function ProjectPage({ id }: { id: string }) {
   const [project, setProject] = useState<Project | null>(null);

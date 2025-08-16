@@ -9,6 +9,7 @@
     "test": "echo \"No tests specified\" && exit 0"
   },
   "dependencies": {
+    "@aws-sdk/client-sqs": "^3.614.0",
     "@supabase/supabase-js": "^2.49.4"
   },
   "devDependencies": {

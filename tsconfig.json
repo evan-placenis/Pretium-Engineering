@@ -19,7 +19,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@/knowledge/*": ["./packages/knowledge/*"]
     },
     // Deno-specific settings
     "allowImportingTsExtensions": true,

@@ -1,5 +1,5 @@
 // Grok4 LLM Provider
-import { LLMProvider, LLMResponse } from '../types.ts';
+import { LLMProvider, LLMResponse } from '../../types';
 import { OpenAI } from 'openai';
 
 export class Grok4Provider implements LLMProvider {

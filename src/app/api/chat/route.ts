@@ -1,205 +1,54 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { OpenAI } from 'openai';
-import { SectionModel } from './models/SectionModel';
-import { SectionTools } from './tools/SectionTools';
-import { ChatCompletionTool } from 'openai/resources/chat/completions.mjs';
-
-// Define the tools available to the model
-const SECTION_TOOLS = [
-  {
-    type: "function",
-    function: {
-      name: "list_sections",
-      description: "Return all sections with ids and numbers for disambiguation.",
-      parameters: { type: "object", properties: {}, additionalProperties: false }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "rename_section",
-      description: "Rename an existing section.",
-      parameters: {
-        type: "object",
-        properties: {
-          section_id: { type: "string" },
-          new_title: { type: "string" }
-        },
-        required: ["section_id", "new_title"],
-        additionalProperties: false
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "set_section_body",
-      description: "Update the body content of a section.",
-      parameters: {
-        type: "object",
-        properties: {
-          section_id: { type: "string" },
-          body_md: { type: "string" }
-        },
-        required: ["section_id", "body_md"],
-        additionalProperties: false
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "insert_section",
-      description: "Insert a new section after the specified section.",
-      parameters: {
-        type: "object",
-        properties: {
-          section_id: { type: "string" },
-          title: { type: "string" },
-          body_md: { type: "string" }
-        },
-        required: ["section_id", "title"],
-        additionalProperties: false
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "delete_section",
-      description: "Delete an existing section.",
-      parameters: {
-        type: "object",
-        properties: {
-          section_id: { type: "string" }
-        },
-        required: ["section_id"],
-        additionalProperties: false
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "move_section",
-      description: "Move a section to be a child of another section.",
-      parameters: {
-        type: "object",
-        properties: {
-          section_id: { type: "string" },
-          new_parent_id: { type: "string" },
-          position: { type: "number" }
-        },
-        required: ["section_id", "new_parent_id"],
-        additionalProperties: false
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "find_sections",
-      description: "Search for sections by title or content.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string" }
-        },
-        required: ["query"],
-        additionalProperties: false
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "replace_text",
-      description: "Replace text in a section using regex.",
-      parameters: {
-        type: "object",
-        properties: {
-          section_id: { type: "string" },
-          find: { type: "string" },
-          replace: { type: "string" },
-          flags: { type: "string" }
-        },
-        required: ["section_id", "find", "replace"],
-        additionalProperties: false
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "insert_image_ref",
-      description: "Insert an image reference in a section.",
-      parameters: {
-        type: "object",
-        properties: {
-          section_id: { type: "string" },
-          image_number: { type: "number" },
-          group: { type: "string" }
-        },
-        required: ["section_id", "image_number"],
-        additionalProperties: false
-      }
-    }
-  }
-];
+import { SectionTools } from '@/lib/jsonTreeModels/tools/SectionTools';
+import { ChatCompletionTool, ChatCompletionMessageParam } from 'openai/resources/chat/completions.mjs';
+import { searchProjectSpecsTool, handleSpecSearch, ruleGate } from '@/lib/jsonTreeModels/tools/chat-knowlege/guards';
+import { supabase } from '@/lib/supabase';
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, reportMarkdown } = await req.json();
+    const { userMessage, reportId, projectId } = await req.json();
 
-    if (!reportMarkdown) {
+    if (!userMessage || !reportId || !projectId) {
       return new Response(JSON.stringify({
-        error: "reportMarkdown is required"
+        error: "userMessage, reportId, and projectId are required"
       }), { status: 400 });
     }
 
-    // Parse the report into our section model
-    const sections = await SectionModel.fromMarkdown(reportMarkdown);
-    const model = new SectionModel(sections);
-    const tools = new SectionTools(model);
+    // --- Pre-check Gate ---
+    const allowSpecs = ruleGate(userMessage);
+    const sectionTools = new SectionTools(reportId, projectId);
+    
+    // Dynamically assemble the tool list based on the gate
+    const contextTools = sectionTools.getContextTools();
+    const actionTools = sectionTools.getActionTools();
+    let availableTools: any[] = [...contextTools, ...actionTools];
+    if (allowSpecs) {
+      availableTools.push(searchProjectSpecsTool);
+    }
+    
+    const allToolHandlers = {
+        ...contextTools.reduce((acc, tool) => ({ ...acc, [tool.function.name]: tool.function.handler }), {}),
+        ...actionTools.reduce((acc, tool) => ({ ...acc, [tool.function.name]: tool.function.handler }), {}),
+        [searchProjectSpecsTool.function.name]: (args: any) => handleSpecSearch(supabase, projectId, args.query, args.topK)
+    };
+    
+    const policyFlags = `Policy flags: allowSpecs=${allowSpecs}`;
 
-    // Initialize conversation state
-    let currentMessages = [...messages];
-    const maxSteps = 6; // Prevent infinite loops
+    // Initialize conversation state with the correct type
+    let currentMessages: ChatCompletionMessageParam[] = [
+        { role: 'system', content: getSystemPrompt() + "\n" + policyFlags },
+        { role: 'user', content: userMessage }
+    ];
+    const maxSteps = 5;
 
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY
-    });
-
-    // Add system message explaining tool usage
-    currentMessages.unshift({
-      role: "system",
-      content: `You are a helpful assistant that edits structured documents. When users refer to sections by number (e.g., "section 1" or "section 2.1"), always:
-
-1. First call list_sections() to get the mapping between section numbers and their stable IDs
-2. Then use the stable ID in subsequent operations (rename_section, set_section_body, etc.)
-
-For any request that involves editing, changing, adding, deleting, or modifying the report in any way, you MUST use the available tools. Do not describe the changes or return edited text directly—always call the tools to perform the edits, and they will return the updated state. If the user asks for something not requiring tools, respond normally.
-
-Example for rename:
-User: "Rename section 1 to Overview"
-Assistant should:
-1. Call list_sections() to find section 1's ID
-2. Use that ID with rename_section()
-
-Example for delete:
-User: "Delete section 2"
-Assistant should:
-1. Call list_sections() to get ID of section 2
-2. Call delete_section({ section_id: '<id>' })
-
-Never try to use section numbers directly as IDs - they can change when sections are moved or reordered. Always get the stable UUID first.`
-    });
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
     for (let step = 0; step < maxSteps; step++) {
       const completion = await openai.chat.completions.create({
-        model: "gpt-4",
+        model: "gpt-4o",
         messages: currentMessages,
-        tools: SECTION_TOOLS as ChatCompletionTool[],
+        tools: availableTools as unknown as ChatCompletionTool[],
         tool_choice: "auto"
       });
 
@@ -207,10 +56,10 @@ Never try to use section numbers directly as IDs - they can change when sections
 
       // If no tool calls, we're done
       if (!message.tool_calls?.length) {
+        const finalModel = await sectionTools.getFinalModel();
         return new Response(JSON.stringify({
           message: message.content,
-          updatedMarkdown: model.toMarkdown(),
-          sections: model.getState()
+          updatedSections: finalModel.getState().sections,
         }));
       }
 
@@ -219,14 +68,20 @@ Never try to use section numbers directly as IDs - they can change when sections
 
       // Then execute each tool call and add their results
       for (const call of message.tool_calls) {
-        const { name, arguments: args } = call.function;
-        const result = await tools.applyTool(name, JSON.parse(args));
+        const { name, arguments: rawArgs } = call.function;
+        const args = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : rawArgs;
         
-        // Add tool result to conversation
+        const handler = allToolHandlers[name];
+        if (!handler) {
+            throw new Error(`Tool ${name} not found`);
+        }
+
+        const result = await handler(args);
+        
         currentMessages.push({
           role: "tool",
           tool_call_id: call.id,
-          content: JSON.stringify(result)
+          content: typeof result === 'object' ? JSON.stringify(result) : result,
         });
       }
     }
@@ -241,4 +96,29 @@ Never try to use section numbers directly as IDs - they can change when sections
       error: error instanceof Error ? error.message : 'Unknown error'
     }), { status: 500 });
   }
+}
+
+function getSystemPrompt(): string {
+  return `You are an AI assistant for editing construction reports.
+
+**CORE BEHAVIOR:**
+You start with NO CONTEXT about the report or chat history. Your primary goal is to fulfill the user's request using tools.
+
+**CRITICAL RULE: USE IDs, NOT NUMBERS**
+Section numbers (e.g., "1", "2.1") are for display only and can change. You **MUST NOT** use them as IDs in your tool calls.
+If a user refers to a section number, your workflow **MUST** be:
+1. Call \`get_report_slices()\` to get a list of all sections and their stable UUIDs.
+2. Find the section in the response that has the matching number.
+3. Use that section's stable UUID in the action tool (e.g., \`update_section\`).
+
+**EXAMPLE WORKFLOW:**
+User says: "Change the title of section 2 to 'New Title'"
+Your response MUST be a sequence of two tool calls:
+1. First, call \`get_report_slices({})\` to get the ID for section number "2.".
+2. Then, use that ID to call \`update_section({ "id": "the-real-uuid-you-found", "title": "New Title" })\`.
+
+**OTHER RULES:**
+1.  **BE LAZY:** Do not fetch context you don't need. Use the narrowest tool possible.
+2.  **RENUMBER LAST:** After any structural change (\`add_section\`, \`move_section\`, \`delete_section\`), your final action **MUST** be a call to \`renumber_sections()\`.
+3.  **SEARCH FOR SPECS:** Use \`search_project_specs\` ONLY for questions about technical requirements, codes, or standards.`;
 }

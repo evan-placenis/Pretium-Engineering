@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useStructuredChat } from '../hooks/useStructuredChat';
-import { Project, Report, ReportImage } from '@/lib/supabase';
+import { Project, Report } from '@/lib/supabase';
+import { ReportImage } from '@/types/reportImage';
 import { Section, Operation, OperationResult } from '../operations/types';
-import { OperationInput } from '../hooks/useOperations';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
@@ -18,40 +18,30 @@ declare global {
 
 interface StructuredReportChatProps {
   reportId: string;
-  content: string;
   project: Project | null;
   report: Report | null;
   user: any;
   reportImages: ReportImage[];
-  setContent: (content: string) => void;
   sections: Section[];
-  operations: Operation[];
-  applyOperation: (op: OperationInput) => Promise<OperationResult>;
   undo: () => Promise<any>;
   redo: () => Promise<any>;
   canUndo: boolean;
   canRedo: boolean;
-  isLoadingOperations: boolean;
-  operationError: string | null;
-  syncFromMarkdown?: (markdown: string) => Promise<void>; // Add this
+  onChatComplete: (updatedSections: Section[]) => void;
 }
 
 export function StructuredReportChat({
   reportId,
-  content,
   project,
   report,
   user,
   reportImages,
-  setContent,
-  operations,
+  sections,
   undo,
   redo,
   canUndo,
   canRedo,
-  isLoadingOperations,
-  operationError,
-  syncFromMarkdown
+  onChatComplete,
 }: StructuredReportChatProps) {
   const {
     chatMessages,
@@ -61,8 +51,9 @@ export function StructuredReportChat({
     setChatMessage,
     sendChatMessage,
     initializeChat,
-    chatContainerRef
-  } = useStructuredChat(reportId, content, project, report, user, syncFromMarkdown);
+    chatContainerRef,
+    isLoadingHistory
+  } = useStructuredChat(reportId, sections, project, report, user, onChatComplete);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isCentered, setIsCentered] = useState(false);
@@ -167,10 +158,8 @@ export function StructuredReportChat({
 
   // Handle sending messages
   const handleSendMessage = async () => {
-    const updatedContent = await sendChatMessage();
-    if (updatedContent) {
-      setContent(updatedContent);
-    }
+    await sendChatMessage();
+    // No longer need to handle updatedSections here, as the state is managed by a different hook.
   };
 
   useEffect(() => {
@@ -212,12 +201,10 @@ export function StructuredReportChat({
               onClick={() => {
                 console.log('Attempting undo with:', {
                   canUndo,
-                  isLoadingOperations,
-                  operationsCount: operations.length
                 });
                 undo();
               }}
-              disabled={!canUndo || isLoadingOperations}
+              disabled={!canUndo}
               style={{
                 background: canUndo ? '#E53E3E' : '#718096',
                 border: 'none',
@@ -226,7 +213,6 @@ export function StructuredReportChat({
                 color: 'white',
                 cursor: canUndo ? 'pointer' : 'not-allowed',
                 fontSize: '0.875rem',
-                opacity: isLoadingOperations ? 0.7 : 1,
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.5rem'
@@ -242,11 +228,10 @@ export function StructuredReportChat({
               onClick={() => {
                 console.log('Attempting redo with:', {
                   canRedo,
-                  isLoadingOperations
                 });
                 redo();
               }}
-              disabled={!canRedo || isLoadingOperations}
+              disabled={!canRedo}
               style={{
                 background: canRedo ? '#4CAF50' : '#718096',
                 border: 'none',
@@ -255,7 +240,6 @@ export function StructuredReportChat({
                 color: 'white',
                 cursor: canRedo ? 'pointer' : 'not-allowed',
                 fontSize: '0.875rem',
-                opacity: isLoadingOperations ? 0.7 : 1,
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.5rem'
@@ -269,38 +253,6 @@ export function StructuredReportChat({
           </div>
         </div>
 
-        {isLoadingOperations && (
-          <div style={{ 
-            marginTop: '0.5rem',
-            fontSize: '0.875rem',
-            color: '#666',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem' 
-          }}>
-            <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
-            </svg>
-            Applying changes...
-          </div>
-        )}
-
-        {operationError && (
-          <div style={{ 
-            marginTop: '0.5rem',
-            fontSize: '0.875rem',
-            color: '#E53E3E',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem'
-          }}>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M8 14A6 6 0 108 2a6 6 0 000 12zM8 5v3M8 11h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            {operationError}
-          </div>
-        )}
       </div>
 
       {/* Chat Messages */}
@@ -315,7 +267,7 @@ export function StructuredReportChat({
           gap: '1.25rem'
         }}
       >
-        {chatMessages.length === 0 ? (
+        {chatMessages.length === 0 && !isLoadingHistory ? (
           <div style={{ textAlign: 'center', color: '#666', marginTop: '2rem' }}>
             {!isInitialized ? (
               <div>
@@ -392,6 +344,11 @@ export function StructuredReportChat({
                   Thinking...
                 </span>
               </div>
+            )}
+            {isLoadingHistory && chatMessages.length === 0 && (
+                <div style={{ textAlign: 'center', color: '#666', marginTop: '2rem' }}>
+                    <p style={{ fontSize: '1rem' }}>Loading chat history...</p>
+                </div>
             )}
           </>
         )}

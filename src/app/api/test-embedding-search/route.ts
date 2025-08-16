@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { embeddingService } from '@/app/projects/[id]/hooks/embedding-service';
 
+interface EmbeddingResult {
+  id: string;
+  content: string;
+  similarity: number;
+  // add as needed
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { projectId, query, limit, runDefaultTests } = await req.json();
@@ -19,7 +26,7 @@ export async function POST(req: NextRequest) {
         "quality control standards"
       ];
       
-      const testResults = [];
+      const testResults: { query: string; results: EmbeddingResult[]; success: boolean; error?: string }[] = [];
       for (const testQuery of defaultQueries) {
         try {
           const results = await embeddingService.searchSimilarContent(projectId, testQuery, 3);

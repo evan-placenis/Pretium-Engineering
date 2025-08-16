@@ -1,25 +1,9 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { SQSEvent, SQSRecord } from 'aws-lambda';
 import { createClient } from '@supabase/supabase-js';
 import { processGenerateReportWithNewGenerator } from './report-job-handler';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-};
-
-export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
-  // Handle CORS preflight requests
-  if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 200,
-      headers: corsHeaders,
-      body: 'ok'
-    };
-  }
-
+export const handler = async (event: SQSEvent): Promise<void> => {
   try {
-    
     // Get environment variables
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -31,6 +15,23 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     // Create Supabase client
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    // Process each SQS message
+    for (const record of event.Records) {
+      await processSingleJob(record, supabase);
+    }
+
+  } catch (error: any) {
+    console.error('Error in process-jobs function:', error);
+    // Note: For SQS triggers, we don't return a value.
+    // Errors will be handled by Lambda's retry policy.
+    throw error;
+  }
+};
+
+const processSingleJob = async (record: SQSRecord, supabase: any): Promise<void> => {
+  console.log('Processing SQS record:', record.body);
+
+  try {
     // Get next job to process
     console.log('🔍 Looking for next job to process...');
     const { data: nextJobData, error: getJobError } = await supabase
@@ -44,15 +45,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     if (!nextJobData || nextJobData.length === 0) {
       console.log('ℹ️ No jobs to process');
-      return {
-        statusCode: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          success: true,
-          message: 'No jobs to process',
-          processed: 0
-        })
-      };
+      return;
     }
 
     console.log('✅ Found job to process:', nextJobData[0].id);
@@ -84,15 +77,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     if (!processingResult) {
       console.log('⚠️ Job already being processed by another worker');
-      return {
-        statusCode: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          success: true,
-          message: 'Job already being processed by another worker',
-          processed: 0
-        })
-      };
+      return;
     }
 
     console.log('✅ Job marked as processing successfully');
@@ -163,28 +148,9 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       });
     }
 
-    return {
-      statusCode: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        success: true,
-        message: error ? 'Job failed' : 'Job completed successfully',
-        jobId: job.id,
-        error: error || null,
-        processed: 1
-      })
-    };
-
-  } catch (error: any) {
-    console.error('Error in process-jobs function:', error);
-
-    return {
-      statusCode: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        success: false,
-        error: error.message
-      })
-    };
+  } catch (error) {
+    console.error('Failed to process job:', error);
+    // Let SQS handle the retry based on the visibility timeout
+    throw error;
   }
 }; 

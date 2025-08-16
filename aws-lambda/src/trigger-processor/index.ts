@@ -1,4 +1,7 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
+
+const sqsClient = new SQSClient({});
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -18,34 +21,29 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
   try {
     // Get environment variables
-    const processJobsFunctionUrl = process.env.PROCESS_JOBS_FUNCTION_URL!;
+    const jobQueueUrl = process.env.JOB_QUEUE_URL!;
 
-    if (!processJobsFunctionUrl) {
-      throw new Error('Missing PROCESS_JOBS_FUNCTION_URL environment variable');
+    if (!jobQueueUrl) {
+      throw new Error('Missing JOB_QUEUE_URL environment variable');
     }
 
     console.log('🚀 Triggering job processor...');
-    console.log('📋 Process jobs URL:', processJobsFunctionUrl);
+    console.log('📬 Sending message to queue:', jobQueueUrl);
 
-    // Call the main job processor function (fire-and-forget)
+    // Send a message to the SQS queue to trigger the job processor
     try {
-      const response = await fetch(processJobsFunctionUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        }
+      const command = new SendMessageCommand({
+        QueueUrl: jobQueueUrl,
+        MessageBody: JSON.stringify({ trigger: 'process-jobs' }),
       });
-      
-      if (response.ok) {
-        console.log('✅ Job processor triggered successfully');
-      } else {
-        console.error('❌ Job processor returned error status:', response.status);
-      }
+      await sqsClient.send(command);
+      console.log('✅ Message sent to SQS successfully');
     } catch (error) {
-      console.error('❌ Trigger failed:', error);
+      console.error('❌ Failed to send message to SQS:', error);
+      throw new Error('Failed to queue job for processing');
     }
 
-    // Return immediately - don't wait for the processor
+    // Return immediately
     console.log('✅ Trigger request sent');
 
     return {
@@ -53,7 +51,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         success: true,
-        message: 'Job processor triggered successfully'
+        message: 'Job successfully queued for processing'
       })
     };
 

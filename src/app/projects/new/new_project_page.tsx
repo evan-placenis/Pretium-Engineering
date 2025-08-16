@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { handleExcelUpload, validateProjectData } from '@/lib/utils';
+import { handleExcelUpload, validateProjectData } from '@/hooks/utils';
 
 export default function NewProject() {
 

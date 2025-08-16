@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
-import { ReportImage, ProjectImage } from '@/lib/supabase';
+import { ProjectImage, ReportImage } from '@/lib/supabase';
 
 // Initialize OpenAI client
 const openai = new OpenAI({

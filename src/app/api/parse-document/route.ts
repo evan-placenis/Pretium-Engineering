@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServiceSupabase } from '@/lib/supabase';
+import { createServiceRoleClient } from '@/lib/supabase';
 import { embeddingService } from '../../projects/[id]/hooks/embedding-service';
 
 interface DocumentInfo {
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create server-side Supabase client
-    const supabase = getServiceSupabase();
+    const supabase = createServiceRoleClient();
 
     // Download file from Supabase storage
     const { data: fileData, error: downloadError } = await supabase.storage

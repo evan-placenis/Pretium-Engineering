@@ -20,8 +20,7 @@ npm run build
 echo "📦 Creating process-jobs.zip..."
 # 1. Go into the output directory and zip its contents
 (cd src/process-jobs/dist && zip -r ../../../dist/process-jobs.zip .)
-# 2. Add the shared node_modules to the zip file
-(cd dist && zip -ur process-jobs.zip ../node_modules)
+# 2. Add the shared node_modules to the zip file - REMOVED as esbuild handles bundling
 
 # Package trigger-processor
 echo "📦 Creating trigger-processor.zip..."

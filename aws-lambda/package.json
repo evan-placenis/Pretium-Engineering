@@ -5,13 +5,14 @@
   "private": true,
   "scripts": {
     "build": "npm run build:process-jobs && npm run build:trigger-processor",
-    "build:process-jobs": "tsc -p src/process-jobs/tsconfig.build.json",
+    "build:process-jobs": "esbuild src/process-jobs/index.ts --bundle --platform=node --target=node18 --outfile=src/process-jobs/dist/index.js --external:@aws-sdk/*",
     "build:trigger-processor": "esbuild src/trigger-processor/index.ts --bundle --platform=node --target=node18 --outfile=dist/trigger-processor.js --external:@aws-sdk/*"
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.614.0",
     "@supabase/supabase-js": "^2.49.4",
-    "openai": "^4.98.0"
+    "openai": "^4.98.0",
+    "p-limit": "^7.0.0"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.119",

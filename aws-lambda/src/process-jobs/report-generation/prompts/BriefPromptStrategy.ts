@@ -125,7 +125,7 @@ Your primary mission is to refine the titles of the incoming JSON sections for c
         "children": []
       },
       {
-        "title": "Block 1",
+        "title": "Step Flashings",
         "bodyMd": ["Step flashings were being installed in accordance with spec"],
         "images": [{ "number": 2, "group": ["Block 1"] }],
         "children": []
@@ -157,12 +157,13 @@ ${specifications.map((spec) => `- ${spec}`).join('\n')}
 # INSTRUCTIONS:
 - Analyze the following raw observations.
 - **Critical** If you generate a title yourself, you MUST prefix it with a tilde (~). For example: "~Gable End Drip Edge Flashing".
-- For each observation, generate exactly one section, which can have multiple bodyMd points.
+- For each observation, generate exactly one section, which can and should have multiple elemends in the bodyMd array, each element is a specific point.
 - Return a single JSON object of the form {"sections":[ ... ]} containing one section for each observation, in the same order.
+- Reference the relevant specifications when needed.
 
 ${specs}
 
-# RAW OBSERVATIONS:
+# RAW OBSERVATIONS FROM THE SITE:
 ${observations.map((obs) => `- ${obs}`).join('\n')}
 `;
   }
@@ -174,7 +175,7 @@ ${observations.map((obs) => `- ${obs}`).join('\n')}
 - Take the following array of JSON "section" objects and refine the titles as needed for clarity and grouping.
 - Follow the rules I provided in my system prompt. Do not change user-provided titles (those without a ~).
 - **Critical** If title is marked with a tilde (~), you can edit the title to improve structure and clarity. IF no tilde, MUST leave the title as is.
-- Organize them into a final, structured report with a logical hierarchy, following the rules and format I provided in my system prompt.
+- Organize them into a final, flat list of sections, following the rules and format I provided in my system prompt.
 
 # JSON SECTIONS TO ORGANIZE:
 \`\`\`json

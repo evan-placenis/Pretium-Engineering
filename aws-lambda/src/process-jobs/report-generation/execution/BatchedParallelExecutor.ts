@@ -5,7 +5,9 @@ import { ExecutionStrategy, ExecutionParams, ExecutionResult, GroupingMode, Imag
 import { getRelevantKnowledgeChunks } from '../report-knowledge/guards';
 import { SectionModel } from './SectionModel';
 
+import { globalLlmLimit } from './limiter';
 export class BatchedParallelExecutor implements ExecutionStrategy {
+  
   private readonly BATCH_SIZE = 5;
   private readonly MAX_PARALLEL_AGENTS = 3;
   private supabase: any = null;
@@ -36,11 +38,11 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
       });
 
       const allPromises: Promise<void>[] = [];
-      const activePromises: Promise<void>[] = [];
+      const activePromises =  new Set<Promise<void>>();
 
       for (const batch of batches) {
         // If the pool is full, wait for the *fastest* active task to finish, opening up a slot.
-        if (activePromises.length >= this.MAX_PARALLEL_AGENTS) {
+        while (activePromises.size >= this.MAX_PARALLEL_AGENTS) {
           await Promise.race(activePromises);
         }
 
@@ -56,21 +58,15 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
           }
         });
 
-        // Wrap the promise to remove it from the active pool upon completion.
-        const wrappedPromise = promise.finally(() => {
-          const index = activePromises.indexOf(wrappedPromise);
-          if (index !== -1) {
-            activePromises.splice(index, 1);
-          }
-        });
+      // Ensure removal happens before the next admission check
+      const wrapped = promise.finally(() => activePromises.delete(wrapped as Promise<void>)) as Promise<void>;
+      activePromises.add(wrapped);
+      allPromises.push(wrapped);
+    }
 
-        activePromises.push(wrappedPromise);
-        allPromises.push(wrappedPromise);
-      }
-      
-      // Wait for any remaining promises to complete before moving to the summary step.
+      // Drain remaining
       await Promise.all(allPromises);
-
+            
       await this.updateReportContent({
         type: 'status',
         message: `IMAGE AGENT COMPLETE: Produced ${allSections.length} initial sections. Moving to summary agent...`,
@@ -101,9 +97,9 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
       
       const summaryPromise = llmProvider.generateContent(fullSummaryPrompt, summaryOptions);
 
-      // Set a timeout of 180 seconds for summary generation (increased due to larger content from embeddings)
+      // Set a timeout of 15 mins for summary generation (increased due to larger content from embeddings)
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Summary generation timed out after 6 minutes')), 360000);
+        setTimeout(() => reject(new Error('Summary generation timed out after 15 minutes')), 900000);
       });
 
       const summaryResponse = await Promise.race([summaryPromise, timeoutPromise]) as any;
@@ -117,13 +113,24 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
       let finalSections: Section[] = [];
       try {
         const parsedJson = JSON.parse(summaryContent);
-        if (parsedJson.sections) {
+        // NEW: Handle title-only summary response
+        if (Array.isArray(parsedJson.titles) && parsedJson.titles.length === allSections.length) {
+          console.log('✅ Parsed title-only summary. Merging with original sections.');
+          // Map the new titles back to the original sections
+          finalSections = allSections.map((section, index) => ({
+            ...section,
+            title: parsedJson.titles[index] || section.title, // Fallback to old title if new one is empty
+          }));
+          summaryContent = JSON.stringify({ sections: finalSections }); // Re-serialize for downstream use
+        } else if (parsedJson.sections) {
+          // OLD FALLBACK: Handle full-section summary response
+          console.warn("Summary response was not title-only, falling back to full section parsing.");
           const model = SectionModel.fromJSON(parsedJson);
           finalSections = model.getState().sections;
           summaryContent = JSON.stringify(model.toJSON());
           console.log('Parsed and auto-numbered JSON sections for summary');
         } else {
-          console.warn("Summary JSON is missing 'sections' property.");
+          console.warn("Summary JSON is missing 'titles' or 'sections' property. Falling back to initial sections.");
           finalSections = allSections; // Fallback to initial sections
         }
       } catch (e: any) {
@@ -246,52 +253,72 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
   }
 
   private async processBatch(batch: any[], params: ExecutionParams): Promise<Section[]> {
-    const { llmProvider, promptStrategy, projectData, grouping, projectId, supabase } = params;
-
-    // Guard clause to ensure projectId is present for type safety
+    const { llmProvider, promptStrategy, grouping, projectId, supabase } = params;
+  
     if (!projectId || !supabase) {
       console.error('processBatch called without projectId or supabase client.');
       return [];
     }
-
-    const observations = batch.map(img => {
-      const imageTag = `[IMAGE:${img.number}:${img.group?.[0] || ''}]`;
-      const description = img.description || '';
-      const sectionTitle = img.group?.[0] ? `(Section Title: ${img.group[0]})` : '(Section Title: N/A - choose section title)';
-      return `${sectionTitle} Description: ${description} Image: ${imageTag}`.trim();
-    });
-
-    const queryForSpecs = observations.join('\n');
-    const specificationsText = await getRelevantKnowledgeChunks(supabase, projectId, queryForSpecs);
-    const specifications = [specificationsText]; // Wrap in an array
-    
-    console.log(`📝 Retrieved ${specificationsText.length} characters of specs for this batch.`);
-
-    const imageAgentSystemPrompt = promptStrategy.getImageSystemPrompt();
-    const imageAgentUserPrompt = promptStrategy.generateUserPrompt(observations, specifications, [], grouping);
-    const fullImageAgentPrompt = `${imageAgentSystemPrompt}\n\n${imageAgentUserPrompt}`;
-
-    const imageAgentResponse = await llmProvider.generateContent(fullImageAgentPrompt, {
-      temperature: 0.7,
-      maxTokens: 12000
-    });
-
-    if (imageAgentResponse.error) {
-      console.error(`Image agent failed for a batch: ${imageAgentResponse.error}`);
-      return []; // Return empty array for the failed batch
-    }
-    
-    try {
-      const parsed = JSON.parse(imageAgentResponse.content);
-      if (parsed.sections && Array.isArray(parsed.sections)) {
-        return parsed.sections;
+  
+    // One stateless "agent" definition per batch
+    const systemPrompt = promptStrategy.getImageSystemPrompt();
+  
+    // Helper: safe JSON parse → sections[]
+    const parseSections = (content?: string): Section[] => {
+      if (!content) return [];
+      try {
+        const parsed = JSON.parse(content);
+        return Array.isArray(parsed?.sections) ? parsed.sections : [];
+      } catch (e: any) {
+        console.error('parse error:', e.message);
+        return [];
       }
-      console.error("No 'sections' property found in image agent response for a batch.");
-      return [];
-    } catch (e: any) {
-      console.error(`Failed to parse image agent response for a batch: ${e.message}.`);
-      return [];
-    }
+    };
+  
+    // Map images → globally-throttled per-image tasks
+    const perImageTasks = batch.map((img) =>
+      globalLlmLimit(async () => {
+        const imageTag = `[IMAGE:${img.number}:${img.group?.[0] || ''}]`;
+        const description = img.description || '';
+        const sectionTitle = img.group?.[0]
+          ? `(Section Title: ${img.group[0]})`
+          : '(Section Title: N/A - choose section title)';
+        const observation = `${sectionTitle} Description: ${description} Image: ${imageTag}`.trim();
+  
+        // Per-image RAG (can also be throttled if DB/API load becomes an issue)
+        const specsText = await getRelevantKnowledgeChunks(supabase, projectId, observation);
+        const specifications = specsText ? specsText.split('\n') : [];
+        console.log(`📝 [img ${img.number}] specs=${specifications.length}`);
+  
+        // Tiny per-image prompt (arrays of length 1 keep your builder intact)
+        const userPrompt = promptStrategy.generateUserPrompt([observation], specifications, [], grouping);
+  
+        // Stateless call: same systemPrompt, unique tiny userPrompt
+        const resp = await llmProvider.generateContent(
+          `${systemPrompt}\n\n${userPrompt}`,
+          {
+            temperature: 0.3,
+            maxTokens: 1500,
+            ...(params.options?.reasoningEffort
+              ? { reasoningEffort: params.options.reasoningEffort, mode: params.mode }
+              : {}),
+          }
+        );
+  
+        if (resp?.error) {
+          console.error(`[img ${img.number}] LLM error: ${resp.error}`);
+          return [] as Section[];
+        }
+  
+        return parseSections(resp.content);
+      })
+    );
+  
+    // Collect all sections from this batch (calls are globally throttled)
+    const results = await Promise.all(perImageTasks);
+    const batchSections = results.flat();
+  
+    return batchSections;
   }
 
   private async updateReportContent(log: { type: 'status' | 'intermediateResult', message: string, payload?: any }) {

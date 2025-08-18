@@ -8,6 +8,8 @@ export interface StructuredChatState {
   isSendingMessage: boolean;
   isInitialized: boolean;
   isLoadingHistory: boolean;
+  selectedModel: string; // Add selectedModel to state
+  setSelectedModel: (model: string) => void; // Add setter for selectedModel
   setChatMessage: (message: string) => void;
   sendChatMessage: () => Promise<void>;
   initializeChat: () => Promise<void>;
@@ -24,6 +26,7 @@ export const useStructuredChat = (
 ): StructuredChatState => {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatMessage, setChatMessage] = useState('');
+  const [selectedModel, setSelectedModel] = useState('grok-4'); // Default model
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
@@ -205,7 +208,8 @@ export const useStructuredChat = (
         body: JSON.stringify({
           userMessage: currentMessage,
           reportId: reportId,
-          projectId: project.id
+          projectId: project.id,
+          model: selectedModel, // Pass the selected model to the API
         }),
       });
       
@@ -273,7 +277,7 @@ export const useStructuredChat = (
     } finally {
       setIsSendingMessage(false);
     }
-  }, [chatMessage, user, reportId, project?.id, onChatComplete]);
+  }, [chatMessage, user, reportId, project?.id, onChatComplete, selectedModel]);
 
   return {
     chatMessages,
@@ -281,6 +285,8 @@ export const useStructuredChat = (
     isSendingMessage,
     isInitialized,
     isLoadingHistory,
+    selectedModel,
+    setSelectedModel,
     setChatMessage,
     sendChatMessage,
     initializeChat,

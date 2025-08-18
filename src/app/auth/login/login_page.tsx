@@ -150,6 +150,12 @@ export default function Login() {
               />
             </div>
 
+            <div style={{ textAlign: 'right', marginTop: '0.5rem' }}>
+              <Link href="/auth/forgot-password">
+                <span className="text-sm text-blue-600 hover:underline">Forgot your password?</span>
+              </Link>
+            </div>
+
             <div style={{ marginTop: "1.5rem" }}>
               <button
                 type="submit"

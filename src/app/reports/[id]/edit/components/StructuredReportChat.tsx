@@ -48,7 +48,9 @@ export function StructuredReportChat({
     chatMessage,
     isSendingMessage,
     isInitialized,
+    selectedModel, // Get model state from hook
     setChatMessage,
+    setSelectedModel, // Get model setter from hook
     sendChatMessage,
     initializeChat,
     chatContainerRef,
@@ -194,7 +196,32 @@ export function StructuredReportChat({
           justifyContent: 'space-between', 
           alignItems: 'center' 
         }}>
-          <h3 style={{ margin: 0, fontSize: '1.1rem' }}>AI Assistant</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <h3 style={{ margin: 0, fontSize: '1.1rem' }}>AI Assistant</h3>
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              style={{
+                fontSize: '0.875rem',
+                padding: '0.5rem 2rem 0.5rem 0.75rem',
+                borderRadius: '8px',
+                border: '1px solid #ccc',
+                background: 'white',
+                color: '#0E2841',
+                cursor: 'pointer',
+                appearance: 'none',
+                backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`,
+                backgroundPosition: 'right 0.5rem center',
+                backgroundRepeat: 'no-repeat',
+                backgroundSize: '1.5em 1.5em',
+                fontWeight: '500',
+              }}
+            >
+              <option value="grok-4">Grok-4</option>
+              <option value="gpt-4o">GPT-4o</option>
+              <option value="gpt-5">GPT-5</option>
+            </select>
+          </div>
           
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <button

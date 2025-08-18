@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase';
 
 export async function POST(req: NextRequest) {
   try {
-    const { userMessage, reportId, projectId } = await req.json();
+    const { userMessage, reportId, projectId, model = 'grok-4' } = await req.json();
 
     if (!userMessage || !reportId || !projectId) {
       return new Response(JSON.stringify({
@@ -42,15 +42,33 @@ export async function POST(req: NextRequest) {
     ];
     const maxSteps = 5;
 
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    
+    
 
     for (let step = 0; step < maxSteps; step++) {
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: currentMessages,
-        tools: availableTools as unknown as ChatCompletionTool[],
-        tool_choice: "auto"
-      });
+      let completion;
+      if (model === 'grok-4') {
+        const grokClient = new OpenAI({
+          apiKey: process.env.GROK_API_KEY,
+          baseURL: "https://api.x.ai/v1",
+          timeout: 360000, // 6 minute timeout for reasoning models
+        });
+
+        completion = await grokClient.chat.completions.create({
+          model: model,
+          messages: currentMessages,
+          tools: availableTools as unknown as ChatCompletionTool[],
+          tool_choice: "auto"
+        });
+      } else {
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        completion = await openai.chat.completions.create({
+          model: model,
+          messages: currentMessages,
+          tools: availableTools as unknown as ChatCompletionTool[],
+          tool_choice: "auto"
+        });
+      }
 
       const message = completion.choices[0].message;
 

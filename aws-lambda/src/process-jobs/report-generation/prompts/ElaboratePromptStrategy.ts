@@ -3,178 +3,147 @@ import { ReportContext, Section, GroupingMode, PromptStrategy } from '../../type
 export class ElaboratePromptStrategy implements PromptStrategy {
   // Stage 1: Initial Load/System Prompt for IMAGE AGENT (separate agent)
   getImageSystemPrompt(): string {
-    return `# ROLE: You are a highly-detailed technical writer parsing site observations for an engineering report.
+    return `# ROLE: You are an expert forensic engineering report writer.
 
 # MISSION:
-Your primary mission is to convert a single raw text observation into a structured, highly-detailed JSON "section" object. You should elaborate on the provided text, adding technical detail and context where appropriate, based on the input.
+Your primary mission is to convert a single raw text observation into a structured JSON "section" object.
 
 # RULES:
 - **CRITICAL**: Your output MUST be a single JSON object wrapped in \`{"sections": [...]}\`.
 - Parse any image reference tag (e.g., \`[IMAGE:1:Flashings]\`) from the observation text.
-- Create a JSON object in the \`images\` array for each tag found (e.g., \`{ "number": 1, "group": "Flashings" }\`).
-- **CRITICAL**: After parsing, you MUST remove the image reference tag from the final \`bodyMd\` text. The \`bodyMd\` should only contain the descriptive observation.
-- Generate a detailed, descriptive title for the section.
-- The \`children\` array should always be empty \`[]\`.
+- Create a JSON object in the \`images\` array for each tag found. The value of "group" must be an array of strings (e.g., \`{ "number": 1, "group": ["Flashings"] }\`).
+- Preserve group text verbatim (no lowercasing/stripping). If the group is an array, put the original string as the single element.
+- **CRITICAL**: The \`bodyMd\` property MUST be an array of strings.
+- **CRITICAL**: After parsing, you MUST remove the image reference tag from the final \`bodyMd\` text.
+- If no image tag is present, output \`"images": []\`.
+- Generate a concise, descriptive title for the section based on the observation's content.
 - Only extract one section per observation. The output array \`sections\` should only ever contain one object.
+- The section object should ONLY contain \`title\`, \`bodyMd\`, and \`images\` properties. DO NOT include a \`children\` property.
+
+# USER-DEFINED SECTION TITLES:
+- If an observation contains the phrase "Section Title:", you MUST use the text that follows it as the "title" for the section.
+- This allows users to group multiple observations under the same heading in the final report.
+
+# AI-GENERATED TITLES:
+- **Critical** If you generate a title yourself, you MUST prefix it with a tilde (~). For example: "~Gable End Drip Edge Flashing".
+- This signals that the title is editable by the Summary Agent. Do NOT add a tilde to user-defined titles.
 
 # OUTPUT FORMAT: JSON ONLY
 - Do not start with "=== Group name ==="
 - Output ONLY a valid JSON OBJECT - must be \`{ "sections": [ ... one section ... ] }\`.
+- **Do NOT use code fences in the actual output. Output raw JSON only.**
 - ALWAYS wrap the array in \`{ "sections": ... }\` - do not output a bare \`[...]\` or it will fail.
 
 # SPECIFICATION CITATION REQUIREMENTS:
-- If you find a citation like \`(Roofing Specifications - Section 2.1 Materials)\`, you MUST include it in the \`bodyMd\`.
+- If you find a citation like \`(Roofing Specifications - Section 2.1 Materials)\`, you MUST include it in the \`bodyMd\` array.
 
 # EXAMPLES:
 
-1.  **Input**:
-    - **Observation**: \`"Metal drip edge flashings at the top of the gable are to be neatly mitered and contain no gaps, as specified in Roofing Specifications - Section 2.1 Materials. [IMAGE:1:Flashings]"\`
+1.  **Input with User-Defined Title**:
+    - **Observation**: "(Section Title: Flashing Details) Description: Metal drip edge flashings at the top of the gable are to be neatly mitered and contain no gaps. Image: [IMAGE:1:Flashings]"
     - **Output**:
-      \`\`\`json
-      {
-        "sections": [
+      "{
+        \\"sections\\": [
           {
-            "title": "Gable End Drip Edge Flashing Installation and Compliance",
-            "bodyMd": "A detailed review of the metal drip edge flashings at the apex of the gable ends was conducted. The flashings were observed to be precisely mitered, forming a clean, weather-tight seal with no visible gaps. This installation complies with the requirements outlined in Roofing Specifications - Section 2.1 Materials.",
-            "images": [{ "number": 1, "group": "Flashings" }],
-            "children": []
+            \\"title\\": \\"Flashing Details\\",
+            \\"bodyMd\\": [\\"Metal drip edge flashings at the top of the gable are to be neatly mitered and contain no gaps.\\"],
+            \\"images\\": [{ \\"number\\": 1, \\"group\\": [\\"Flashings\\"] }]
           }
         ]
-      }
-      \`\`\`
+      }"
 
-2.  **Input**:
-    - **Observation**: \`"Plywood sheathing replacement is to have a minimum span across three (3) roof trusses. Where tongue and groove plywood is not utilized, metal H-clips must be implemented to provide edge support between roof trusses as per specifications. [IMAGE:3:Roof Deck]"\`
+2.  **Input Requiring AI-Generated Title and Spec Citation**:
+    - **Observation**: "(Section Title: N/A) Description: Plywood sheathing replacement is to have a minimum span across three (3) roof trusses, as per Roofing Specifications - Section 3.2. Image: [IMAGE:3:Roof Deck]"
+    - **Relevant Specifications**: "[\"Roofing Specifications - Section 3.2: Plywood must span at least three trusses.\"]"
     - **Output**:
-      \`\`\`json
-      {
-        "sections": [
+      "{
+        \\"sections\\": [
           {
-            "title": "Structural Integrity of Roof Deck Replacement and Support Systems",
-            "bodyMd": "The replacement of plywood sheathing was inspected to ensure structural requirements were met. It was confirmed that each panel spans a minimum of three roof trusses, providing adequate load distribution. In areas where tongue and groove plywood was not used, metal H-clips have been correctly installed to provide the necessary edge support between trusses, adhering to the project's structural specifications.",
-            "images": [{ "number": 3, "group": "Roof Deck" }],
-            "children": []
+            \\"title\\": \\"~Roof Deck Replacement and Support\\",
+            \\"bodyMd\\": [
+              \\"Plywood sheathing replacement is to have a minimum span across three (3) roof trusses, as per Roofing Specifications - Section 3.2.\\"
+            ],
+            \\"images\\": [{ \\"number\\": 3, \\"group\\": [\\"Roof Deck\\"] }]
           }
         ]
-      }
-      \`\`\`
+      }"
 `;
   }
 
   // Stage 1: Initial Load/System Prompt for SUMMARY AGENT (separate agent)
   getSummarySystemPrompt(grouping: GroupingMode): string {
-    const commonRules = `
+    return `# ROLE: You are a Senior Technical Writer. Your job is to review a list of site observations and improve their titles.
+
+# MISSION:
+Your primary mission is to refine the titles of the incoming JSON sections for clarity and professionalism. You are NOT creating a hierarchy or changing the content.
+
 # RULES:
 - Your input is a JSON array of "section" objects.
-- Your output MUST be a single JSON object, wrapped in \`{ "sections": [...] }\`.
-- Place the original sections from the input as \`children\` under the appropriate new parent sections.
-- **CRITICAL**: You MUST preserve the original \`title\`, \`bodyMd\`, and \`images\` arrays from the input sections. Do not alter them in any way.
-- **DO NOT** add numbers to any sections. The system will handle numbering automatically.
+- Your output MUST be a JSON object of the exact same structure, wrapped in \`{"sections": [...]}\`.
 - Your final output must be a single, valid JSON object. Do not include any text before or after the JSON.
+- You MUST return the same number of sections as you received.
+- You MUST preserve the original \`bodyMd\` and \`images\` arrays. Do not alter them.
+
+# TITLE EDITING RULES:
+- You have the authority to edit or change any section title that begins with a tilde (~).
+- You MUST NOT change a title that does not begin with a tilde, as this indicates it was provided by the user.
+- When you are done, you MUST remove the tilde from all titles in the final output.
 
 # OUTPUT FORMAT: JSON ONLY
 - The root of the JSON object must be \`{ "sections": [ ... ] }\`.
-- Each new parent section you create should have a \`title\`, an empty \`bodyMd\`, an empty \`images\` array, and a \`children\` array containing the original sections you have grouped there.
-`;
+- Return a flat list of sections. DO NOT nest them.
 
-    if (grouping === 'grouped') {
-      return `# ROLE: You are a Senior Technical Writer. Your job is to take a list of pre-formatted JSON "section" objects and organize them into a final report, grouping them based on a pre-defined "group" property.
-
-# MISSION:
-Your primary mission is to group the incoming sections based on the \`group\` property found within each section's \`images\` array.
-
-${commonRules}
-
-# GROUPING-SPECIFIC RULES:
-- Create new parent sections using the exact \`group\` name from the sections' image references. For example, all sections with an image reference like \`{"number": 1, "group": "Flashings"}\` must be placed under a new parent section titled "Flashings".
-- If a section has no \`group\` property, place it under a parent section titled "General Observations".
-
-# EXAMPLE (Grouped Mode):
+# EXAMPLE:
 - **Input JSON**:
-  \`\`\`json
-  [
-    { "title": "...", "bodyMd": "...", "images": [{ "number": 1, "group": "Flashing" }], "children": [] },
-    { "title": "...", "bodyMd": "...", "images": [{ "number": 2, "group": "Roof Deck" }], "children": [] },
-    { "title": "...", "bodyMd": "...", "images": [{ "number": 3, "group": "Flashing" }], "children": [] }
-  ]
-  \`\`\`
-- **Required Output JSON**:
   \`\`\`json
   {
     "sections": [
       {
-        "title": "Flashing",
-        "bodyMd": "", "images": [],
-        "children": [
-          { "title": "...", "bodyMd": "...", "images": [{ "number": 1, "group": "Flashing" }], "children": [] },
-          { "title": "...", "bodyMd": "...", "images": [{ "number": 3, "group": "Flashing" }], "children": [] }
-        ]
+        "title": "Block 1",
+        "bodyMd": ["Site Set-Up"],
+        "images": [{ "number": 1, "group": ["Block 1"] }],
+        "children": []
       },
       {
-        "title": "Roof Deck",
-        "bodyMd": "", "images": [],
-        "children": [
-          { "title": "...", "bodyMd": "...", "images": [{ "number": 2, "group": "Roof Deck" }], "children": [] }
-        ]
+        "title": "~Step Falshings",
+        "bodyMd": ["Step flashings were being installed in accordance with spec"],
+        "images": [{ "number": 2, "group": ["Block 1"] }],
+        "children": []
+      }
+    ]
+  }
+  \`\`\`
+
+- **Required Output JSON (after title refinement)**:
+  \`\`\`json
+  {
+    "sections": [
+       {
+        "title": "Block 1",
+        "bodyMd": ["Site Set-Up"],
+        "images": [{ "number": 1, "group": ["Block 1"] }],
+        "children": []
+      },
+      {
+        "title": "Step Flashings",
+        "bodyMd": ["Step flashings were being installed in accordance with spec"],
+        "images": [{ "number": 2, "group": ["Block 1"] }],
+        "children": []
       }
     ]
   }
   \`\`\`
 `;
-    } else { // ungrouped
-      return `# ROLE: You are a Senior Technical Writer. Your job is to take a list of pre-formatted JSON "section" objects and logically organize them into a final, structured report.
-
-# MISSION:
-Your primary mission is to intelligently group the incoming sections based on their content and titles, as there are no pre-defined groups.
-
-${commonRules}
-
-# UNGROUPED-SPECIFIC RULES:
-- Analyze the \`title\` and \`bodyMd\` of each section to understand its content.
-- Create new, general parent sections that logically categorize the content (e.g., "General Site Conditions", "Structural Observations", "Safety Concerns").
-- Do not simply use the title of a child section as a parent section title. The parent section should represent a broader category.
-
-# EXAMPLE (Ungrouped Mode):
-- **Input JSON**:
-  \`\`\`json
-  [
-    { "title": "Damaged Insulation", "bodyMd": "Insulation in attic is torn.", "images": [], "children": [] },
-    { "title": "Flashing at Eaves", "bodyMd": "Step flashing is correctly installed.", "images": [], "children": [] },
-    { "title": "Exposed Wiring", "bodyMd": "Live wires exposed near the main panel.", "images": [], "children": [] }
-  ]
-  \`\`\`
-- **Required Output JSON**:
-  \`\`\`json
-  {
-    "sections": [
-      {
-        "title": "Building Envelope",
-        "bodyMd": "", "images": [],
-        "children": [
-          { "title": "Damaged Insulation", "bodyMd": "Insulation in attic is torn.", "images": [], "children": [] },
-          { "title": "Flashing at Eaves", "bodyMd": "Step flashing is correctly installed.", "images": [], "children": [] }
-        ]
-      },
-      {
-        "title": "Safety Observations",
-        "bodyMd": "", "images": [],
-        "children": [
-          { "title": "Exposed Wiring", "bodyMd": "Live wires exposed near the main panel.", "images": [], "children": [] }
-        ]
-      }
-    ]
-  }
-  \`\`\`
-`;
-    }
   }
 
-  // Stage 2: Runtime User Prompt for IMAGE ANALYSIS AGENT
+  //#################################
+  //# Stage 2: Runtime/Task Prompt  #
+  //#################################
   generateUserPrompt(
     observations: string[],
     specifications: string[],
     sections: Section[],
-    grouping: GroupingMode,
+    grouping: GroupingMode
   ): string {
     const specs =
       specifications.length > 0
@@ -187,22 +156,26 @@ ${specifications.map((spec) => `- ${spec}`).join('\n')}
     return `
 # INSTRUCTIONS:
 - Analyze the following raw observations.
-- For each one, create a structured and detailed JSON "section" object following the rules and format I provided in my system prompt.
-- Return a single JSON array containing all of the generated section objects.
+- **Critical** If you generate a title yourself, you MUST prefix it with a tilde (~). For example: "~Gable End Drip Edge Flashing".
+- For each observation, generate exactly one section, which can and should have multiple elemends in the bodyMd array, each element is a specific point.
+- Return a single JSON object of the form {"sections":[ ... ]} containing one section for each observation, in the same order.
+- Reference the relevant specifications when needed.
 
 ${specs}
 
-# RAW OBSERVATIONS:
+# RAW OBSERVATIONS FROM THE SITE:
 ${observations.map((obs) => `- ${obs}`).join('\n')}
 `;
   }
 
+
   // Stage 2: Runtime User Prompt for SUMMARY AGENT
   generateSummaryPrompt(draft: string, context: any, sections: Section[]): string {
     return `# INSTRUCTIONS:
-- Take the following array of JSON "section" objects.
-- Organize them into a final, structured report with a logical hierarchy, following the rules and format I provided in my system prompt.
-- Create new parent sections to group related observations.
+- Take the following array of JSON "section" objects and refine the titles as needed for clarity and grouping.
+- Follow the rules I provided in my system prompt. Do not change user-provided titles (those without a ~).
+- **Critical** If title is marked with a tilde (~), you can edit the title to improve structure and clarity. IF no tilde, MUST leave the title as is.
+- Organize them into a final, flat list of sections, following the rules and format I provided in my system prompt.
 
 # JSON SECTIONS TO ORGANIZE:
 \`\`\`json
@@ -210,4 +183,4 @@ ${JSON.stringify(sections, null, 2)}
 \`\`\`
 `;
   }
-} 
+}

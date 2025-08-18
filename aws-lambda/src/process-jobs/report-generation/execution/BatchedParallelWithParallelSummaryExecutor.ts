@@ -85,7 +85,7 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
       // Add timeout safeguard for summary generation
       const summaryOptions: any = {
         temperature: 0.7,
-        maxTokens: 12000  // Increased to prevent content truncation
+        maxTokens: 3000  // Reduced from 12000 for title-only summary
       };
       
       // Add reasoning effort for GPT-5

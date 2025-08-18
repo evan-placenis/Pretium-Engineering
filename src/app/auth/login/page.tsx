@@ -1,7 +1,9 @@
-import { Suspense } from 'react';
-import LoginPage from './login_page';
+'use client';
 
-export default function Page() {
+import LoginPage from './login_page';
+import { Suspense } from 'react';
+
+export default function Login() {
   return (
     <Suspense fallback={<div>Loading...</div>}>
       <LoginPage />

@@ -85,7 +85,7 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
       // Add timeout safeguard for summary generation
       const summaryOptions: any = {
         temperature: 0.7,
-        maxTokens: 12000  // Increased to prevent content truncation
+        maxTokens: 3000  // Increased to prevent content truncation
       };
       
       // Add reasoning effort for GPT-5

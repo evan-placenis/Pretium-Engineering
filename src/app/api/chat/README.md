@@ -44,6 +44,22 @@ These tools perform modifications to the report. They are all stateless and foll
     - All database operations within the tools use a **Service Role Supabase Client** (`createServiceRoleClient`) to bypass Row Level Security (RLS), which is necessary for the server to read and write data on behalf of the user.
     - The result of the tool call is sent back to the LLM. This loop continues until the LLM responds with a natural language message for the user.
 4.  **Response:** The API responds with a JSON object containing the final AI message and, crucially, the `updatedSections` array, which represents the complete, new state of the report after all tool operations have been completed.
+5.  **Cache Invalidation:** Immediately after a successful database update, the API calls `revalidateTag()` to invalidate the Next.js cache for the specific report.
+
+---
+
+## The "Silent AI" Problem and the Confirmation Message
+
+A critical aspect of this architecture is how the server knows when to save the final report. The save-and-refresh logic is triggered **only when the API sends a successful final response** containing the AI's natural language message.
+
+This creates a subtle failure case:
+
+- **Single Updates (Work Correctly):** When the AI performs a single action (e.g., `update_section`), it typically follows up with a confirmation message like, "Okay, I've updated that section." This message allows the server to exit its loop gracefully, save the changes, and send the successful response.
+- **Batch Updates (Can Fail):** When the AI performs a `batch_update_sections` call, it may consider the entire task complete after the single successful tool call. It often does **not** send a final confirmation message and simply goes silent.
+
+When the AI goes silent, the server's orchestration loop continues until it times out, at which point it returns a `400 Bad Request` error. The in-memory changes are discarded, and the successful response with `updatedSections` is never sent.
+
+**Solution:** The system prompt (`getSystemPrompt()` in `route.ts`) now includes an explicit, critical rule that instructs the AI that it **MUST** send a simple confirmation message after every successful `batch_update_sections` call. This ensures that the batch update workflow mimics the successful single update workflow, triggering the save-and-refresh process reliably.
 
 ---
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceRoleClient } from '@/lib/supabase';
 import { Section } from '@/lib/jsonTreeModels/types/section';
+import { revalidateTag } from 'next/cache';
 
 export async function POST(
   req: NextRequest,
@@ -19,17 +20,36 @@ export async function POST(
 
     const supabaseAdmin = createServiceRoleClient();
 
-    const { error } = await supabaseAdmin
+    // First, prune any future edits to handle branching history
+    const { error: pruneError } = await supabaseAdmin.rpc('prune_future_edits', { p_report_id: reportId });
+
+    if (pruneError) {
+      console.error(`[API] Failed to prune future edits for report ${reportId}:`, pruneError);
+      throw pruneError;
+    }
+
+    // Now, update the sections, which will create a new edit via the trigger
+    const { data, error } = await supabaseAdmin
       .from('reports')
       .update({ sections_json: { sections } })
-      .eq('id', reportId);
+      .eq('id', reportId)
+      .select('current_edit_number') // Use the new column
+      .single();
 
     if (error) {
       console.error(`[API] Failed to save sections for report ${reportId}:`, error);
       throw error;
     }
 
-    return NextResponse.json({ success: true, message: 'Sections saved successfully.' });
+    // --- Cache Invalidation Step ---
+    revalidateTag(`report:${reportId}`);
+    console.log(`[Cache] Revalidated tag for report: ${reportId}`);
+
+    return NextResponse.json({ 
+        success: true, 
+        message: 'Sections saved successfully.',
+        newEditNumber: data.current_edit_number // Return the new number
+    });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
     console.error(`[API] Error in POST /reports/${reportId}/sections:`, errorMessage);

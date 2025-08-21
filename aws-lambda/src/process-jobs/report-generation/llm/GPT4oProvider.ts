@@ -23,16 +23,13 @@ export class GPT4oProvider implements LLMProvider {
         model: 'gpt-4o',
         messages: [
           {
-            role: 'system',
-            content: 'You are a professional engineering inspector. Provide clear, accurate technical observations.'
-          },
-          {
             role: 'user',
             content: prompt
           }
         ],
         temperature: options?.temperature || 0.7,
         max_tokens: options?.maxTokens || 2000,
+        response_format: { type: "json_object" }, // Force JSON output
         stream: true // Enable streaming
       });
 

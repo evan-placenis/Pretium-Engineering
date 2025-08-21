@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase, Project, Report, ReportSnapshot } from '@/lib/supabase';
+import { supabase, Project, Report } from '@/lib/supabase';
 import { Section } from '../operations/types';
 import { SectionModel } from '@/lib/jsonTreeModels/SectionModel';
 import { ReportImage as ReportImageType } from '@/types/reportImage';
@@ -41,22 +41,7 @@ export function useReportData(reportId: string) {
           console.log('Loading from sections_json');
           loadedSections = SectionModel.fromJSON(reportData.sections_json).getState().sections;
         } else {
-          const { data: snapshotData, error: snapshotError } = await supabase
-            .from('report_snapshots')
-            .select('sections')
-            .eq('report_id', reportId)
-            .order('version', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          if (snapshotError) console.warn('Could not fetch latest snapshot:', snapshotError.message);
-
-          if (snapshotData?.sections) {
-            console.log('Loading from latest snapshot');
-            loadedSections = SectionModel.fromJSON(snapshotData.sections as { sections: Section[] }).getState().sections;
-          } else {
-            console.log('No sections_json or snapshots found, starting with an empty report.');
-          }
+          console.log('No sections_json found, starting with an empty report.');
         }
         setSections(loadedSections);
         setContent(loadedSections.length > 0 ? new SectionModel(loadedSections).toMarkdown() : '');

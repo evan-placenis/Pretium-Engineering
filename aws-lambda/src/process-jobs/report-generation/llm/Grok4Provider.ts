@@ -30,16 +30,13 @@ export class Grok4Provider implements LLMProvider {
         model: 'grok-4',
         messages: [
           {
-            role: 'system',
-            content: 'You are a professional engineering inspector. Provide clear, accurate technical observations.'
-          },
-          {
             role: 'user',
             content: prompt
           }
         ],
         temperature: options?.temperature || 0.7,
         max_tokens: options?.maxTokens || 2000,
+        response_format: { type: "json_object" }, // Force JSON output
         stream: true // Enable streaming
       });
       const apiCallEndTime = Date.now();

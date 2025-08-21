@@ -5,7 +5,7 @@ export function useReportSaver(reportId: string) {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const saveSections = useCallback(async (sections: Section[]) => {
+  const saveSections = useCallback(async (sections: Section[]): Promise<boolean> => {
     if (!reportId) {
       setSaveError("Report ID is not available.");
       return false;

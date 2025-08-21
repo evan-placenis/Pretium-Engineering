@@ -19,18 +19,26 @@ export class SectionModel {
 
   constructor(initialSections: Section[] = [], strategy?: ReportStructureStrategy) {
     this.strategy = strategy || new ObservationReportStrategy();
-    this.state = { sections: initialSections, version: 1, lastModified: new Date().toISOString() };
+    // Ensure incoming sections are deeply copied and are plain objects
+    const sectionsCopy = JSON.parse(JSON.stringify(initialSections));
+    this.state = { sections: sectionsCopy, version: 1, lastModified: new Date().toISOString() };
   }
 
   private updateState(sections: Section[]) {
+    // Always ensure the state is composed of plain, serializable objects
+    const sectionsCopy = JSON.parse(JSON.stringify(sections));
     this.state = {
-      sections,
+      sections: sectionsCopy,
       version: this.state.version + 1,
       lastModified: new Date().toISOString()
     };
   }
 
-  private findSectionById(sections: Section[], id: string): Section | null {
+  public setState(sections: Section[]): void {
+    this.updateState(sections);
+  }
+
+  public findSectionById(sections: Section[], id: string): Section | null {
     for (const section of sections) {
       if (section.id === id) return section;
       if (section.children) {
@@ -39,6 +47,14 @@ export class SectionModel {
       }
     }
     return null;
+  }
+
+  public isDescendant(potentialChildId: string, potentialParentId: string): boolean {
+    const parent = this.findSectionById(this.state.sections, potentialParentId);
+    if (!parent || !parent.children) {
+        return false;
+    }
+    return !!this.findSectionById(parent.children, potentialChildId);
   }
 
 
@@ -509,5 +525,12 @@ export class SectionModel {
 
   autoNumberSections(): void {
     this.strategy.autoNumber(this.state.sections, '');
+  }
+
+  clone(): SectionModel {
+    const clonedSections = typeof structuredClone === 'function'
+      ? structuredClone(this.state.sections)
+      : JSON.parse(JSON.stringify(this.state.sections)); // fallback, loses undefined/Date
+    return new SectionModel(clonedSections, this.strategy);
   }
 }

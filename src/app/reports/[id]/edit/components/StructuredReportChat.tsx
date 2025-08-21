@@ -27,7 +27,7 @@ interface StructuredReportChatProps {
   redo: () => Promise<any>;
   canUndo: boolean;
   canRedo: boolean;
-  onChatComplete: (updatedSections: Section[]) => void;
+  signalEdit: () => void;
 }
 
 export function StructuredReportChat({
@@ -41,7 +41,7 @@ export function StructuredReportChat({
   redo,
   canUndo,
   canRedo,
-  onChatComplete,
+  signalEdit,
 }: StructuredReportChatProps) {
   const {
     chatMessages,
@@ -55,7 +55,7 @@ export function StructuredReportChat({
     initializeChat,
     chatContainerRef,
     isLoadingHistory
-  } = useStructuredChat(reportId, sections, project, report, user, onChatComplete);
+  } = useStructuredChat(reportId, sections, project, report, user, signalEdit);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isCentered, setIsCentered] = useState(false);

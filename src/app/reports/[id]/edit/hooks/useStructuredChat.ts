@@ -22,11 +22,11 @@ export const useStructuredChat = (
   project: Project | null,
   report: Report | null,
   user: any,
-  onChatComplete?: (updatedSections: Section[]) => void
+  signalEdit?: () => void // Replaced onChatComplete with signalEdit
 ): StructuredChatState => {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatMessage, setChatMessage] = useState('');
-  const [selectedModel, setSelectedModel] = useState('grok-4'); // Default model
+  const [selectedModel, setSelectedModel] = useState('gpt-4o'); // Default model
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
@@ -94,64 +94,100 @@ export const useStructuredChat = (
 
   // Initialize chat with system prompt
   const initializeChat = useCallback(async (): Promise<void> => {
-    if (!project?.id || isInitialized || hasInitializedRef.current || isLoadingHistory) return;
+    // This function should only run ONCE, when the component is ready.
+    if (!report || !project?.id || hasInitializedRef.current || isLoadingHistory) return;
 
+    // Immediately mark as initialized to prevent re-runs
+    hasInitializedRef.current = true;
     setIsSendingMessage(true);
-    try {
-      hasInitializedRef.current = true;
-      const existingMessages = chatMessages.length > 0;
-      
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userMessage: existingMessages ? 
-              'Silent initialization - do not generate welcome message' :
-              'This is your first message to the user. Greet the user and briefly introduce yourself as an AI assistant for editing this report. Keep your response to a single, friendly paragraph.',
-          reportId: reportId,
-          projectId: project.id
-        }),
-      });
+    
+    const initialize = async () => {
+      let attempts = 0;
+      const maxAttempts = 3;
+      const retryDelay = 1000; // 1 second
 
-      if (response.ok) {
-        const data = await response.json();
-        
-        // Save the initialization message if we got one
-        if (data.message && !existingMessages) {
-          const { data: savedMessage, error: assistantMsgError } = await supabase
+      while (attempts < maxAttempts) {
+        try {
+          // Check for existing messages one time, right before we act.
+          const { data: existingMessages, error } = await supabase
             .from('chat_messages')
-            .insert({
-              report_id: reportId,
-              content: data.message,
-              role: 'assistant'
-            })
-            .select()
-            .single();
+            .select('id')
+            .eq('report_id', reportId)
+            .limit(1);
 
-          if (assistantMsgError) {
-            console.error('Error saving initialization message:', assistantMsgError);
-          } else if (savedMessage) {
-            setChatMessages(prev => [...prev, savedMessage as ChatMessage]);
+          if (error) {
+            console.error("Failed to check for existing messages:", error);
+            return; // Don't proceed if we can't check
           }
-        }
-        
-        // IMPORTANT: The backend now manages state. We need to trigger a refresh on the frontend.
-        // For now, we assume another mechanism (like the operations hook) will handle this.
-        if(data.updatedSections) {
-            console.log("Received updated sections from init, calling onChatComplete.");
-            onChatComplete?.(data.updatedSections);
-        }
 
-        setIsInitialized(true);
+          const hasHistory = existingMessages && existingMessages.length > 0;
+
+          const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              userMessage: hasHistory ? 
+                  'Silent initialization - do not generate welcome message' :
+                  'This is your first message to the user. Greet the user and briefly introduce yourself as an AI assistant for editing this report. Keep your response to a single, friendly paragraph.',
+              reportId: reportId,
+              projectId: project.id
+            }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            
+            // Save the initialization message if we got one
+            if (data.message && !hasHistory) {
+              const { data: savedMessage, error } = await supabase
+                .from('chat_messages')
+                .insert({
+                  report_id: reportId,
+                  content: data.message,
+                  role: 'assistant'
+                })
+                .select()
+                .single();
+
+              if (error) {
+                console.error("Failed to save welcome message:", error);
+              } else if (savedMessage) {
+                // Manually add the welcome message to the local state
+                setChatMessages(prev => [...prev, savedMessage as ChatMessage]);
+              }
+            }
+            
+            if (data.updatedSections) {
+                console.log("Initialization returned sections, but we will ignore them to prevent overwriting the report.");
+            }
+
+            setIsInitialized(true);
+            return; // Success, exit the loop
+          } else if (response.status === 404) {
+            attempts++;
+            console.warn(`[initializeChat] Attempt ${attempts} failed with 404. Retrying in ${retryDelay}ms...`);
+            if (attempts >= maxAttempts) {
+              throw new Error(`Failed to initialize chat after ${maxAttempts} attempts.`);
+            }
+            await new Promise(res => setTimeout(res, retryDelay));
+          } else {
+            // For other errors, fail immediately
+            throw new Error(`API error: ${response.status} ${response.statusText}`);
+          }
+        } catch (error) {
+          console.error('Error initializing chat:', error);
+          return; // Exit loop on error
+        }
       }
-    } catch (error) {
-      console.error('Error initializing chat:', error);
-    } finally {
+    };
+
+    initialize().finally(() => {
       setIsSendingMessage(false);
-    }
-  }, [project?.id, isInitialized, chatMessages.length, reportId, isLoadingHistory, onChatComplete]);
+    });
+
+  }, [report, project?.id, reportId, isLoadingHistory]);
 
   const sendChatMessage = useCallback(async (): Promise<void> => {
     if (!chatMessage.trim() || !user || !reportId || !project?.id) return;
@@ -199,28 +235,25 @@ export const useStructuredChat = (
         setChatMessages(prev => [...prev, savedUserMessage as ChatMessage]);
       }
       
-      // Call the new stateless API
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userMessage: currentMessage,
           reportId: reportId,
           projectId: project.id,
-          model: selectedModel, // Pass the selected model to the API
+          model: selectedModel,
         }),
       });
-      
+
       if (!response.ok) {
-        console.error('API error:', response.status);
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorData = await response.json().catch(() => ({ error: 'API did not return valid JSON.' }));
+        throw new Error(`API error: ${response.status} ${response.statusText} - ${errorData.error}`);
       }
       
       const data = await response.json();
-      
-      // Save assistant message
+
+      // Save the final assistant message
       if (data.message) {
         const { data: savedMessage, error: assistantMsgError } = await supabase
           .from('chat_messages')
@@ -238,13 +271,10 @@ export const useStructuredChat = (
           setChatMessages(prev => [...prev, savedMessage as ChatMessage]);
         }
       }
-      
-      // IMPORTANT: The backend now manages state. We need to trigger a refresh on the frontend.
-      // This is a key part of the new architecture. We are no longer returning sections.
-      // We assume another hook will listen for database changes and update the UI.
+
+      // If the report was updated, signal the parent component to refresh
       if (data.updatedSections) {
-        console.log("Received updated sections, calling onChatComplete to refresh UI.");
-        onChatComplete?.(data.updatedSections);
+        signalEdit?.();
       }
 
     } catch (error: any) {
@@ -277,7 +307,7 @@ export const useStructuredChat = (
     } finally {
       setIsSendingMessage(false);
     }
-  }, [chatMessage, user, reportId, project?.id, onChatComplete, selectedModel]);
+  }, [chatMessage, user, reportId, project?.id, signalEdit, selectedModel]);
 
   return {
     chatMessages,

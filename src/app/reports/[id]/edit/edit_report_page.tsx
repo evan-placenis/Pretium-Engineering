@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { supabase, Project, Report } from '@/lib/supabase';
 import { createWordDocumentWithImages} from '@/hooks/word-utils';
@@ -12,12 +12,20 @@ import { SectionModel } from '@/lib/jsonTreeModels/SectionModel';
 import { ObservationReportStrategy } from '@/lib/report_strucutres/strategies/ObservationReportStrategy';
 import { useReportData } from './hooks/useReportData';
 import { useReportStreaming } from './hooks/useReportStreaming';
+import { useReportOperations, ToastConfig } from './hooks/useReportOperations';
+import { useStructuredChat } from './hooks/useStructuredChat';
+import { Toast } from '@/components/feedback';
 
 export default function EditReportPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const reportId = params.id as string;
   const [user, setUser] = useState<any>(null);
+  const [toastConfig, setToastConfig] = useState<{ message: string | null; type: 'success' | 'error' | 'warning' | 'info'; key: number }>({ message: null, type: 'success', key: 0 });
+
+  const showToast = (config: ToastConfig) => {
+    setToastConfig({ ...config, key: Date.now() });
+  };
   
   const [isStreaming, setIsStreaming] = useState(searchParams.get('streaming') === 'true');
   const {
@@ -36,19 +44,104 @@ export default function EditReportPage() {
     setContent,
   } = useReportData(reportId);
 
+  const renumberAndSetSections = (newSections: Section[]) => {
+    if (!newSections) return;
+    const model = new SectionModel(newSections, new ObservationReportStrategy());
+    model.autoNumberSections();
+    setSections(model.getState().sections);
+  };
+
+  const { 
+    undo, 
+    redo, 
+    canUndo, 
+    canRedo, 
+    signalEdit,
+    fetchCurrentSections,
+    lastEditTimestamp
+  } = useReportOperations(reportId, renumberAndSetSections, showToast);
+
+  // This effect will run when the AI (or any other operation) signals an edit has completed.
+  const initialTimestamp = useRef(lastEditTimestamp);
+  useEffect(() => {
+    // We check against the initial timestamp to avoid re-fetching on the first render.
+    if (lastEditTimestamp > initialTimestamp.current) {
+      const refresh = async () => {
+        const newSections = await fetchCurrentSections();
+        if (newSections) {
+          renumberAndSetSections(newSections);
+        }
+      };
+      refresh();
+    }
+  }, [lastEditTimestamp, fetchCurrentSections]);
+
+  const handleUndo = async () => {
+    const newSections = await undo();
+    if (newSections) {
+      renumberAndSetSections(newSections);
+    }
+  };
+
+  const handleRedo = async () => {
+    const newSections = await redo();
+    if (newSections) {
+      renumberAndSetSections(newSections);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey) { // Support for Mac (Cmd key)
+        if (event.key.toLowerCase() === 'z') {
+          event.preventDefault();
+          if (event.shiftKey) {
+            handleRedo();
+          } else {
+            handleUndo();
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handleUndo, handleRedo]);
+
+  const {
+    chatMessages,
+    chatMessage,
+    isSendingMessage,
+    isInitialized,
+    isLoadingHistory,
+    selectedModel,
+    setSelectedModel,
+    setChatMessage,
+    sendChatMessage,
+    initializeChat,
+    chatContainerRef,
+  } = useStructuredChat(
+    reportId,
+    sections,
+    project,
+    report,
+    user,
+    signalEdit
+  );
+
+  const handleSave = (newSections: Section[]) => {
+    renumberAndSetSections(newSections);
+    signalEdit();
+  };
+
   const { streamingStatus, streamingSections } = useReportStreaming(reportId, isStreaming, setIsStreaming, setSections);
   
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadStatus, setDownloadStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [showChat, setShowChat] = useState(true);
-
-  // This is a placeholder for the undo/redo functionality
-  // since useOperations was removed.
-  const undo = async () => console.log("Undo action triggered");
-  const redo = async () => console.log("Redo action triggered");
-  const canUndo = false;
-  const canRedo = false;
 
   const reportStrategy = new ObservationReportStrategy();
 
@@ -57,7 +150,8 @@ export default function EditReportPage() {
   const handleChatComplete = (updatedSections: Section[]) => {
     if (updatedSections) {
       console.log("Chat complete, updating sections on main page.");
-      setSections(updatedSections);
+      renumberAndSetSections(updatedSections);
+      signalEdit(); // Signal that the AI made an edit
     }
   };
 
@@ -125,6 +219,7 @@ export default function EditReportPage() {
       minHeight: '100vh',
       background: '#f8f9fa'
     }}>
+      <Toast key={toastConfig.key} message={toastConfig.message} type={toastConfig.type} />
       {/* Top Navigation Bar */}
       <div style={{
         display: 'flex',
@@ -279,7 +374,8 @@ export default function EditReportPage() {
           <ReportEditor
             reportId={reportId}
             sections={isStreaming ? streamingSections : sections}
-            onSectionsChange={setSections}
+            onSectionsChange={handleSave}
+            signalEdit={signalEdit}
             reportImages={reportImages}
             isStreaming={isStreaming}
             streamingStatus={streamingStatus}
@@ -301,11 +397,11 @@ export default function EditReportPage() {
               user={user}
               reportImages={reportImages}
               sections={sections}
-              undo={undo}
-              redo={redo}
+              undo={handleUndo}
+              redo={handleRedo}
               canUndo={canUndo}
               canRedo={canRedo}
-              onChatComplete={handleChatComplete}
+              signalEdit={signalEdit}
             />
           </div>
         )}

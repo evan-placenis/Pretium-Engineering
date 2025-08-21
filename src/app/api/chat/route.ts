@@ -3,7 +3,13 @@ import { OpenAI } from 'openai';
 import { SectionTools } from '@/lib/jsonTreeModels/tools/SectionTools';
 import { ChatCompletionTool, ChatCompletionMessageParam } from 'openai/resources/chat/completions.mjs';
 import { searchProjectSpecsTool, handleSpecSearch, ruleGate } from '@/lib/jsonTreeModels/tools/chat-knowlege/guards';
-import { supabase } from '@/lib/supabase';
+import { createServiceRoleClient } from '@/lib/supabase'; // Use the admin client
+import { getReportSectionsForChat } from "@/lib/data/reports";
+import { SectionModel } from "@/lib/jsonTreeModels/SectionModel";
+import { ObservationReportStrategy } from "@/lib/report_strucutres/strategies/ObservationReportStrategy";
+import { revalidateTag } from 'next/cache';
+
+const supabaseAdmin = createServiceRoleClient(); // Instantiate the admin client
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,23 +20,49 @@ export async function POST(req: NextRequest) {
         error: "userMessage, reportId, and projectId are required"
       }), { status: 400 });
     }
+    
+    // --- Step 1: Fetch the report using the cached function ---
+    const reportData = await getReportSectionsForChat(reportId);
+
+    if (!reportData) {
+      return new Response(
+        JSON.stringify({
+          error: `Report with ID ${reportId} could not be fetched.`,
+        }),
+        { status: 404 }
+      );
+    }
+
+    const sectionModel = new SectionModel(
+      reportData.sections,
+      new ObservationReportStrategy()
+    );
 
     // --- Pre-check Gate ---
-    const allowSpecs = ruleGate(userMessage);
-    const sectionTools = new SectionTools(reportId, projectId);
+    const allowSpecs = await ruleGate(userMessage);
+    // --- Step 2: Pass the in-memory model to the tools ---
+    const sectionTools = new SectionTools(reportId, projectId, sectionModel);
     
     // Dynamically assemble the tool list based on the gate
     const contextTools = sectionTools.getContextTools();
     const actionTools = sectionTools.getActionTools();
-    let availableTools: any[] = [...contextTools, ...actionTools];
+    
+    // Separate definitions from handlers
+    const toolDefinitions: ChatCompletionTool[] = [
+        ...contextTools.map(t => t.function),
+        ...actionTools.map(t => t.function),
+    ].map(f => ({ type: 'function', function: { name: f.name, description: f.description, parameters: f.parameters } }));
+
     if (allowSpecs) {
-      availableTools.push(searchProjectSpecsTool);
+      toolDefinitions.push({ type: 'function', function: searchProjectSpecsTool.function });
     }
     
     const allToolHandlers = {
-        ...contextTools.reduce((acc, tool) => ({ ...acc, [tool.function.name]: tool.function.handler }), {}),
-        ...actionTools.reduce((acc, tool) => ({ ...acc, [tool.function.name]: tool.function.handler }), {}),
-        [searchProjectSpecsTool.function.name]: (args: any) => handleSpecSearch(supabase, projectId, args.query, args.topK)
+        ...[...contextTools, ...actionTools].reduce((acc, tool) => {
+            acc[tool.function.name] = tool.function.handler;
+            return acc;
+        }, {} as Record<string, Function>),
+        [searchProjectSpecsTool.function.name]: (args: any) => handleSpecSearch(supabaseAdmin, projectId, args.query, args.topK)
     };
     
     const policyFlags = `Policy flags: allowSpecs=${allowSpecs}`;
@@ -41,9 +73,7 @@ export async function POST(req: NextRequest) {
         { role: 'user', content: userMessage }
     ];
     const maxSteps = 5;
-
-    
-    
+    let hasMadeChanges = false; // Flag to track if any action tool was used
 
     for (let step = 0; step < maxSteps; step++) {
       let completion;
@@ -57,7 +87,7 @@ export async function POST(req: NextRequest) {
         completion = await grokClient.chat.completions.create({
           model: model,
           messages: currentMessages,
-          tools: availableTools as unknown as ChatCompletionTool[],
+          tools: toolDefinitions,
           tool_choice: "auto"
         });
       } else {
@@ -65,27 +95,57 @@ export async function POST(req: NextRequest) {
         completion = await openai.chat.completions.create({
           model: model,
           messages: currentMessages,
-          tools: availableTools as unknown as ChatCompletionTool[],
+          tools: toolDefinitions,
           tool_choice: "auto"
         });
       }
 
       const message = completion.choices[0].message;
 
-      // If no tool calls, we're done
-      if (!message.tool_calls?.length) {
-        const finalModel = await sectionTools.getFinalModel();
-        return new Response(JSON.stringify({
-          message: message.content,
-          updatedSections: finalModel.getState().sections,
-        }));
+      if (!message.tool_calls) {
+        // AI is done, save the final state if changes were made
+        if (hasMadeChanges) {
+            const finalSections = sectionModel.getState().sections;
+
+            // --- Step 3a: Prune future edits before saving the new one --- (this is for knowing what is next for undo/redo)
+            const { error: pruneError } = await supabaseAdmin.rpc('prune_future_edits', { p_report_id: reportId });
+            if (pruneError) {
+                console.error('Failed to prune future edits before final save:', pruneError);
+                throw pruneError; // Stop the process if pruning fails
+            }
+
+            // --- Step 3b: Perform one final, atomic save ---
+            const { error: updateError } = await supabaseAdmin 
+              .from('reports')
+              .update({ sections_json: { sections: finalSections } })
+              .eq('id', reportId);
+            
+            if (updateError) throw updateError;
+            
+            // --- Cache Invalidation Step ---
+            revalidateTag(`report:${reportId}`);
+            console.log(`[Cache] Revalidated tag for report: ${reportId}`);
+
+            return NextResponse.json({
+              message: message.content,
+              updatedSections: finalSections, // Let the client know a refresh is needed
+            });
+        } else {
+            // No changes were made, just return the message
+            return NextResponse.json({
+              message: message.content, 
+              updatedSections: null, // No refresh needed
+            });
+        }
       }
 
-      // Add assistant's message with tool calls to conversation first
       currentMessages.push(message);
 
-      // Then execute each tool call and add their results
       for (const call of message.tool_calls) {
+        if (sectionTools.isActionTool(call.function.name)) {
+            hasMadeChanges = true; // Set the flag, but don't prune here
+        }
+        
         const { name, arguments: rawArgs } = call.function;
         const args = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : rawArgs;
         
@@ -94,12 +154,26 @@ export async function POST(req: NextRequest) {
             throw new Error(`Tool ${name} not found`);
         }
 
-        const result = await handler(args);
+        let result;
+        try {
+          result = await handler(args);
+        } catch (error: any) {
+          console.error(`[Tool Error] Exception in ${name}:`, error.message);
+          result = { success: false, error: error.message };
+        }
+      
+        const toolContent = result.success 
+            ? (typeof result.data === 'object' ? JSON.stringify(result.data ?? {}) : String(result.data ?? ''))
+            : `Error: ${result.error}`;
         
+        if (!result.success) {
+          console.log(`[Tool Feedback] Sending corrective error to model: ${toolContent}`);
+        }
+
         currentMessages.push({
           role: "tool",
           tool_call_id: call.id,
-          content: typeof result === 'object' ? JSON.stringify(result) : result,
+          content: toolContent,
         });
       }
     }
@@ -137,6 +211,7 @@ Your response MUST be a sequence of two tool calls:
 
 **OTHER RULES:**
 1.  **BE LAZY:** Do not fetch context you don't need. Use the narrowest tool possible.
-2.  **RENUMBER LAST:** After any structural change (\`add_section\`, \`move_section\`, \`delete_section\`), your final action **MUST** be a call to \`renumber_sections()\`.
-3.  **SEARCH FOR SPECS:** Use \`search_project_specs\` ONLY for questions about technical requirements, codes, or standards.`;
+2.  **USE BATCH FOR EFFICIENCY:** If a user's request requires more than two distinct changes (e.g., updating three sections, adding two and deleting one), you **MUST** use the \`batch_update_sections\` tool. This is much faster and more efficient. For one or two changes, use the single-action tools.
+3.  **RENUMBER LAST:** After any structural change (\`add_section\`, \`move_section\`, \`delete_section\`, or a batch operation), your final action **MUST** be a call to \`renumber_sections()\`.
+4.  **SEARCH FOR SPECS:** Use \`search_project_specs\` ONLY for questions about technical requirements, codes, or standards.`;
 }

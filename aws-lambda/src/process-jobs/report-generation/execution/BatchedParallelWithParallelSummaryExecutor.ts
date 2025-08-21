@@ -114,12 +114,16 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
       try {
         const parsedJson = JSON.parse(summaryContent);
         // NEW: Handle title-only summary response
-        if (Array.isArray(parsedJson.titles) && parsedJson.titles.length === allSections.length) {
-          console.log('✅ Parsed title-only summary. Merging with original sections.');
-          // Map the new titles back to the original sections
+        if (Array.isArray(parsedJson.titles)) {
+          if (parsedJson.titles.length !== allSections.length) {
+            console.warn(`[DIAGNOSTIC MODE] Summary Agent returned ${parsedJson.titles.length} titles, but expected ${allSections.length}. Proceeding with partial data to show the raw failure.`);
+          }
+          console.log('✅ Parsed title-only summary. Merging with original sections (even if partial).');
+          // Map the new titles back to the original sections.
+          // If the new titles array is shorter, the || section.title will prevent a crash and use the original title.
           finalSections = allSections.map((section, index) => ({
             ...section,
-            title: parsedJson.titles[index] || section.title, // Fallback to old title if new one is empty
+            title: parsedJson.titles[index] || section.title, 
           }));
           summaryContent = JSON.stringify({ sections: finalSections }); // Re-serialize for downstream use
         } else if (parsedJson.sections) {
@@ -130,12 +134,33 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
           summaryContent = JSON.stringify(model.toJSON());
           console.log('Parsed and auto-numbered JSON sections for summary');
         } else {
-          console.warn("Summary JSON is missing 'titles' or 'sections' property. Falling back to initial sections.");
-          finalSections = allSections; // Fallback to initial sections
+          console.error("Summary Agent failed: Response JSON is missing 'titles' or 'sections' property. Writing raw output for diagnostics.");
+          finalSections = [{
+            id: uuidv4(),
+            title: "REPORT GENERATION FAILED: INVALID SUMMARY AGENT RESPONSE",
+            number: "!",
+            bodyMd: [
+              "The summary agent produced invalid output. The raw text from the AI is included below for debugging.",
+              "---",
+              summaryContent,
+              "---"
+            ]
+          }];
         }
       } catch (e: any) {
-        console.error('Failed to parse final summaryContent as JSON:', e.message, "Returning raw sections from batches.");
-        finalSections = allSections; // Fallback to initial sections if summary parsing fails
+        console.error('Failed to parse final summaryContent as JSON:', e.message, "Writing raw output for diagnostics.");
+        finalSections = [{
+          id: uuidv4(),
+          title: "REPORT GENERATION FAILED: JSON PARSING ERROR",
+          number: "!",
+          bodyMd: [
+            "The summary agent produced text that could not be parsed as JSON. The raw text from the AI is included below for debugging.",
+            `Error: ${e.message}`,
+            "---",
+            summaryContent,
+            "---"
+          ]
+        }];
       }
       
       console.error(`[DEBUG] EXECUTION COMPLETE: Report generation finished.`);

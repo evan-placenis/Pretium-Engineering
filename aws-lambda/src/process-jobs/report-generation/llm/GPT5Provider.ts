@@ -49,6 +49,7 @@ export class GPT5Provider implements LLMProvider {
         ],
         max_completion_tokens: config.maxTokens, // Use correct parameter name
         reasoning_effort: options?.reasoningEffort || 'medium', // Add reasoning effort parameter
+        response_format: { type: "json_object" }, // Force JSON output
         stream: true // Enable streaming
       });
 

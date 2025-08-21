@@ -60,7 +60,6 @@ export type Project = Tables<'projects'>;
 export type Report = Tables<'reports'>;
 export type ChatMessage = Tables<'chat_messages'>;
 export type ReportImage = Tables<'report_images'>;
-export type ReportSnapshot = Tables<'report_snapshots'>;
 
 export type ProjectImage = {
   id: string;

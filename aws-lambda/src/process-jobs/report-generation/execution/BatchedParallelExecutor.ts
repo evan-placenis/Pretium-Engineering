@@ -85,7 +85,7 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
       // Add timeout safeguard for summary generation
       const summaryOptions: any = {
         temperature: 0.7,
-        maxTokens: 3000  // Increased to prevent content truncation
+        maxTokens: 3000  // Reduced from 12000 for title-only summary
       };
       
       // Add reasoning effort for GPT-5
@@ -107,6 +107,10 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
       if (summaryResponse.error) {
         console.error(`[ERROR] SUMMARY ERROR: ${summaryResponse.error}`);
         throw new Error(`Summary generation failed: ${summaryResponse.error}`);
+      }
+      var test = ""
+      if (summaryResponse.content.length == 0) {
+        test = "the output is actually empty"
       }
 
       let summaryContent = summaryResponse.content || '';
@@ -130,12 +134,31 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
           summaryContent = JSON.stringify(model.toJSON());
           console.log('Parsed and auto-numbered JSON sections for summary');
         } else {
-          console.warn("Summary JSON is missing 'titles' or 'sections' property. Falling back to initial sections.");
-          finalSections = allSections; // Fallback to initial sections
+          // Handle cases where the JSON is valid but doesn't match expected structure or length
+          const errorMessage = `Summary JSON was valid but had an incorrect structure or mismatched title count. Expected ${allSections.length} titles, but the 'titles' array was missing, not an array, or had a different length.`;
+          console.error(`[ERROR] SUMMARY PARSE ERROR: ${errorMessage}`);
+          throw new Error(errorMessage);
         }
       } catch (e: any) {
-        console.error('Failed to parse final summaryContent as JSON:', e.message, "Returning raw sections from batches.");
-        finalSections = allSections; // Fallback to initial sections if summary parsing fails
+        console.error('Failed to parse final summaryContent as JSON:', e.message, "Creating error section and returning raw sections.");
+        const errorSection: Section = {
+          id: uuidv4(),
+          number: "!",
+          title: "! SUMMARY AGENT ERROR !",
+          bodyMd: [
+            "The summary agent returned a response that could not be processed. This is usually caused by a malformed or empty JSON response from the AI.",
+            "**Error Details:**",
+            `\`\`\`\n${e.message}\n\`\`\``,
+            "**Raw AI Output:**",
+            `\`\`\`\n${summaryContent || '(empty response)'}\n\`\`\``,
+            "**Full Summary Response Shape:**",
+            `\`\`\`json\n${JSON.stringify(summaryResponse, null, 2)}\n\`\`\``,
+            "**Full Summary Conent Shape:**",
+            `\`\`\`json\n${JSON.stringify(summaryContent, null, 2)}\n\`\`\``,
+          ],
+          children: [],
+        };
+        finalSections = [errorSection, ...allSections]; // Prepend error and use original sections
       }
       
       console.error(`[DEBUG] EXECUTION COMPLETE: Report generation finished.`);
@@ -150,7 +173,7 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
       });
 
       return {
-        content: summaryContent,
+        content: summaryContent + test,
         sections: groupedSections,
         metadata: {
           ...metadata,

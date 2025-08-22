@@ -102,12 +102,14 @@ export const searchProjectSpecsTool = {
 };
 
 export type SpecSearchResult = {
-  ok: true;
-  chunks: string;
-  truncated: boolean;
-  sourceCount?: number;
+  success: true;
+  data: {
+    chunks: string;
+    truncated: boolean;
+    sourceCount?: number;
+  };
 } | {
-  ok: false;
+  success: false;
   error: string;
 };
 
@@ -118,15 +120,17 @@ export async function handleSpecSearch(
   topK = 3
 ): Promise<SpecSearchResult> {
   const q = normalizeQuery(queryRaw);
-  if (!q) return { ok: false, error: "Empty query." };
+  if (!q) return { success: false, error: "Empty query." };
 
   const cacheKey = `${projectId}:${q}:${topK}`;
   const cached = getFromCache(cacheKey);
   if (cached !== null) {
     return {
-      ok: true,
-      chunks: cached.slice(0, MAX_SPECS_CHARS),
-      truncated: cached.length > MAX_SPECS_CHARS,
+      success: true,
+      data: {
+        chunks: cached.slice(0, MAX_SPECS_CHARS),
+        truncated: cached.length > MAX_SPECS_CHARS,
+      }
     };
   }
 
@@ -136,11 +140,13 @@ export async function handleSpecSearch(
     putInCache(cacheKey, text);
 
     return {
-      ok: true,
-      chunks: text.slice(0, MAX_SPECS_CHARS),
-      truncated: text.length > MAX_SPECS_CHARS,
+      success: true,
+      data: {
+        chunks: text.slice(0, MAX_SPECS_CHARS),
+        truncated: text.length > MAX_SPECS_CHARS,
+      }
     };
   } catch (err: any) {
-    return { ok: false, error: err?.message ?? "Spec search failed." };
+    return { success: false, error: err?.message ?? "Spec search failed." };
   }
 }

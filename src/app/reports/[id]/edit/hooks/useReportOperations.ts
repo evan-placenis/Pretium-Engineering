@@ -33,6 +33,23 @@ export function useReportOperations(
     const [lastEditTimestamp, setLastEditTimestamp] = useState<number>(Date.now());
     const debouncedLastEditTimestamp = useDebounce(lastEditTimestamp, 500);
 
+    useEffect(() => {
+        const clearHistory = async () => {
+            if (!reportId) return;
+            console.log(`[History] Clearing undo/redo history for report: ${reportId}`);
+            const { error } = await supabase.rpc('clear_report_history', { p_report_id: reportId });
+            if (error) {
+                console.error('Error clearing report history:', error);
+                showToast({ message: `Failed to clear report history: ${error.message}`, type: 'error' });
+            }
+             // Fetch the initial status after clearing
+            updateHistoryStatus();
+        };
+
+        clearHistory();
+    }, [reportId]); // Run only when reportId changes (i.e., on load)
+
+
     const updateHistoryStatus = useCallback(async () => {
         if (!reportId) return;
         const { data, error } = await supabase.rpc('get_history_status', { p_report_id: reportId });

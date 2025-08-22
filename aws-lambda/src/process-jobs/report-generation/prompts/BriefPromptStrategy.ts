@@ -198,7 +198,7 @@ ${observations.map((obs) => `- ${obs}`).join('\n')}
     const titles = sections.map(s => (s.title ?? 'Untitled').trim());
     const jsonTitles = JSON.stringify({ titles });
     return `# TITLES TO REFINE/Organize in the report
-\`\`\`json
+\`\`\`jsons
 ${jsonTitles}
 \`\`\`
 `;

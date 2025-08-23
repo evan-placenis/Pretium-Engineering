@@ -2,7 +2,7 @@
 import { ReportConfig, ReportResult, ExecutionStrategy, LLMProvider, ReportMode, GroupingMode, LLMModel, ExecutionType } from '../types';
 
 import { BatchedParallelExecutor } from './execution/BatchedParallelExecutor';
-import { BatchedParallelWithParallelSummaryExecutor } from './execution/BatchedParallelWithParallelSummaryExecutor';
+import { BatchedParallelExecutorWithImages } from './execution/BatchedParallelExecutorWithImages';
 import { Grok4Provider } from './llm/Grok4Provider';
 import { GPT4oProvider } from './llm/GPT4oProvider';
 import { GPT5Provider } from './llm/GPT5Provider';
@@ -30,7 +30,7 @@ export class ReportGenerator {
     this.executionStrategies = new Map();
 
     this.executionStrategies.set('batched-parallel', new BatchedParallelExecutor());
-    this.executionStrategies.set('batched-parallel-with-parallel-summary', new BatchedParallelWithParallelSummaryExecutor());
+    this.executionStrategies.set('batched-parallel-with-images', new BatchedParallelExecutorWithImages());
 
     this.promptStrategies = new Map();
     this.promptStrategies.set('brief', new BriefPromptStrategy());

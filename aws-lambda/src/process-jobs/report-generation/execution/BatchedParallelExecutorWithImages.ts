@@ -1,12 +1,12 @@
 // Batched Parallel Execution Strategy with Max 3 Agents
 // STREAMING IS ALWAYS ENABLED for real-time progress updates
 import { v4 as uuidv4 } from 'uuid';
-import { ExecutionStrategy, ExecutionParams, ExecutionResult, GroupingMode, ImageReference, Section } from '../../types';
+import { ExecutionStrategy, ExecutionParams, ExecutionResult, GroupingMode, ImageReference, Section, VisionContent } from '../../types';
 import { getRelevantKnowledgeChunks } from '../report-knowledge/guards';
 import { SectionModel } from './SectionModel';
 
 import { globalLlmLimit } from './limiter';
-export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStrategy {
+export class BatchedParallelExecutorWithImages implements ExecutionStrategy {
   
   private readonly BATCH_SIZE = 5;
   private readonly MAX_PARALLEL_AGENTS = 3;
@@ -108,22 +108,22 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
         console.error(`[ERROR] SUMMARY ERROR: ${summaryResponse.error}`);
         throw new Error(`Summary generation failed: ${summaryResponse.error}`);
       }
+      var test = ""
+      if (summaryResponse.content.length == 0) {
+        test = "the output is actually empty"
+      }
 
       let summaryContent = summaryResponse.content || '';
       let finalSections: Section[] = [];
       try {
         const parsedJson = JSON.parse(summaryContent);
         // NEW: Handle title-only summary response
-        if (Array.isArray(parsedJson.titles)) {
-          if (parsedJson.titles.length !== allSections.length) {
-            console.warn(`[DIAGNOSTIC MODE] Summary Agent returned ${parsedJson.titles.length} titles, but expected ${allSections.length}. Proceeding with partial data to show the raw failure.`);
-          }
-          console.log('✅ Parsed title-only summary. Merging with original sections (even if partial).');
-          // Map the new titles back to the original sections.
-          // If the new titles array is shorter, the || section.title will prevent a crash and use the original title.
+        if (Array.isArray(parsedJson.titles) && parsedJson.titles.length === allSections.length) {
+          console.log('✅ Parsed title-only summary. Merging with original sections.');
+          // Map the new titles back to the original sections
           finalSections = allSections.map((section, index) => ({
             ...section,
-            title: parsedJson.titles[index] || section.title, 
+            title: parsedJson.titles[index] || section.title, // Fallback to old title if new one is empty
           }));
           summaryContent = JSON.stringify({ sections: finalSections }); // Re-serialize for downstream use
         } else if (parsedJson.sections) {
@@ -134,33 +134,31 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
           summaryContent = JSON.stringify(model.toJSON());
           console.log('Parsed and auto-numbered JSON sections for summary');
         } else {
-          console.error("Summary Agent failed: Response JSON is missing 'titles' or 'sections' property. Writing raw output for diagnostics.");
-          finalSections = [{
-            id: uuidv4(),
-            title: "REPORT GENERATION FAILED: INVALID SUMMARY AGENT RESPONSE",
-            number: "!",
-            bodyMd: [
-              "The summary agent produced invalid output. The raw text from the AI is included below for debugging.",
-              "---",
-              summaryContent,
-              "---"
-            ]
-          }];
+          // Handle cases where the JSON is valid but doesn't match expected structure or length
+          const errorMessage = `Summary JSON was valid but had an incorrect structure or mismatched title count. Expected ${allSections.length} titles, but the 'titles' array was missing, not an array, or had a different length.`;
+          console.error(`[ERROR] SUMMARY PARSE ERROR: ${errorMessage}`);
+          throw new Error(errorMessage);
         }
       } catch (e: any) {
-        console.error('Failed to parse final summaryContent as JSON:', e.message, "Writing raw output for diagnostics.");
-        finalSections = [{
+        console.error('Failed to parse final summaryContent as JSON:', e.message, "Creating error section and returning raw sections.");
+        const errorSection: Section = {
           id: uuidv4(),
-          title: "REPORT GENERATION FAILED: JSON PARSING ERROR",
           number: "!",
+          title: "! SUMMARY AGENT ERROR !",
           bodyMd: [
-            "The summary agent produced text that could not be parsed as JSON. The raw text from the AI is included below for debugging.",
-            `Error: ${e.message}`,
-            "---",
-            summaryContent,
-            "---"
-          ]
-        }];
+            "The summary agent returned a response that could not be processed. This is usually caused by a malformed or empty JSON response from the AI.",
+            "**Error Details:**",
+            `\`\`\`\n${e.message}\n\`\`\``,
+            "**Raw AI Output:**",
+            `\`\`\`\n${summaryContent || '(empty response)'}\n\`\`\``,
+            "**Full Summary Response Shape:**",
+            `\`\`\`json\n${JSON.stringify(summaryResponse, null, 2)}\n\`\`\``,
+            "**Full Summary Conent Shape:**",
+            `\`\`\`json\n${JSON.stringify(summaryContent, null, 2)}\n\`\`\``,
+          ],
+          children: [],
+        };
+        finalSections = [errorSection, ...allSections]; // Prepend error and use original sections
       }
       
       console.error(`[DEBUG] EXECUTION COMPLETE: Report generation finished.`);
@@ -175,7 +173,7 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
       });
 
       return {
-        content: summaryContent,
+        content: summaryContent + test,
         sections: groupedSections,
         metadata: {
           ...metadata,
@@ -253,20 +251,43 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
       groupMap.get(title)!.push(section);
     });
 
-    // Step 2: Create a new parent section for each group
+    // Step 2: Create a new parent section for each group and explode bodyMd into children
     const parentSections: Section[] = [];
-    for (const [title, children] of groupMap.entries()) {
-      // Create a new parent section
+    for (const [title, originalSections] of groupMap.entries()) {
+      const newChildren: Section[] = [];
+
+      // Iterate over each original AI-generated section in the group
+      originalSections.forEach(originalSection => {
+        // Check if bodyMd is an array and has content
+        if (Array.isArray(originalSection.bodyMd) && originalSection.bodyMd.length > 0) {
+          // Map each point in bodyMd to a new child sub-section
+          originalSection.bodyMd.forEach((point, index) => {
+            const newChild: Section = {
+              id: uuidv4(),
+              number: '', // The auto-numberer will handle this
+              bodyMd: [point], // Each new child has a bodyMd array with a single string
+              // Only add all images from the original observation to the FIRST new child
+              images: index === 0 ? originalSection.images || [] : [],
+            };
+            newChildren.push(newChild);
+          });
+        } else if (originalSection.bodyMd) { 
+            // Handle cases where bodyMd might be a single string or something else, wrap it in a single child
+            const newChild: Section = {
+              id: uuidv4(),
+              number: '',
+              bodyMd: Array.isArray(originalSection.bodyMd) ? originalSection.bodyMd : [String(originalSection.bodyMd)],
+              images: originalSection.images || [],
+            };
+            newChildren.push(newChild);
+        }
+      });
+      
       const parentSection: Section = {
         id: uuidv4(),
         title: title,
         number: '',
-        children: children.map(child => ({
-          id: uuidv4(),
-          number: '',
-          bodyMd: child.bodyMd,
-          images: child.images || [],
-        })),
+        children: newChildren,
       };
       parentSections.push(parentSection);
     }
@@ -285,10 +306,8 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
       return [];
     }
   
-    // One stateless "agent" definition per batch
     const systemPrompt = promptStrategy.getImageSystemPrompt();
   
-    // Helper: safe JSON parse → sections[]
     const parseSections = (content?: string): Section[] => {
       if (!content) return [];
       try {
@@ -300,7 +319,6 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
       }
     };
   
-    // Map images → globally-throttled per-image tasks
     const perImageTasks = batch.map((img) =>
       globalLlmLimit(async () => {
         const imageTag = `[IMAGE:${img.number}:${img.group?.[0] || ''}]`;
@@ -310,17 +328,47 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
           : '(Section Title: N/A - choose section title)';
         const observation = `${sectionTitle} Description: ${description} Image: ${imageTag}`.trim();
   
-        // Per-image RAG (can also be throttled if DB/API load becomes an issue)
+        let imageUrl: string | undefined = undefined;
+        if (img.storage_path) {
+          try {
+            const { data, error } = await supabase.storage
+              .from('report_images')
+              .createSignedUrl(img.storage_path, 3600); // URL valid for 1 hour
+            if (error) {
+              console.error(`[img ${img.number}] Failed to sign URL for ${img.storage_path}:`, error.message);
+            } else {
+              imageUrl = data.signedUrl;
+            }
+          } catch (e: any) {
+            console.error(`[img ${img.number}] Exception while signing URL for ${img.storage_path}:`, e.message);
+          }
+        }
+
         const specsText = await getRelevantKnowledgeChunks(supabase, projectId, observation);
         const specifications = specsText ? specsText.split('\n') : [];
         console.log(`📝 [img ${img.number}] specs=${specifications.length}`);
   
-        // Tiny per-image prompt (arrays of length 1 keep your builder intact)
-        const userPrompt = promptStrategy.generateUserPrompt([observation], specifications, [], grouping);
+        const userPromptResult = promptStrategy.generateUserPrompt(
+          [observation], 
+          specifications, 
+          [], 
+          grouping,
+          [{ ...img, url: imageUrl }]
+        );
+        
+        // Combine system prompt with the user prompt for the final payload
+        let finalPrompt: string | VisionContent;
+        if (typeof userPromptResult === 'object' && userPromptResult !== null) {
+          finalPrompt = {
+            ...userPromptResult,
+            text: `${systemPrompt}\n\n${userPromptResult.text}`,
+          };
+        } else {
+          finalPrompt = `${systemPrompt}\n\n${userPromptResult}`;
+        }
   
-        // Stateless call: same systemPrompt, unique tiny userPrompt
         const resp = await llmProvider.generateContent(
-          `${systemPrompt}\n\n${userPrompt}`,
+          finalPrompt,
           {
             temperature: 0.3,
             maxTokens: 1500,
@@ -339,7 +387,6 @@ export class BatchedParallelWithParallelSummaryExecutor implements ExecutionStra
       })
     );
   
-    // Collect all sections from this batch (calls are globally throttled)
     const results = await Promise.all(perImageTasks);
     const batchSections = results.flat();
   

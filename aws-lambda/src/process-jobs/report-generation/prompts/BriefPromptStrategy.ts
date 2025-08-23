@@ -1,5 +1,6 @@
 // #########################################################
-import { ReportContext, Section, GroupingMode, PromptStrategy } from '../../types';
+import { ReportContext, Section, GroupingMode, PromptStrategy, VisionContent, ImageReference } from '../../types';
+
 
 export class BriefPromptStrategy implements PromptStrategy {
   // Stage 1: Initial Load/System Prompt for IMAGE AGENT (separate agent)
@@ -167,29 +168,40 @@ Convert ONE raw observation string into a single structured JSON "section" insid
     observations: string[],
     specifications: string[],
     sections: Section[],
-    grouping: GroupingMode
-  ): string {
+    grouping: GroupingMode,
+    imageReferences?: ImageReference[]
+  ): string | VisionContent {
     const specs =
       specifications.length > 0
-        ? `
-# RELEVANT SPECIFICATIONS:
-${specifications.map((spec) => `- ${spec}`).join('\n')}
-`
+        ? `# RELEVANT SPECIFICATIONS:
+          ${specifications.map((spec) => `- ${spec}`).join('\n')}
+          `
         : '';
 
-    return `
-# INSTRUCTIONS:
-- Analyze the following raw observations.
-- **Critical** If you generate a title yourself, you MUST prefix it with a tilde (~). For example: "~Gable End Drip Edge Flashing".
-- For each observation, generate exactly one section, which can and should have multiple elements in the bodyMd array, each element is a specific point.
-- Return a single JSON object of the form {"sections":[ ... ]} containing one section for each observation, in the same order.
-- Reference the relevant specifications when needed.
+    const textPrompt = `
+      # INSTRUCTIONS:
+      - Analyze the provided image and the following raw observations.
+      - **Critical** If you generate a title yourself, you MUST prefix it with a tilde (~). For example: "~Gable End Drip Edge Flashing".
+      - For each observation, generate exactly one section, which can and should have multiple elements in the bodyMd array, each element is a specific point.
+      - Return a single JSON object of the form {"sections":[ ... ]} containing one section for each observation, in the same order.
+      - Reference the relevant specifications when needed.
 
-${specs}
+      ${specs}
 
-# RAW OBSERVATIONS FROM THE SITE:
-${observations.map((obs) => `- ${obs}`).join('\n')}
-`;
+      # RAW OBSERVATIONS FROM THE SITE:
+      ${observations.map((obs) => `- ${obs}`).join('\n')}
+    `;
+
+    // If image references are provided, return the VisionContent object for the new executor
+    if (imageReferences && imageReferences.length > 0) {
+      return {
+        text: textPrompt,
+        imageUrl: imageReferences[0]?.url,
+      };
+    }
+
+    // Otherwise, return a plain string for the original, text-only executor
+    return textPrompt;
   }
 
 

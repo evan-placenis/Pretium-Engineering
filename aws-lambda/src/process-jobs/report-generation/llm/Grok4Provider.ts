@@ -1,5 +1,5 @@
 // Grok4 LLM Provider
-import { LLMProvider, LLMResponse } from '../../types';
+import { LLMProvider, LLMResponse, VisionContent } from '../../types';
 import { OpenAI } from 'openai';
 
 export class Grok4Provider implements LLMProvider {
@@ -12,10 +12,20 @@ export class Grok4Provider implements LLMProvider {
     }
   }
 
-  async generateContent(prompt: string, options?: any): Promise<LLMResponse> {
+  async generateContent(prompt: string | VisionContent, options?: any): Promise<LLMResponse> {
     const startTime = Date.now();
     try {
-      console.log(`🤖 Grok4: Starting content generation (prompt: ${prompt.length} chars)`);
+      let textPrompt: string;
+      if (typeof prompt === 'string') {
+        textPrompt = prompt;
+      } else {
+        textPrompt = prompt.text;
+        if (prompt.imageUrl) {
+          console.warn('⚠️ Grok4Provider received an image URL, but it does not support vision. The image will be ignored.');
+        }
+      }
+
+      console.log(`🤖 Grok4: Starting content generation (prompt: ${textPrompt.length} chars)`);
 
             // Static import for OpenAI
       const grokClient = new OpenAI({
@@ -31,7 +41,7 @@ export class Grok4Provider implements LLMProvider {
         messages: [
           {
             role: 'user',
-            content: prompt
+            content: textPrompt
           }
         ],
         temperature: options?.temperature || 0.7,

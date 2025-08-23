@@ -210,7 +210,7 @@ export interface ReportResult {
 }
 
 export interface LLMProvider {
-  generateContent(prompt: string, options?: any): Promise<LLMResponse>;
+  generateContent(prompt: string | VisionContent, options?: any): Promise<LLMResponse>;
 }
 
 export interface LLMResponse {
@@ -218,6 +218,11 @@ export interface LLMResponse {
   error?: string;
   metadata?: any;
 }
+
+export type VisionContent = {
+  text: string;
+  imageUrl?: string;
+};
 
 export interface ExecutionStrategy {
   execute(params: ExecutionParams): Promise<ExecutionResult>;
@@ -252,6 +257,6 @@ export interface ExecutionResult {
 export interface PromptStrategy {
   getImageSystemPrompt(): string;
   getSummarySystemPrompt(grouping: GroupingMode): string;
-  generateUserPrompt(observations: string[], specifications: string[], sections: Section[], grouping: GroupingMode): string;
+  generateUserPrompt(observations: string[], specifications: string[], sections: Section[], grouping: GroupingMode, imageReferences?: ImageReference[]): string | VisionContent;
   generateSummaryPrompt(draft: string, context: any, sections: Section[]): string;
 }

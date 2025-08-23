@@ -27,6 +27,29 @@
   margin-left: 60px;
 }
 
+/* New, simpler two-column layout styles */
+.mainSectionLayout {
+  display: flex;
+  flex-direction: row;
+  gap: 2rem;
+  align-items: flex-start;
+  margin-top: 1rem; /* Add some space below the main section header */
+}
+
+.textColumn {
+  flex: 1 1 50%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem; /* Space between the numbered text points */
+}
+
+.imageColumn {
+  flex: 1 1 50%;
+  min-width: 0;
+  /* No sticky positioning */
+}
+
 
 .sectionHeader {
   font-weight: bold;
@@ -45,14 +68,20 @@
 
 .subSectionContainer {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start; /* Changed from space-between for more stable alignment */
   align-items: flex-start;
   gap: 0.2rem;
+  margin-bottom: 0.5rem; /* Add some space between numbered items */
 }
 
 .subSectionNumber {
   font-weight: 600;
   margin-right: 0.5em;
+}
+
+.editableBody {
+  flex: 1; /* Allow text to grow to fill space */
+  min-width: 0; /* Prevent overflow issues in flex containers */
 }
 
 .reportBody {

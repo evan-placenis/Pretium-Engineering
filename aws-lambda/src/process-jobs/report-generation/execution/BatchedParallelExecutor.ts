@@ -251,20 +251,43 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
       groupMap.get(title)!.push(section);
     });
 
-    // Step 2: Create a new parent section for each group
+    // Step 2: Create a new parent section for each group and explode bodyMd into children
     const parentSections: Section[] = [];
-    for (const [title, children] of groupMap.entries()) {
-      // Create a new parent section
+    for (const [title, originalSections] of groupMap.entries()) {
+      const newChildren: Section[] = [];
+
+      // Iterate over each original AI-generated section in the group
+      originalSections.forEach(originalSection => {
+        // Check if bodyMd is an array and has content
+        if (Array.isArray(originalSection.bodyMd) && originalSection.bodyMd.length > 0) {
+          // Map each point in bodyMd to a new child sub-section
+          originalSection.bodyMd.forEach((point, index) => {
+            const newChild: Section = {
+              id: uuidv4(),
+              number: '', // The auto-numberer will handle this
+              bodyMd: [point], // Each new child has a bodyMd array with a single string
+              // Only add all images from the original observation to the FIRST new child
+              images: index === 0 ? originalSection.images || [] : [],
+            };
+            newChildren.push(newChild);
+          });
+        } else if (originalSection.bodyMd) { 
+            // Handle cases where bodyMd might be a single string or something else, wrap it in a single child
+            const newChild: Section = {
+              id: uuidv4(),
+              number: '',
+              bodyMd: Array.isArray(originalSection.bodyMd) ? originalSection.bodyMd : [String(originalSection.bodyMd)],
+              images: originalSection.images || [],
+            };
+            newChildren.push(newChild);
+        }
+      });
+      
       const parentSection: Section = {
         id: uuidv4(),
         title: title,
         number: '',
-        children: children.map(child => ({
-          id: uuidv4(),
-          number: '',
-          bodyMd: child.bodyMd,
-          images: child.images || [],
-        })),
+        children: newChildren,
       };
       parentSections.push(parentSection);
     }

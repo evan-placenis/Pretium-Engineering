@@ -1,6 +1,6 @@
 // GPT-4o LLM Provider
 import { OpenAI } from 'openai';
-import { LLMProvider, LLMResponse } from '../../types';
+import { LLMProvider, LLMResponse, VisionContent } from '../../types';
 
 export class GPT4oProvider implements LLMProvider {
   private apiKey: string;
@@ -12,21 +12,39 @@ export class GPT4oProvider implements LLMProvider {
     }
   }
 
-  async generateContent(prompt: string, options?: any): Promise<LLMResponse> {
+  async generateContent(prompt: string | VisionContent, options?: any): Promise<LLMResponse> {
     try {
       console.log('🤖 GPT-4o: Generating content...');
 
       // Static import for OpenAI
       const openai = new OpenAI({ apiKey: this.apiKey });
+      const messages: any = [];
+
+      if (typeof prompt === 'string') {
+        console.log('🤖 GPT-4o: Generating content (text-only)...');
+        messages.push({
+          role: 'user',
+          content: prompt,
+        });
+      } else {
+        console.log('🤖 GPT-4o: Generating content with vision...');
+        const userContent: any[] = [{ type: 'text', text: prompt.text }];
+        if (prompt.imageUrl) {
+          console.log(`🖼️  Adding image to prompt: ${prompt.imageUrl}`);
+          userContent.push({
+            type: 'image_url',
+            image_url: { url: prompt.imageUrl },
+          });
+        }
+        messages.push({
+          role: 'user',
+          content: userContent,
+        });
+      }
 
       const response = await openai.chat.completions.create({
         model: 'gpt-4o',
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
+        messages: messages,
         temperature: options?.temperature || 0.7,
         max_tokens: options?.maxTokens || 2000,
         response_format: { type: "json_object" }, // Force JSON output

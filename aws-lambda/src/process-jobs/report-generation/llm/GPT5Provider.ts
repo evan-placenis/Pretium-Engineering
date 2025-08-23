@@ -1,6 +1,6 @@
 // GPT-5 LLM Provider with reasoning effort support
 import { OpenAI } from 'openai';
-import { LLMProvider, LLMResponse } from '../../types';
+import { LLMProvider, LLMResponse, VisionContent } from '../../types';
 
 export interface GPT5Options {
   reasoningEffort?: 'low' | 'medium' | 'high';
@@ -19,9 +19,18 @@ export class GPT5Provider implements LLMProvider {
     }
   }
 
-  async generateContent(prompt: string, options?: GPT5Options): Promise<LLMResponse> {
+  async generateContent(prompt: string | VisionContent, options?: GPT5Options): Promise<LLMResponse> {
     try {
-      console.log(`🤖 GPT-5: Starting content generation (prompt: ${prompt.length} chars)`);
+      let textPrompt: string;
+      if (typeof prompt === 'string') {
+        textPrompt = prompt;
+      } else {
+        textPrompt = prompt.text;
+        if (prompt.imageUrl) {
+          console.warn('⚠️ GPT5Provider received an image URL, but it does not support vision. The image will be ignored.');
+        }
+      }
+      console.log(`🤖 GPT-5: Starting content generation (prompt: ${textPrompt.length} chars)`);
       console.log(`🔧 GPT-5 Options:`, {
         reasoningEffort: options?.reasoningEffort || 'medium',
         temperature: options?.temperature || 0.7,
@@ -44,7 +53,7 @@ export class GPT5Provider implements LLMProvider {
         messages: [
           {
             role: 'user',
-            content: prompt
+            content: textPrompt
           }
         ],
         max_completion_tokens: config.maxTokens, // Use correct parameter name

@@ -1076,82 +1076,94 @@ const renderSectionsRecursively = async (
       elements.push(titlePara);
     }
 
-    if (section.images && section.images.length > 0) {
-      for (const imageRef of section.images) {
-        const image = findImageByNumber(allImages, imageRef.number);
-        if (image && image.signedUrl) {
-          try {
-            const response = await fetch(image.signedUrl);
-            const buffer = await response.arrayBuffer();
-            const compressedBuffer = await compressImage(buffer, 400, 300, 0.7, 'jpeg', 150);
-            
-            const imageTable = new Table({
-              width: { size: 100, type: WidthType.PERCENTAGE },
-              borders: { top: { style: "none" }, bottom: { style: "none" }, left: { style: "none" }, right: { style: "none" }, insideHorizontal: { style: "none" }, insideVertical: { style: "none" } },
-              rows: [
-                new TableRow({
-                  children: [
-                    new TableCell({
-                      width: { size: 60, type: WidthType.PERCENTAGE },
-                      verticalAlign: 'top', // Fix: Changed vertical alignment to top
-                      margins: {
-                        right: 200, // Adds space to the right of the text
-                      },
-                      children: [
-                        new Paragraph({
-                          text: image.description || '',
-                          numbering: { reference: 'ai-numbering', level: level }, // Fix: Adjusted numbering level
-                          alignment: AlignmentType.JUSTIFIED,
-                          indent: { hanging: 720 },
-                        }),
-                      ],
-                    }),
-                    new TableCell({
-                      width: { size: 40, type: WidthType.PERCENTAGE },
-                      margins: {
-                        left: 200, // Adds space to the left of the image
-                      },
-                      children: [
-                        new Paragraph({
-                          children: [
-                            new ImageRun({
-                              data: compressedBuffer,
-                              transformation: { width: 300, height: 225 },
-                              type: 'jpg', // Fix: Corrected image type for linter
-                            }),
-                          ],
-                          alignment: AlignmentType.CENTER,
-                        }),
-                        new Paragraph({
-                          text: `Photo ${image.number || ''}`,
-                          alignment: AlignmentType.CENTER,
-                        }),
-                      ],
-                    }),
-                  ],
-                }),
-              ],
+    if (section.children && section.children.length > 0) {
+      // Pre-process children into observation groups. A new group starts with an image.
+      const observationGroups: Section[][] = [];
+      let currentGroup: Section[] = [];
+      section.children.forEach(child => {
+        if (child.images && child.images.length > 0) {
+          if (currentGroup.length > 0) {
+            observationGroups.push(currentGroup);
+          }
+          currentGroup = [child];
+        } else {
+          currentGroup.push(child);
+        }
+      });
+      if (currentGroup.length > 0) {
+        observationGroups.push(currentGroup);
+      }
+
+      // Now, render each group in its own two-column table
+      for (const group of observationGroups) {
+        const textParagraphs: Paragraph[] = [];
+        group.forEach(child => {
+          if (child.bodyMd && child.bodyMd.length > 0) {
+            child.bodyMd.forEach(line => {
+              textParagraphs.push(new Paragraph({
+                children: [new TextRun({ text: line, font: "Segoe UI", size: 20 })],
+                numbering: { reference: 'ai-numbering', level: level + 1 },
+                alignment: AlignmentType.JUSTIFIED,
+                indent: { hanging: 720 },
+              }));
             });
-            elements.push(imageTable);
-          } catch (error) {
-            console.error(`Error processing image ${image.number}:`, error);
-            elements.push(new Paragraph({ text: `[Error loading image ${image.number}]` }));
+          }
+        });
+
+        const imageParagraphs: Paragraph[] = [];
+        const firstChildWithImage = group.find(c => c.images && c.images.length > 0);
+        if (firstChildWithImage && firstChildWithImage.images) {
+          for (const imageRef of firstChildWithImage.images) {
+            const image = findImageByNumber(allImages, imageRef.number);
+            if (image && image.signedUrl) {
+              try {
+                const response = await fetch(image.signedUrl);
+                const buffer = await response.arrayBuffer();
+                const compressedBuffer = await compressImage(buffer, 400, 300, 0.7, 'jpeg', 150);
+                
+                imageParagraphs.push(new Paragraph({
+                  children: [new ImageRun({
+                    data: compressedBuffer,
+                    transformation: { width: 300, height: 225 },
+                    type: 'jpg',
+                  })],
+                  alignment: AlignmentType.CENTER,
+                }));
+                imageParagraphs.push(new Paragraph({
+                  text: `Photo ${image.number || ''}`,
+                  alignment: AlignmentType.CENTER,
+                  spacing: { after: 200 },
+                }));
+              } catch (error) {
+                console.error(`Error processing image ${image.number}:`, error);
+                imageParagraphs.push(new Paragraph({ text: `[Error loading image ${image.number}]` }));
+              }
+            }
           }
         }
+        
+        const observationTable = new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          borders: { top: { style: "none" }, bottom: { style: "none" }, left: { style: "none" }, right: { style: "none" }, insideHorizontal: { style: "none" }, insideVertical: { style: "none" } },
+          rows: [new TableRow({
+            children: [
+              new TableCell({
+                children: textParagraphs,
+                width: { size: 60, type: WidthType.PERCENTAGE },
+                verticalAlign: 'top',
+                margins: { right: 200 },
+              }),
+              new TableCell({
+                children: imageParagraphs.length > 0 ? imageParagraphs : [new Paragraph('')], // Ensure cell isn't empty
+                width: { size: 40, type: WidthType.PERCENTAGE },
+                verticalAlign: 'top',
+                margins: { left: 200 },
+              }),
+            ],
+          })],
+        });
+        elements.push(observationTable);
       }
-    } else if (section.bodyMd && section.bodyMd.length > 0) {
-      section.bodyMd.forEach(line => {
-        elements.push(new Paragraph({
-          text: line,
-          numbering: { reference: 'ai-numbering', level: level }, // Fix: Adjusted numbering level
-          alignment: AlignmentType.JUSTIFIED,
-          indent: { hanging: 720 },
-        }));
-      });
-    }
-
-    if (section.children && section.children.length > 0) {
-      elements.push(...await renderSectionsRecursively(section.children, level + 1, allImages));
     }
   }
 

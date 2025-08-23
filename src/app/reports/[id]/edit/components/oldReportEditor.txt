@@ -81,7 +81,6 @@ export const ReportEditor: React.FC<ReportEditorProps> = ({
     const findAndUpdate = (secs: Section[]): boolean => {
       for (const sec of secs) {
         if (sec.id === sectionId) {
-          // Assuming each sub-section has a bodyMd array with one item.
           sec.bodyMd = [newBody];
           return true;
         }
@@ -95,97 +94,77 @@ export const ReportEditor: React.FC<ReportEditorProps> = ({
     handleSave(newSections);
   };
 
+  // A dedicated component for rendering a section and its children recursively.
   const SectionItem: React.FC<{ section: Section; level: number }> = ({ section: sec, level }) => {
+    const isSubSection = level > 0;
     const HeaderTag = `h${level + 1}` as keyof JSX.IntrinsicElements;
 
-    // Pre-process children into observation groups. A new group starts with an image.
-    const observationGroups: Section[][] = [];
-    if (sec.children && sec.children.length > 0) {
-      let currentGroup: Section[] = [];
-      sec.children.forEach(child => {
-        if (child.images && child.images.length > 0) {
-          if (currentGroup.length > 0) {
-            observationGroups.push(currentGroup);
-          }
-          currentGroup = [child];
-        } else {
-          currentGroup.push(child);
-        }
-      });
-      if (currentGroup.length > 0) {
-        observationGroups.push(currentGroup);
-      }
-    }
-
+    // The key is applied to this root div in the .map() loop where this component is used.
     return (
-      <div className={styles.section}>
-        <HeaderTag className={styles.sectionHeader}>
-          <span style={{ marginRight: '0.5em' }}>{sec.number}</span>
-          <EditableField
-            initialValue={sec.title || ''}
-            onSave={(newValue) => handleTitleChange(sec.id, newValue)}
-            as="span"
-          />
-        </HeaderTag>
-
-        {/* Map over the re-grouped observations */}
-        {observationGroups.map((group, groupIndex) => (
-          <div key={`group-${groupIndex}`} className={styles.mainSectionLayout}>
-            {/* Left column for text points in this group */}
-            <div className={styles.textColumn}>
-              {group.map((child) => {
-                const bodyText = (Array.isArray(child.bodyMd) && child.bodyMd.length > 0) ? child.bodyMd[0] : '';
-                return (
-                  <div key={child.id} className={styles.subSectionContainer}>
-                    <span className={styles.subSectionNumber}>{child.number}</span>
-                    <EditableField
-                      initialValue={bodyText}
-                      onSave={(newValue) => handleBodyChange(child.id, newValue)}
-                      as="span"
-                      className={styles.editableBody}
-                      multiline={true}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-            
-            {/* Right column for this group's image gallery */}
-            <div className={styles.imageColumn}>
-              {(() => {
-                const firstChild = group[0];
-                if (firstChild && firstChild.images && firstChild.images.length > 0) {
-                  return (
-                    <div className={styles.imageGallery}>
-                      {firstChild.images.map((imageRef, idx) => {
-                        const image = reportImages?.find(
-                          (img) =>
-                            img.number === imageRef.number &&
-                            (!imageRef.group ||
-                              imageRef.group.length === 0 ||
-                              (img.group &&
-                                img.group.some((g) => imageRef.group?.includes(g)))),
-                        );
-                        if (!image?.signedUrl) return null;
-                        const groupPart = Array.isArray(imageRef.group)
-                          ? (imageRef.group ?? []).join('|')
-                          : imageRef.group ?? '';
-                        const imgKey = `${imageRef.number ?? 'n'}-${groupPart}-${idx}`;
-                        return (
-                          <CustomImage
-                            key={imgKey}
-                            src={image.signedUrl}
-                            alt={`Image ${image.number}`}
-                          />
-                        );
-                      })}
-                    </div>
-                  );
+      <div className={styles.section} style={{ marginLeft: '0px', marginBottom: '1rem' }}>
+        {isSubSection ? (
+          <div className={styles.subSectionContainer}>
+            <div className={styles.subSectionTitle}>
+              <span className={styles.subSectionNumber}>{sec.number}</span>
+              <EditableField
+                initialValue={
+                  sec.bodyMd
+                    ? Array.isArray(sec.bodyMd)
+                      ? sec.bodyMd.join(' ')
+                      : sec.bodyMd
+                    : ''
                 }
-                return null;
-              })()}
+                onSave={(newValue) => handleBodyChange(sec.id, newValue)}
+                as="span"
+                className={styles.editableBody}
+                multiline={true}
+              />
             </div>
+            {sec.images && sec.images.length > 0 && (
+              <div className={styles.imageGallery}>
+                {sec.images.map((imageRef, idx) => {
+                  const image = reportImages?.find(
+                    (img) =>
+                      img.number === imageRef.number &&
+                      (!imageRef.group ||
+                        imageRef.group.length === 0 ||
+                        (img.group &&
+                          img.group.some((g) => imageRef.group?.includes(g)))),
+                  );
+                  if (!image?.signedUrl) return null;
+                  const groupPart = Array.isArray(imageRef.group)
+                    ? (imageRef.group ?? []).join('|')
+                    : imageRef.group ?? '';
+                  const imgKey = `${imageRef.number ?? 'n'}-${groupPart}-${idx}`;
+                  return (
+                    <CustomImage
+                      key={imgKey}
+                      src={image.signedUrl}
+                      alt={`Image ${image.number}`}
+                    />
+                  );
+                })}
+              </div>
+            )}
           </div>
+        ) : (
+          <HeaderTag className={styles.sectionHeader}>
+            <span style={{ marginRight: '0.5em' }}>{sec.number}</span>
+            <EditableField
+              initialValue={sec.title || ''}
+              onSave={(newValue) => handleTitleChange(sec.id, newValue)}
+              as="span"
+            />
+          </HeaderTag>
+        )}
+
+        {/* Recursive rendering of children */}
+        {sec.children?.map((child, idx) => (
+          <SectionItem
+            key={child.id ?? `${sec.id ?? 'sec'}-child-${idx}`}
+            section={child}
+            level={level + 1}
+          />
         ))}
       </div>
     );

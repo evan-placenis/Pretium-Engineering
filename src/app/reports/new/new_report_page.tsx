@@ -56,7 +56,7 @@ export default function NewReport() {
   const [selectedImages, setSelectedImages] = useState<ExtendedImageItem[]>([]);
   const [selectedModel, setSelectedModel] = useState('grok4');
   const [reportStyle, setReportStyle] = useState<'brief' | 'elaborate'>('brief');
-  const [executionStrategy, setExecutionStrategy] = useState<'batched-parallel' | 'batched-parallel-with-parallel-summary'>('batched-parallel');
+  const [executionStrategy, setExecutionStrategy] = useState<'batched-parallel' | 'batched-parallel-with-images'>('batched-parallel');
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [debugInfo, setDebugInfo] = useState<any>(null);
   const [showDebugInfo, setShowDebugInfo] = useState(false);
@@ -374,7 +374,7 @@ export default function NewReport() {
   // Auto-switch execution strategy to Standard when in ungrouped mode
   // TODO: Remove this restriction later - Parallel Summary should work with ungrouped photos
   useEffect(() => {
-    if (isUngroupedMode && executionStrategy === 'batched-parallel-with-parallel-summary') {
+    if (isUngroupedMode && executionStrategy === 'batched-parallel-with-images') {
       setExecutionStrategy('batched-parallel');
     }
   }, [isUngroupedMode, executionStrategy]);
@@ -1173,12 +1173,12 @@ export default function NewReport() {
               </button>
               <button
                 type="button"
-                onClick={() => setExecutionStrategy('batched-parallel-with-parallel-summary')}
+                onClick={() => setExecutionStrategy('batched-parallel-with-images')}
                 className="btn btn-sm"
                 style={{ 
-                  backgroundColor: (loading || isUngroupedMode) ? 'var(--color-bg-secondary)' : (executionStrategy === 'batched-parallel-with-parallel-summary' ? 'var(--color-primary)' : 'transparent'),
-                  color: (loading || isUngroupedMode) ? 'var(--color-text-secondary)' : (executionStrategy === 'batched-parallel-with-parallel-summary' ? '#fff' : 'var(--color-text)'),
-                  borderColor: (loading || isUngroupedMode) ? 'var(--color-border)' : (executionStrategy === 'batched-parallel-with-parallel-summary' ? 'var(--color-primary)' : 'var(--color-border)'),
+                  backgroundColor: (loading || isUngroupedMode) ? 'var(--color-bg-secondary)' : (executionStrategy === 'batched-parallel-with-images' ? 'var(--color-primary)' : 'transparent'),
+                  color: (loading || isUngroupedMode) ? 'var(--color-text-secondary)' : (executionStrategy === 'batched-parallel-with-images' ? '#fff' : 'var(--color-text)'),
+                  borderColor: (loading || isUngroupedMode) ? 'var(--color-border)' : (executionStrategy === 'batched-parallel-with-images' ? 'var(--color-primary)' : 'var(--color-border)'),
                   fontSize: "0.875rem",
                   padding: "0.5rem 1rem",
                   cursor: (loading || isUngroupedMode) ? 'not-allowed' : 'pointer',
@@ -1187,7 +1187,7 @@ export default function NewReport() {
                 disabled={loading || isUngroupedMode}
                 title={isUngroupedMode ? "Parallel Summary is not available for ungrouped photos" : "Use multiple AI agents for faster processing"}
               >
-                Parallel Summary
+                Vision-Enabled
               </button>
             </div>
             <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>

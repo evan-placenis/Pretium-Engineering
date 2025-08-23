@@ -23776,17 +23776,37 @@ Please try generating again.`;
       groupMap.get(title).push(section);
     });
     const parentSections = [];
-    for (const [title, children] of groupMap.entries()) {
+    for (const [title, originalSections] of groupMap.entries()) {
+      const newChildren = [];
+      originalSections.forEach((originalSection) => {
+        if (Array.isArray(originalSection.bodyMd) && originalSection.bodyMd.length > 0) {
+          originalSection.bodyMd.forEach((point, index) => {
+            const newChild = {
+              id: v4_default(),
+              number: "",
+              // The auto-numberer will handle this
+              bodyMd: [point],
+              // Each new child has a bodyMd array with a single string
+              // Only add all images from the original observation to the FIRST new child
+              images: index === 0 ? originalSection.images || [] : []
+            };
+            newChildren.push(newChild);
+          });
+        } else if (originalSection.bodyMd) {
+          const newChild = {
+            id: v4_default(),
+            number: "",
+            bodyMd: Array.isArray(originalSection.bodyMd) ? originalSection.bodyMd : [String(originalSection.bodyMd)],
+            images: originalSection.images || []
+          };
+          newChildren.push(newChild);
+        }
+      });
       const parentSection = {
         id: v4_default(),
         title,
         number: "",
-        children: children.map((child) => ({
-          id: v4_default(),
-          number: "",
-          bodyMd: child.bodyMd,
-          images: child.images || []
-        }))
+        children: newChildren
       };
       parentSections.push(parentSection);
     }
@@ -23867,8 +23887,8 @@ ${userPrompt}`,
   }
 };
 
-// src/process-jobs/report-generation/execution/BatchedParallelWithParallelSummaryExecutor.ts
-var BatchedParallelWithParallelSummaryExecutor = class {
+// src/process-jobs/report-generation/execution/BatchedParallelExecutorWithImages.ts
+var BatchedParallelExecutorWithImages = class {
   constructor() {
     this.BATCH_SIZE = 5;
     this.MAX_PARALLEL_AGENTS = 3;
@@ -23943,18 +23963,20 @@ ${summaryTaskPrompt}`;
         console.error(`[ERROR] SUMMARY ERROR: ${summaryResponse.error}`);
         throw new Error(`Summary generation failed: ${summaryResponse.error}`);
       }
+      var test = "";
+      if (summaryResponse.content.length == 0) {
+        test = "the output is actually empty";
+      }
       let summaryContent = summaryResponse.content || "";
       let finalSections = [];
       try {
         const parsedJson = JSON.parse(summaryContent);
-        if (Array.isArray(parsedJson.titles)) {
-          if (parsedJson.titles.length !== allSections.length) {
-            console.warn(`[DIAGNOSTIC MODE] Summary Agent returned ${parsedJson.titles.length} titles, but expected ${allSections.length}. Proceeding with partial data to show the raw failure.`);
-          }
-          console.log("\u2705 Parsed title-only summary. Merging with original sections (even if partial).");
+        if (Array.isArray(parsedJson.titles) && parsedJson.titles.length === allSections.length) {
+          console.log("\u2705 Parsed title-only summary. Merging with original sections.");
           finalSections = allSections.map((section, index) => ({
             ...section,
             title: parsedJson.titles[index] || section.title
+            // Fallback to old title if new one is empty
           }));
           summaryContent = JSON.stringify({ sections: finalSections });
         } else if (parsedJson.sections) {
@@ -23964,33 +23986,38 @@ ${summaryTaskPrompt}`;
           summaryContent = JSON.stringify(model.toJSON());
           console.log("Parsed and auto-numbered JSON sections for summary");
         } else {
-          console.error("Summary Agent failed: Response JSON is missing 'titles' or 'sections' property. Writing raw output for diagnostics.");
-          finalSections = [{
-            id: v4_default(),
-            title: "REPORT GENERATION FAILED: INVALID SUMMARY AGENT RESPONSE",
-            number: "!",
-            bodyMd: [
-              "The summary agent produced invalid output. The raw text from the AI is included below for debugging.",
-              "---",
-              summaryContent,
-              "---"
-            ]
-          }];
+          const errorMessage = `Summary JSON was valid but had an incorrect structure or mismatched title count. Expected ${allSections.length} titles, but the 'titles' array was missing, not an array, or had a different length.`;
+          console.error(`[ERROR] SUMMARY PARSE ERROR: ${errorMessage}`);
+          throw new Error(errorMessage);
         }
       } catch (e2) {
-        console.error("Failed to parse final summaryContent as JSON:", e2.message, "Writing raw output for diagnostics.");
-        finalSections = [{
+        console.error("Failed to parse final summaryContent as JSON:", e2.message, "Creating error section and returning raw sections.");
+        const errorSection = {
           id: v4_default(),
-          title: "REPORT GENERATION FAILED: JSON PARSING ERROR",
           number: "!",
+          title: "! SUMMARY AGENT ERROR !",
           bodyMd: [
-            "The summary agent produced text that could not be parsed as JSON. The raw text from the AI is included below for debugging.",
-            `Error: ${e2.message}`,
-            "---",
-            summaryContent,
-            "---"
-          ]
-        }];
+            "The summary agent returned a response that could not be processed. This is usually caused by a malformed or empty JSON response from the AI.",
+            "**Error Details:**",
+            `\`\`\`
+${e2.message}
+\`\`\``,
+            "**Raw AI Output:**",
+            `\`\`\`
+${summaryContent || "(empty response)"}
+\`\`\``,
+            "**Full Summary Response Shape:**",
+            `\`\`\`json
+${JSON.stringify(summaryResponse, null, 2)}
+\`\`\``,
+            "**Full Summary Conent Shape:**",
+            `\`\`\`json
+${JSON.stringify(summaryContent, null, 2)}
+\`\`\``
+          ],
+          children: []
+        };
+        finalSections = [errorSection, ...allSections];
       }
       console.error(`[DEBUG] EXECUTION COMPLETE: Report generation finished.`);
       const groupedSections = this.createGroupedHierarchy(finalSections);
@@ -24000,7 +24027,7 @@ ${summaryTaskPrompt}`;
         message: "\u2705 Report Generation Complete"
       });
       return {
-        content: summaryContent,
+        content: summaryContent + test,
         sections: groupedSections,
         metadata: {
           ...metadata,
@@ -24066,17 +24093,37 @@ Please try generating again.`;
       groupMap.get(title).push(section);
     });
     const parentSections = [];
-    for (const [title, children] of groupMap.entries()) {
+    for (const [title, originalSections] of groupMap.entries()) {
+      const newChildren = [];
+      originalSections.forEach((originalSection) => {
+        if (Array.isArray(originalSection.bodyMd) && originalSection.bodyMd.length > 0) {
+          originalSection.bodyMd.forEach((point, index) => {
+            const newChild = {
+              id: v4_default(),
+              number: "",
+              // The auto-numberer will handle this
+              bodyMd: [point],
+              // Each new child has a bodyMd array with a single string
+              // Only add all images from the original observation to the FIRST new child
+              images: index === 0 ? originalSection.images || [] : []
+            };
+            newChildren.push(newChild);
+          });
+        } else if (originalSection.bodyMd) {
+          const newChild = {
+            id: v4_default(),
+            number: "",
+            bodyMd: Array.isArray(originalSection.bodyMd) ? originalSection.bodyMd : [String(originalSection.bodyMd)],
+            images: originalSection.images || []
+          };
+          newChildren.push(newChild);
+        }
+      });
       const parentSection = {
         id: v4_default(),
         title,
         number: "",
-        children: children.map((child) => ({
-          id: v4_default(),
-          number: "",
-          bodyMd: child.bodyMd,
-          images: child.images || []
-        }))
+        children: newChildren
       };
       parentSections.push(parentSection);
     }
@@ -24108,14 +24155,44 @@ Please try generating again.`;
         const description = img.description || "";
         const sectionTitle = img.group?.[0] ? `(Section Title: ${img.group[0]})` : "(Section Title: N/A - choose section title)";
         const observation = `${sectionTitle} Description: ${description} Image: ${imageTag}`.trim();
+        let imageUrl = void 0;
+        if (img.storage_path) {
+          try {
+            const { data, error } = await supabase.storage.from("report_images").createSignedUrl(img.storage_path, 3600);
+            if (error) {
+              console.error(`[img ${img.number}] Failed to sign URL for ${img.storage_path}:`, error.message);
+            } else {
+              imageUrl = data.signedUrl;
+            }
+          } catch (e2) {
+            console.error(`[img ${img.number}] Exception while signing URL for ${img.storage_path}:`, e2.message);
+          }
+        }
         const specsText = await getRelevantKnowledgeChunks(supabase, projectId, observation);
         const specifications = specsText ? specsText.split("\n") : [];
         console.log(`\u{1F4DD} [img ${img.number}] specs=${specifications.length}`);
-        const userPrompt = promptStrategy.generateUserPrompt([observation], specifications, [], grouping);
-        const resp = await llmProvider.generateContent(
-          `${systemPrompt}
+        const userPromptResult = promptStrategy.generateUserPrompt(
+          [observation],
+          specifications,
+          [],
+          grouping,
+          [{ ...img, url: imageUrl }]
+        );
+        let finalPrompt;
+        if (typeof userPromptResult === "object" && userPromptResult !== null) {
+          finalPrompt = {
+            ...userPromptResult,
+            text: `${systemPrompt}
 
-${userPrompt}`,
+${userPromptResult.text}`
+          };
+        } else {
+          finalPrompt = `${systemPrompt}
+
+${userPromptResult}`;
+        }
+        const resp = await llmProvider.generateContent(
+          finalPrompt,
           {
             temperature: 0.3,
             maxTokens: 1500,
@@ -24168,7 +24245,16 @@ var Grok4Provider = class {
   async generateContent(prompt, options) {
     const startTime = Date.now();
     try {
-      console.log(`\u{1F916} Grok4: Starting content generation (prompt: ${prompt.length} chars)`);
+      let textPrompt;
+      if (typeof prompt === "string") {
+        textPrompt = prompt;
+      } else {
+        textPrompt = prompt.text;
+        if (prompt.imageUrl) {
+          console.warn("\u26A0\uFE0F Grok4Provider received an image URL, but it does not support vision. The image will be ignored.");
+        }
+      }
+      console.log(`\u{1F916} Grok4: Starting content generation (prompt: ${textPrompt.length} chars)`);
       const grokClient = new OpenAI({
         apiKey: this.apiKey,
         baseURL: "https://api.x.ai/v1",
@@ -24182,7 +24268,7 @@ var Grok4Provider = class {
         messages: [
           {
             role: "user",
-            content: prompt
+            content: textPrompt
           }
         ],
         temperature: options?.temperature || 0.7,
@@ -24252,14 +24338,31 @@ var GPT4oProvider = class {
     try {
       console.log("\u{1F916} GPT-4o: Generating content...");
       const openai = new OpenAI({ apiKey: this.apiKey });
+      const messages = [];
+      if (typeof prompt === "string") {
+        console.log("\u{1F916} GPT-4o: Generating content (text-only)...");
+        messages.push({
+          role: "user",
+          content: prompt
+        });
+      } else {
+        console.log("\u{1F916} GPT-4o: Generating content with vision...");
+        const userContent = [{ type: "text", text: prompt.text }];
+        if (prompt.imageUrl) {
+          console.log(`\u{1F5BC}\uFE0F  Adding image to prompt: ${prompt.imageUrl}`);
+          userContent.push({
+            type: "image_url",
+            image_url: { url: prompt.imageUrl }
+          });
+        }
+        messages.push({
+          role: "user",
+          content: userContent
+        });
+      }
       const response = await openai.chat.completions.create({
         model: "gpt-4o",
-        messages: [
-          {
-            role: "user",
-            content: prompt
-          }
-        ],
+        messages,
         temperature: options?.temperature || 0.7,
         max_tokens: options?.maxTokens || 2e3,
         response_format: { type: "json_object" },
@@ -24310,7 +24413,16 @@ var GPT5Provider = class {
   }
   async generateContent(prompt, options) {
     try {
-      console.log(`\u{1F916} GPT-5: Starting content generation (prompt: ${prompt.length} chars)`);
+      let textPrompt;
+      if (typeof prompt === "string") {
+        textPrompt = prompt;
+      } else {
+        textPrompt = prompt.text;
+        if (prompt.imageUrl) {
+          console.warn("\u26A0\uFE0F GPT5Provider received an image URL, but it does not support vision. The image will be ignored.");
+        }
+      }
+      console.log(`\u{1F916} GPT-5: Starting content generation (prompt: ${textPrompt.length} chars)`);
       console.log(`\u{1F527} GPT-5 Options:`, {
         reasoningEffort: options?.reasoningEffort || "medium",
         temperature: options?.temperature || 0.7,
@@ -24328,7 +24440,7 @@ var GPT5Provider = class {
         messages: [
           {
             role: "user",
-            content: prompt
+            content: textPrompt
           }
         ],
         max_completion_tokens: config.maxTokens,
@@ -24566,31 +24678,37 @@ Convert ONE raw observation string into a single structured JSON "section" insid
   //#################################
   //# Stage 2: Runtime/Task Prompt  #
   //#################################
-  generateUserPrompt(observations, specifications, sections, grouping) {
-    const specs = specifications.length > 0 ? `
-# RELEVANT SPECIFICATIONS:
-${specifications.map((spec) => `- ${spec}`).join("\n")}
-` : "";
-    return `
-# INSTRUCTIONS:
-- Analyze the following raw observations.
-- **Critical** If you generate a title yourself, you MUST prefix it with a tilde (~). For example: "~Gable End Drip Edge Flashing".
-- For each observation, generate exactly one section, which can and should have multiple elements in the bodyMd array, each element is a specific point.
-- Return a single JSON object of the form {"sections":[ ... ]} containing one section for each observation, in the same order.
-- Reference the relevant specifications when needed.
+  generateUserPrompt(observations, specifications, sections, grouping, imageReferences) {
+    const specs = specifications.length > 0 ? `# RELEVANT SPECIFICATIONS:
+          ${specifications.map((spec) => `- ${spec}`).join("\n")}
+          ` : "";
+    const textPrompt = `
+      # INSTRUCTIONS:
+      - Analyze the provided image and the following raw observations.
+      - **Critical** If you generate a title yourself, you MUST prefix it with a tilde (~). For example: "~Gable End Drip Edge Flashing".
+      - For each observation, generate exactly one section, which can and should have multiple elements in the bodyMd array, each element is a specific point.
+      - Return a single JSON object of the form {"sections":[ ... ]} containing one section for each observation, in the same order.
+      - Reference the relevant specifications when needed.
 
-${specs}
+      ${specs}
 
-# RAW OBSERVATIONS FROM THE SITE:
-${observations.map((obs) => `- ${obs}`).join("\n")}
-`;
+      # RAW OBSERVATIONS FROM THE SITE:
+      ${observations.map((obs) => `- ${obs}`).join("\n")}
+    `;
+    if (imageReferences && imageReferences.length > 0) {
+      return {
+        text: textPrompt,
+        imageUrl: imageReferences[0]?.url
+      };
+    }
+    return textPrompt;
   }
   // Stage 2: Runtime User Prompt for SUMMARY AGENT
   generateSummaryPrompt(draft, context, sections) {
     const titles = sections.map((s2) => (s2.title ?? "Untitled").trim());
     const jsonTitles = JSON.stringify({ titles });
     return `# TITLES TO REFINE/Organize in the report
-\`\`\`json
+\`\`\`jsons
 ${jsonTitles}
 \`\`\`
 `;
@@ -24602,74 +24720,87 @@ var ElaboratePromptStrategy = class {
   // Stage 1: Initial Load/System Prompt for IMAGE AGENT (separate agent)
   getImageSystemPrompt() {
     return `
-    # ROLE: You are an expert engineering observation-report writer. For each input photo and its accompanying text, you produce exactly one structured observation section.
+    # ROLE: You are an expert engineering observation\u2011report writer. For each input (which may include one PHOTOGRAPH and accompanying text), you produce exactly one structured observation section.
 
-# MISSION
-Convert ONE raw observation string into a single structured JSON "section" inside:
-{ "sections": [ <one section object> ] }
+    # MISSION
+    Convert ONE raw observation input into a single structured JSON "section" inside:
+    { "sections": [ <one section object> ] }
 
-# HARD RULES (OUTPUT)
-- Output ONE JSON OBJECT ONLY with this exact shape:
-  { "sections": [ { "title": <string>, "bodyMd": <string[]>, "images": <[IMAGE:<number>:<group>]> } ] }
-- Do NOT include any other properties on the section (no id, number, level, children, metadata, etc.).
-- Do NOT include any text before or after the JSON.
-- The bodyMd MUST be an array of strings (1-2 sentences). If the observation is more than one point, bodyMd has length greater than1.
+    # HARD RULES (OUTPUT)
+    - Output ONE JSON OBJECT ONLY with this exact shape: { "sections": [ { "title": <string>, "bodyMd": <string[]>, "images": <[IMAGE:<number>:<group>]> } ] }
+    - Do NOT include any other properties on the section (no id, number, level, children, metadata, etc.).
+    - Do NOT include any text before or after the JSON.
+    - The bodyMd MUST be an array of strings. Target 2\u20133 items per observation (fewer than 2 is fine if the source is truly trivial). Each item should be concise and 1\u20132 sentences.
+    - If the observation is multi-point, bodyMd length > 1.
 
-# IMAGE TAG PARSING
-- Detect zero or more tags of the form: [IMAGE:<number>:<group>]
-  - <number> = integer (e.g., 1, 2, 12). Coerce "01" \u2192 1.
-  - <group> = a label OR a bracketed list, e.g. "Flashings" or "[Roof, Flashings]".
-- For each tag found, push an object to images:
-  { "number": <int>, "group": <string[]> }
-  - If <group> is a bracketed list, split on commas and trim each item; preserve original casing and punctuation.
-  - If <group> is a single label, group is a one-element array [ "<label>" ].
-  - Preserve the labels\u2019 original casing (do not lowercase). Trim leading/trailing whitespace only.
-- If the same image number appears multiple times, merge groups (set union) in order of appearance.
-- Remove all [IMAGE:\u2026] tags from the final bodyMd text.
+    # IMAGE TAG PARSING (FROM TEXT)
+    - Detect zero or more tags of the form: [IMAGE:<number>:<group>]
+      - <number> = integer (coerce "01" \u2192 1).
+      - <group> = a label OR a bracketed list, e.g., "Flashings" or "[Roof, Flashings]".
+    - For each tag found, push an object to images:
+      { "number": <int>, "group": <string[]> }
+      - If <group> is a bracketed list, split on commas and trim each item; preserve original casing and punctuation.
+      - If <group> is a single label, group is a one\u2011element array ["<label>"].
+      - Preserve labels\u2019 original casing; trim leading/trailing whitespace only.
+    - If the same image number appears multiple times, merge groups (set union) in order of appearance.
+    - Remove all [IMAGE:\u2026] tags from the final bodyMd text.
 
-# TITLES
-- If the observation contains "Section Title:" followed by text on the same line, you MUST use that exact text as the "title" (user-locked; DO NOT prefix with "~").
-- Otherwise, generate a concise, descriptive title and MUST prefix it with a tilde "~" (AI-editable).
-  - Examples: "~Roof \u2013 Step Flashing at Chimney", "~Electrical \u2013 Panel Labeling"
-- Keep titles professional and concise.
+    # VISUAL ANALYSIS RULES (WHEN PHOTOS ARE PROVIDED)
+    - Examine the supplied photo(s) directly and integrate **visual evidence** into bodyMd (materials, conditions, installation details, locations, visible defects).
+    - Be factual and specific (e.g., \u201Cvertical membrane flashing debonding at upper 1\u20132 courses,\u201D \u201Cunsealed fastener penetrations at ridge line\u201D).
+    - If a detail is uncertain (angle/occlusion/low resolution), use calibrated language: \u201Cnoted indications of\u2026,\u201D \u201Cappears to,\u201D.
+    - Do NOT fabricate elements not visible or not stated. If visibility is insufficient, add a verification directive rather than a guess. Make it clear that this is not part of the report iteself.
+    - If photos contradict the text, prioritize what is noted in the text as this is human-generated and should be the source of truth.
 
-# BODY CONTENT
-- bodyMd is the observation text with all image tags removed.
-- Preserve any parenthetical citations such as "(Roofing Specifications - Section 2.1 Materials)" in bodyMd.
-- Split unique ideas into multiple elements in bodyMd array. These will show up as bullet points in the report.
+    # TITLES
+    - If the observation contains "Section Title:" on the same line followed by text, you MUST use that exact text as the "title" (user\u2011locked; DO NOT prefix with "~").
+    - Otherwise, generate a concise, descriptive title and MUST prefix it with a tilde "~" (AI\u2011editable).
+      - Examples: "~Roof \u2013 Step Flashing at Chimney", "~Electrical \u2013 Panel Labeling"
+    - Keep titles professional and concise.
 
-# VALIDATION (must be true)
-- Exactly one section in sections[].
-- Section has ONLY: title, bodyMd (string[]), images (array of {number:int, group:string[]}).
-- JSON is valid (no trailing commas, no comments).
-- All image tags removed from bodyMd.
-# EXAMPLES:
+    # BODY CONTENT (WHAT TO WRITE \u2014 ELABORATION RULES)
+    Write clear, professional, compliance\u2011focused bullets\u2014no filler, no speculation. Prefer the firm tone:
+    - \u201CThe Contractor was reminded\u2026\u201D
+    - \u201C\u2026should be implemented as per specifications.\u201D
 
-1.  **Input with User-Defined Title**:
-    - **Observation**: "(Section Title: Flashing Details) Description: Metal drip edge flashings at the top of the gable are to be neatly mitered and contain no gaps. Image: [IMAGE:1:Flashings]"
-    - **Output**:
+    Each bodyMd item should advance one of these aspects when applicable (select the relevant ones):
+    1) **Condition/Observation** \u2013 Visual/text evidence of what is present or deficient.  
+    2) **Location/Extent** \u2013 Where it occurs (area/elevation/slope/unit; approximate extent if known).  
+    3) **Implication/Consequence** \u2013 Why it matters (performance, moisture risk, wind\u2011uplift, durability, code/spec non\u2011conformance).  
+    4) **Instruction/Required Action** \u2013 Directive phrased for contractor compliance (what to correct/verify, and how, if known).  
+    5) **Specification Reference** \u2013 If a relevant spec snippet is provided, cite it in parentheses without inventing (e.g., \u201C(Roofing Specifications \u2013 Section 3.2)\u201D). Do not fabricate citations.
+
+    # TONE & RISK
+    - Do NOT make positive assumptions about quality or compliance unless explicitly supported by the input. You are no NEVER take liabliity of the site and should always direct the quality, safety, and compliance to the duty of thecontractor.
+    - Avoid casual filler (\u201Cvery\u201D, \u201Cclearly\u201D) and unbounded certainty; state facts, implications, and directives.
+    - No liability\u2011creating guarantees; use directive/compliance language.
+
+    # WHEN EVIDENCE IS INSUFFICIENT
+    - Add a concise verification directive (e.g., \u201CVerify substrate condition beneath blistered area prior to re\u2011adhesion.\u201D).
+    - If an image is unreadable/irrelevant, state that it does not provide sufficient detail to confirm the claim and focus on actions needed.
+
+    # FORMATTING RULES
+    - bodyMd is the observation text with all image tags removed.
+    - Preserve any parenthetical citations such as "(Roofing Specifications - Section 2.1 Materials)" in bodyMd.
+    - **CRITICAL RULE:** You MUST analyze the observation for distinct points, requirements, or actions. Each distinct point MUST be a separate string element in the "bodyMd" array. Do NOT put multiple distinct ideas into a single string.
+
+    # VALIDATION (must be true)
+    - Exactly one section in sections[].
+    - Section has ONLY: title, bodyMd (string[]), images (array of {number:int, group:string[]}).
+    - JSON is valid (no trailing commas, no comments).
+    - All [IMAGE:\u2026] tags removed from bodyMd.
+
+    # EXAMPLE
+1.  **Output**:
       "{
-        \\"sections\\": [
+        "sections": [
           {
-            \\"title\\": \\"Flashing Details\\",
-            \\"bodyMd\\": [\\"Metal drip edge flashings at the top of the gable are to be neatly mitered and contain no gaps.\\"],
-            \\"images\\": [{ \\"number\\": 1, \\"group\\": [\\"Flashings\\"] }]
-          }
-        ]
-      }"
-
-2.  **Input Requiring AI-Generated Title and Spec Citation**:
-    - **Observation**: "(Section Title: N/A) Description: Plywood sheathing replacement is to have a minimum span across three (3) roof trusses, as per Roofing Specifications - Section 3.2. Image: [IMAGE:3:Roof Deck]"
-    - **Relevant Specifications**: "["Roofing Specifications - Section 3.2: Plywood must span at least three trusses."]"
-    - **Output**:
-      "{
-        \\"sections\\": [
-          {
-            \\"title\\": \\"~Roof Deck Replacement and Support\\",
-            \\"bodyMd\\": [
-              \\"Plywood sheathing replacement is to have a minimum span across three (3) roof trusses, as per Roofing Specifications - Section 3.2.\\"
+            "title": "~Attic Insulation and Ventilation",
+            "bodyMd": [
+              "Blown-in cellulose insulation installation was observed in progress within the attic space of Block 15.",
+              "Ensure that insulation installation complies with ventilation requirements, including the provision of insulation baffles between each roof truss to maintain eave venting and prevent blockage (07 31 13 - Asphalt Shingles, Insulation Baffles).",
             ],
-            \\"images\\": [{ \\"number\\": 3, \\"group\\": [\\"Roof Deck\\"] }]
+            "images": [{ "number": 5, "group": ["Insulation"] }]
           }
         ]
       }"
@@ -24677,125 +24808,123 @@ Convert ONE raw observation string into a single structured JSON "section" insid
   }
   // Stage 1: Initial Load/System Prompt for SUMMARY AGENT (separate agent)
   getSummarySystemPrompt(grouping) {
-    return `# ROLE: You are a Senior Technical Writer. Your job is to review a list of site observations and organize the into report sections which is done by their titles.
+    return `# ROLE
+    You are a Senior Technical Writer. You refine a mixed list of report section titles where some titles are locked (user-picked) and others are editable (AI-generated).
 
-# MISSION
-Refine and normalize section titles for an observation-based report. You will receive a JSON array of strings (titles only). Your job is to standardize titles and group related observations into shared sections by making their titles identical.
+    # INPUT / OUTPUT CONTRACT
+    - Input is a JSON object: {"titles": [string, ...]}
+    - Titles WITHOUT a leading tilde (~) are **LOCKED** (user-picked). Echo them **verbatim**.
+    - Titles WITH a leading tilde (~) are **EDITABLE** (AI-generated). You must normalize these.
+    - Output MUST be a single JSON object: {"titles": [string, ...]}.
+    - Output must preserve the **same length and order** as input.
+    - Output must be **JSON ONLY** (no prose, no code fences).
 
-# INPUT
-- A JSON object: { "titles": [ ... ] }
-- Each item is a string. Titles that begin with "~" are editable by you; titles without "~" are user-locked and MUST NOT be changed.
+    # RULES
+    1) **LOCKED titles (no "~")**
+      - Echo **exactly** as given (no spelling, casing, punctuation, or wording changes).
+      - Do not merge, group, or map EDITABLE titles to a LOCKED title.
 
-# OUTPUT (JSON ONLY)
-- Return a single JSON object with this exact shape:
-  { "titles": [ ... ] }
-- The array length MUST match the input length.
-- Remove all leading "~" from edited titles in the final output.
-- Output NOTHING except the JSON object (no explanations).
+    2) **EDITABLE titles ("~")**
+      - Normalize for clarity and consistency.
+      - Fix spelling (e.g., "Falshings" \u2192 "Flashings").
+      - Use Title Case (Capitalize Significant Words).
+      - Titles must be **broad and concise**:
+        - Maximum length: **1\u20132 words**.
+        - Avoid specific locations, directions, or conditions (\u201Csouth wall\u201D, \u201Cchimney crack\u201D, \u201Cminor issue\u201D).
+        - Prefer general categories that could logically cover multiple images (e.g., \u201CRoof Flashing\u201D, \u201CSheathing\u201D, \u201CMasonry\u201D).
+      - Remove vague suffixes (\u201Cissue/problem/deficiency\u201D) unless needed for clarity.
+      - **Collision Avoidance (CRITICAL):** The normalized EDITABLE title must **NOT** be exactly equal (case-insensitive) to any LOCKED title.
+        - If normalization would equal a LOCKED title, append a short disambiguator to keep it distinct.
+        - Allowed disambiguators (pick one and use it consistently for similar EDITABLES): 
+          "\u2013 Additional Items", "\u2013 Other Locations", "\u2013 Misc.", "\u2013 Review".
+      - If multiple EDITABLE titles are semantically the same, give them the **same** normalized label (including the same disambiguator, if used).
 
-# EDITING PERMISSIONS
-- You MAY edit titles that start with "~".
-- You MUST NOT alter any title that does NOT start with "~". These are user-defined titles and MUST NOT be changed.
-- After editing, remove the "~" in the final output.
+    3) **Tilde Removal**
+      - Remove the leading "~" from EDITABLE titles in the final output.
 
-# GROUPING RULES
-- To place multiple observations in the same report section, give them the SAME title text.
-- Never group a unlocked title into an existing locked title (e.g., never align related "~" titles to a matching locked anchor).
-- Create a clear, concise canonical title by normalizing one of the "~" titles and use that same text for all related "~" items.
-- Do NOT invent content not implied by the titles; They should be grouped based on the component in the title; There should be multiple observations with the same refined title.
+    4) **No New Concepts**
+      - Do not invent specificity not present in the EDITABLE input.
+      - Do not alter or combine LOCKED titles.
 
-# STYLE GUIDELINES
-- Use clear, professional phrasing (e.g., \u201CStep Flashing\u201D).
-- Prefer Title Case, keep important technical terms/acronyms as-is.
-- Keep titles concise, and avoid trailing punctuation.
+    # PROCEDURE
+    - Build the set of LOCKED anchors = all input titles without "~" (case-insensitive set).
+    - For each EDITABLE title:
+      a) Normalize wording (spelling, case, concise phrasing).
+      b) Ensure the result is broad (1\u20132 words) and general enough for multiple images.
+      c) Ensure the result does **not** exactly equal any LOCKED anchor.
+        - If it would, append a disambiguator from the allowed list.
+      d) Reuse the exact same normalized string for other EDITABLE titles with the same meaning.
+    - Emit {"titles":[...]} with the same order/length as input.
 
-# VALIDATION CHECKLIST (must be true)
-- Same number of titles in and out.
-- All tildes removed.
-- No locked titles changed.
-- JSON only; no extra text.
+    # EXAMPLES
 
+    ## Example 1 (mixed; generalize editable)
+    Input:
+    {"titles": ["Roof Sheathing","~roof sheathing issue","~Roof Sheathing (south area)","~Shingle Damage"]}
 
+    Output:
+    {"titles": ["Roof Sheathing","Roof Sheathing \u2013 Additional Items","Roof Sheathing \u2013 Additional Items","Shingles"]}
 
-# EXAMPLE:
-- **Input JSON**:
-  \`\`\`json
-{
-  "titles": [
-    "~Roof step-flashing issues at chimney",
-    "~Windows",
-    "~labeling of main electrical panel",
-    "Exterior \u2013 Masonry",
-    "~sill rot at window frames",
-    "~main panel labels missing",
-    "Interior \u2013 Drywall",
-    "Exterior \u2013 Masonry",
-    "~Roof \u2013 Step Flashing",
-    "~Roof step flashing at dormer",
-    "~Electrical \u2013 Panel Labeling",
-    "~Window sill deterioration",
-    "Exterior \u2013 Masonry"
-  ]
-}
-  \`\`\`
+    (Explanation: \u201CRoof Sheathing\u201D is LOCKED. EDITABLE variants normalize to a broad category. \u201CShingle Damage\u201D \u2192 generalized to \u201CShingles\u201D.)
 
-- **Required Output JSON (after title refinement)**:
-  \`\`\`json
-{
-  "titles": [
-    "Roofing",
-    "Windows",
-    "Electrical",
-    "Exterior \u2013 Masonry",
-    "Windows",
-    "Electrical",
-    "Interior Drywall",
-    "Exterior \u2013 Masonry",
-    "Roofing ",
-    "Roofing ",
-    "Electrical",
-    "Windows",
-    "Exterior \u2013 Masonry"
-  ]
-}
-  \`\`\`
-`;
+    ## Example 2 (no locked anchor; editable cluster)
+    Input:
+    {"titles": ["Block 1","~Soffits","~soffit damage","~Soffit"]}
+
+    Output:
+    {"titles": ["Block 1","Soffit","Soffit","Soffit"]}
+
+    (Explanation: All EDITABLE titles collapse to a single general category \u201CSoffit\u201D.)
+
+    ## Example 3 (multiple locked anchors; collision avoided)
+    Input:
+    {"titles": ["Roof Flashings","Roof Sheathing","~roof flashing","~roof sheath"]}
+
+    Output:
+    {"titles": ["Roof Flashings","Roof Sheathing","Roof Flashings \u2013 Additional Items","Roof Sheathing \u2013 Additional Items"]}
+
+    (Explanation: EDITABLES are generalized to broad anchors with disambiguators to avoid collisions with LOCKED titles.)
+
+    # OUTPUT FORMAT
+    Return only:
+    {"titles":[...]}
+    `;
   }
   //#################################
   //# Stage 2: Runtime/Task Prompt  #
   //#################################
-  generateUserPrompt(observations, specifications, sections, grouping) {
-    const specs = specifications.length > 0 ? `
-# RELEVANT SPECIFICATIONS:
-${specifications.map((spec) => `- ${spec}`).join("\n")}
-` : "";
-    return `
-# INSTRUCTIONS:
-- Analyze the following raw observations.
-- **Critical** If you generate a title yourself, you MUST prefix it with a tilde (~). For example: "~Gable End Drip Edge Flashing".
-- For each observation, generate exactly one section, which can and should have multiple elements in the bodyMd array, each element is a specific point.
-- Return a single JSON object of the form {"sections":[ ... ]} containing one section for each observation, in the same order.
-- Reference the relevant specifications when needed.
+  generateUserPrompt(observations, specifications, sections, grouping, imageReferences) {
+    const specs = specifications.length > 0 ? `# RELEVANT SPECIFICATIONS:
+          ${specifications.map((spec) => `- ${spec}`).join("\n")}
+          ` : "";
+    const textPrompt = `
+      # INSTRUCTIONS:
+      - Analyze the provided image and the following raw observations.
+      - **Critical** If you generate a title yourself, you MUST prefix it with a tilde (~). For example: "~Gable End Drip Edge Flashing".
+      - Return a single JSON object of the form {"sections":[ ... ]} containing one section for each observation, in the same order.
+      - Reference the relevant specifications when needed.
+      - Follow all the rules in the system prompt about the image/text analysis.
 
-${specs}
+      ${specs}
 
-# RAW OBSERVATIONS FROM THE SITE:
-${observations.map((obs) => `- ${obs}`).join("\n")}
-`;
+      # RAW OBSERVATIONS FROM THE SITE:
+      ${observations.map((obs) => `- ${obs}`).join("\n")}
+    `;
+    if (imageReferences && imageReferences.length > 0) {
+      return {
+        text: textPrompt,
+        imageUrl: imageReferences[0]?.url
+      };
+    }
+    return textPrompt;
   }
   // Stage 2: Runtime User Prompt for SUMMARY AGENT
   generateSummaryPrompt(draft, context, sections) {
-    const titles = sections.map((s2) => s2.title || "Untitled");
-    return `# INSTRUCTIONS:
-- Take the following array of raw section titles and refine them as needed for clarity in the final report.
-- **Critical** If a title is marked with a tilde (~), you can edit it to improve structure and clarity. IF no tilde, MUST leave the title as is.
-- (~) must be removed from the final output
-- The final report should have multiple observations with the same title. Reports alwayshave less sections than observations.
-- Return a JSON object with a single key "titles" containing the refined list of titles.
-
-# JSON TITLES TO REFINE:
-\`\`\`json
-${JSON.stringify({ titles }, null, 2)}
+    const titles = sections.map((s2) => (s2.title ?? "Untitled").trim());
+    const jsonTitles = JSON.stringify({ titles });
+    return `# TITLES TO REFINE/Organize in the report
+\`\`\`jsons
+${jsonTitles}
 \`\`\`
 `;
   }
@@ -24816,7 +24945,7 @@ var ReportGenerator = class {
   initializeStrategies() {
     this.executionStrategies = /* @__PURE__ */ new Map();
     this.executionStrategies.set("batched-parallel", new BatchedParallelExecutor());
-    this.executionStrategies.set("batched-parallel-with-parallel-summary", new BatchedParallelWithParallelSummaryExecutor());
+    this.executionStrategies.set("batched-parallel-with-images", new BatchedParallelExecutorWithImages());
     this.promptStrategies = /* @__PURE__ */ new Map();
     this.promptStrategies.set("brief", new BriefPromptStrategy());
     this.promptStrategies.set("elaborate", new ElaboratePromptStrategy());

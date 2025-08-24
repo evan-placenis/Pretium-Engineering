@@ -7,7 +7,7 @@ This document outlines the architecture and data flow for the AI-powered chat as
 The chat API is designed around a **stateless** and **"lazy-loading"** architecture. This approach is highly robust and cost-effective.
 
 - **Stateless by Default:** Each request to the `/api/chat` endpoint starts with zero context about the report's content or the conversation history. The server does not hold any state between requests.
-- **Lazy-Loading via Tools:** The AI assistant is instructed to be "lazy." It only fetches the specific information it needs to fulfill a user's request by using a well-defined set of tools. This prevents sending large, unnecessary data blobs with every message, saving on token costs and improving performance.
+- **Lazy-Loading via Tools:** The AI assistant is instructed to be "lazy." It only fetches the specific information it needs to fulfill a user's request by using a well-defined set of tools. This includes conversation history - the AI will only fetch previous messages when the user refers to prior context or when asking clarifying questions that require understanding previous exchanges.
 
 ---
 
@@ -20,7 +20,7 @@ The AI has access to two categories of tools, which are managed in `pretium/src/
 These tools allow the AI to gather information on demand.
 
 - `get_report_slices`: Fetches summaries of specific sections of the report. This is the primary tool the AI uses when a user refers to a section by its number or title (e.g., "update section 3.1"). It allows the AI to resolve the section number to a stable UUID before performing an action.
-- `get_chat_history`: Retrieves a summary of the recent conversation. The AI is instructed to use this sparingly, only when it needs to resolve a direct reference to a previous turn in the conversation (e.g., "what was the ID you gave me before?").
+- `get_chat_history`: Retrieves a summary of the recent conversation. The AI is instructed to use this when the user refers to previous messages, when asking clarifying questions that need context from prior exchanges, or when continuing work from previous conversations.
 - `search_project_specs`: Searches the project's knowledge base (embeddings) for technical specifications, codes, or requirements.
 
 ### 2. Action Tools

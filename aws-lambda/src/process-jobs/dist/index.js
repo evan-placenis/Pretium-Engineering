@@ -23600,7 +23600,7 @@ var BatchedParallelExecutor = class {
         while (activePromises.size >= this.MAX_PARALLEL_AGENTS) {
           await Promise.race(activePromises);
         }
-        const promise = this.processBatch(batch, params).then(async (batchSections) => {
+        const promise = this.processBatch(batch, params, bulletPoints).then(async (batchSections) => {
           if (batchSections.length > 0) {
             allSections.push(...batchSections);
             const streamingPayload = this.prepareStreamingPayload(allSections);
@@ -23616,10 +23616,6 @@ var BatchedParallelExecutor = class {
         allPromises.push(wrapped);
       }
       await Promise.all(allPromises);
-      await this.updateReportContent({
-        type: "status",
-        message: `IMAGE AGENT COMPLETE: Produced ${allSections.length} initial sections. Moving to summary agent...`
-      });
       console.log("\u{1F4DD} Generating final summary sequentially...");
       const summarySystemPrompt = promptStrategy.getSummarySystemPrompt(grouping);
       const summaryTaskPrompt = promptStrategy.generateSummaryPrompt("", {}, allSections);
@@ -23814,13 +23810,13 @@ Please try generating again.`;
     model.autoNumberSections();
     return model.getState().sections;
   }
-  async processBatch(batch, params) {
+  async processBatch(batch, params, bulletPoints) {
     const { llmProvider, promptStrategy, grouping, projectId, supabase } = params;
     if (!projectId || !supabase) {
       console.error("processBatch called without projectId or supabase client.");
       return [];
     }
-    const systemPrompt = promptStrategy.getImageSystemPrompt();
+    const systemPrompt = promptStrategy.getImageSystemPrompt(bulletPoints);
     const parseSections = (content) => {
       if (!content)
         return [];
@@ -23917,7 +23913,7 @@ var BatchedParallelExecutorWithImages = class {
         while (activePromises.size >= this.MAX_PARALLEL_AGENTS) {
           await Promise.race(activePromises);
         }
-        const promise = this.processBatch(batch, params).then(async (batchSections) => {
+        const promise = this.processBatch(batch, params, bulletPoints).then(async (batchSections) => {
           if (batchSections.length > 0) {
             allSections.push(...batchSections);
             const streamingPayload = this.prepareStreamingPayload(allSections);
@@ -23933,10 +23929,6 @@ var BatchedParallelExecutorWithImages = class {
         allPromises.push(wrapped);
       }
       await Promise.all(allPromises);
-      await this.updateReportContent({
-        type: "status",
-        message: `IMAGE AGENT COMPLETE: Produced ${allSections.length} initial sections. Moving to summary agent...`
-      });
       console.log("\u{1F4DD} Generating final summary sequentially...");
       const summarySystemPrompt = promptStrategy.getSummarySystemPrompt(grouping);
       const summaryTaskPrompt = promptStrategy.generateSummaryPrompt("", {}, allSections);
@@ -24131,13 +24123,13 @@ Please try generating again.`;
     model.autoNumberSections();
     return model.getState().sections;
   }
-  async processBatch(batch, params) {
+  async processBatch(batch, params, bulletPoints) {
     const { llmProvider, promptStrategy, grouping, projectId, supabase } = params;
     if (!projectId || !supabase) {
       console.error("processBatch called without projectId or supabase client.");
       return [];
     }
-    const systemPrompt = promptStrategy.getImageSystemPrompt();
+    const systemPrompt = promptStrategy.getImageSystemPrompt(bulletPoints);
     const parseSections = (content) => {
       if (!content)
         return [];
@@ -24520,7 +24512,13 @@ var GPT5Provider = class {
 // src/process-jobs/report-generation/prompts/BriefPromptStrategy.ts
 var BriefPromptStrategy = class {
   // Stage 1: Initial Load/System Prompt for IMAGE AGENT (separate agent)
-  getImageSystemPrompt() {
+  getImageSystemPrompt(bulletPoints) {
+    let user_instructions = "";
+    if (bulletPoints) {
+      user_instructions = `# USER INPUT: 
+ The following information and/or guidance are written by the user. It refers to the entire project and they must be followed in applicable sections when generating the obervations.
+${bulletPoints}`;
+    }
     return `
     # ROLE: You are an expert engineering observation-report writer. For each input photo and its accompanying text, you produce exactly one structured observation section.
 
@@ -24563,6 +24561,7 @@ Convert ONE raw observation string into a single structured JSON "section" insid
 - Section has ONLY: title, bodyMd (string[]), images (array of {number:int, group:string[]}).
 - JSON is valid (no trailing commas, no comments).
 - All image tags removed from bodyMd.
+
 # EXAMPLES:
 
 1.  **Input with User-Defined Title**:
@@ -24593,7 +24592,7 @@ Convert ONE raw observation string into a single structured JSON "section" insid
           }
         ]
       }"
-`;
+` + user_instructions;
   }
   // Stage 1: Initial Load/System Prompt for SUMMARY AGENT (separate agent)
   getSummarySystemPrompt(grouping) {
@@ -24708,7 +24707,7 @@ Convert ONE raw observation string into a single structured JSON "section" insid
     const titles = sections.map((s2) => (s2.title ?? "Untitled").trim());
     const jsonTitles = JSON.stringify({ titles });
     return `# TITLES TO REFINE/Organize in the report
-\`\`\`jsons
+\`\`\`json
 ${jsonTitles}
 \`\`\`
 `;
@@ -24718,7 +24717,13 @@ ${jsonTitles}
 // src/process-jobs/report-generation/prompts/ElaboratePromptStrategy.ts
 var ElaboratePromptStrategy = class {
   // Stage 1: Initial Load/System Prompt for IMAGE AGENT (separate agent)
-  getImageSystemPrompt() {
+  getImageSystemPrompt(bulletPoints) {
+    let user_instructions = "";
+    if (bulletPoints) {
+      user_instructions = `# USER INPUT: 
+ The following information and/or guidance are written by the user. It refers to the entire project and they must be followed in applicable sections when generating the obervations.
+${bulletPoints}`;
+    }
     return `
     # ROLE: You are an expert engineering observation\u2011report writer. For each input (which may include one PHOTOGRAPH and accompanying text), you produce exactly one structured observation section.
 
@@ -24754,9 +24759,8 @@ var ElaboratePromptStrategy = class {
 
     # TITLES
     - If the observation contains "Section Title:" on the same line followed by text, you MUST use that exact text as the "title" (user\u2011locked; DO NOT prefix with "~").
-    - Otherwise, generate a concise, descriptive title and MUST prefix it with a tilde "~" (AI\u2011editable).
+    - Otherwise, generate a concise, general title and MUST prefix it with a tilde "~" (AI\u2011editable).
       - Examples: "~Roof \u2013 Step Flashing at Chimney", "~Electrical \u2013 Panel Labeling"
-    - Keep titles professional and concise.
 
     # BODY CONTENT (WHAT TO WRITE \u2014 ELABORATION RULES)
     Write clear, professional, compliance\u2011focused bullets\u2014no filler, no speculation. Prefer the firm tone:
@@ -24804,7 +24808,9 @@ var ElaboratePromptStrategy = class {
           }
         ]
       }"
-`;
+
+  
+` + user_instructions;
   }
   // Stage 1: Initial Load/System Prompt for SUMMARY AGENT (separate agent)
   getSummarySystemPrompt(grouping) {
@@ -24825,8 +24831,7 @@ var ElaboratePromptStrategy = class {
       - Do not merge, group, or map EDITABLE titles to a LOCKED title.
 
     2) **EDITABLE titles ("~")**
-      - Normalize for clarity and consistency.
-      - Fix spelling (e.g., "Falshings" \u2192 "Flashings").
+      - You will often need to make a judgement call and group titles/components that are similar but not exactly the same. (e.g shingles and )
       - Use Title Case (Capitalize Significant Words).
       - Titles must be **broad and concise**:
         - Maximum length: **1\u20132 words**.
@@ -24860,30 +24865,21 @@ var ElaboratePromptStrategy = class {
 
     ## Example 1 (mixed; generalize editable)
     Input:
-    {"titles": ["Roof Sheathing","~roof sheathing issue","~Roof Sheathing (south area)","~Shingle Damage"]}
+    {"titles": ["Electrical","~Roof - sheathing issue","~Roof - Sheathing (south area)","~Shingles -Shingle Damage"]}
 
     Output:
-    {"titles": ["Roof Sheathing","Roof Sheathing \u2013 Additional Items","Roof Sheathing \u2013 Additional Items","Shingles"]}
+    {"titles": ["Electrical","Roofing","Roofing","Roofing"]}
 
-    (Explanation: \u201CRoof Sheathing\u201D is LOCKED. EDITABLE variants normalize to a broad category. \u201CShingle Damage\u201D \u2192 generalized to \u201CShingles\u201D.)
+    (Explanation: \u201CElectrical\u201D is LOCKED. EDITABLE variants normalize to a broad category. "Shingles" is on the same topic as "Roofing" so it is grouped with it.)
 
     ## Example 2 (no locked anchor; editable cluster)
     Input:
-    {"titles": ["Block 1","~Soffits","~soffit damage","~Soffit"]}
+    {"titles": ["Block 1","~Soffits - soffit damage","~Soffits - soffit damage","~Soffit - leakage"]}
 
     Output:
     {"titles": ["Block 1","Soffit","Soffit","Soffit"]}
 
     (Explanation: All EDITABLE titles collapse to a single general category \u201CSoffit\u201D.)
-
-    ## Example 3 (multiple locked anchors; collision avoided)
-    Input:
-    {"titles": ["Roof Flashings","Roof Sheathing","~roof flashing","~roof sheath"]}
-
-    Output:
-    {"titles": ["Roof Flashings","Roof Sheathing","Roof Flashings \u2013 Additional Items","Roof Sheathing \u2013 Additional Items"]}
-
-    (Explanation: EDITABLES are generalized to broad anchors with disambiguators to avoid collisions with LOCKED titles.)
 
     # OUTPUT FORMAT
     Return only:
@@ -24923,7 +24919,7 @@ var ElaboratePromptStrategy = class {
     const titles = sections.map((s2) => (s2.title ?? "Untitled").trim());
     const jsonTitles = JSON.stringify({ titles });
     return `# TITLES TO REFINE/Organize in the report
-\`\`\`jsons
+\`\`\`json
 ${jsonTitles}
 \`\`\`
 `;

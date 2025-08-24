@@ -23,7 +23,7 @@ interface ReportEditorProps {
   strategy: ReportStructureStrategy;
 }
 
-const CustomImage = ({ src, alt }: { src?: string; alt?: string }) => {
+const CustomImage = ({ src, alt, imageNumber }: { src?: string; alt?: string; imageNumber?: string | number }) => {
   if (!src) return null;
   return (
     <div className={styles.imageContainer}>
@@ -35,6 +35,11 @@ const CustomImage = ({ src, alt }: { src?: string; alt?: string }) => {
         className={styles.reportImage}
         style={{ objectFit: 'contain' }}
       />
+      {imageNumber && (
+        <div className={styles.imageNumber}>
+          Image {imageNumber}
+        </div>
+      )}
     </div>
   );
 };
@@ -49,6 +54,31 @@ export const ReportEditor: React.FC<ReportEditorProps> = ({
   streamingStatus,
 }) => {
   const { saveSections, isSaving, saveError } = useReportSaver(reportId);
+
+  // Calculate sequential image numbers globally - recursively traverse all sections
+  const imageSequentialMap = new Map<string, number>();
+  let globalImageCounter = 1;
+  
+  const traverseAllSections = (sectionList: Section[]) => {
+    for (const section of sectionList) {
+      console.log(`[DEBUG] Checking section ${section.id} - images: ${section.images?.length || 0}, children: ${section.children?.length || 0}`);
+      if (section.images && section.images.length > 0) {
+        for (let i = 0; i < section.images.length; i++) {
+          const imageKey = `${section.id}-${i}`;
+          imageSequentialMap.set(imageKey, globalImageCounter);
+          console.log(`[DEBUG] Setting ${imageKey} = Image ${globalImageCounter}`);
+          globalImageCounter++;
+        }
+      }
+      if (section.children && section.children.length > 0) {
+        traverseAllSections(section.children);
+      }
+    }
+  };
+  
+  if (sections) {
+    traverseAllSections(sections);
+  }
 
   const handleSave = async (updatedSections: Section[]) => {
     onSectionsChange(updatedSections);
@@ -171,11 +201,18 @@ export const ReportEditor: React.FC<ReportEditorProps> = ({
                           ? (imageRef.group ?? []).join('|')
                           : imageRef.group ?? '';
                         const imgKey = `${imageRef.number ?? 'n'}-${groupPart}-${idx}`;
+                        
+                        // Get sequential image number from global map
+                        const imageKey = `${firstChild.id}-${idx}`;
+                        const sequentialImageNumber = imageSequentialMap.get(imageKey) || 1;
+
+                        
                         return (
                           <CustomImage
                             key={imgKey}
                             src={image.signedUrl}
-                            alt={`Image ${image.number}`}
+                            alt={`Image ${sequentialImageNumber}`}
+                            imageNumber={sequentialImageNumber}
                           />
                         );
                       })}

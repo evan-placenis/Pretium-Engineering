@@ -11,6 +11,9 @@ import { revalidateTag } from 'next/cache';
 
 const supabaseAdmin = createServiceRoleClient(); // Instantiate the admin client
 
+// Global variable to track if current report generation is complete (it checks for the completion message in the generated_content field)
+let currentCompletedReportId: string | null = null;
+
 export async function POST(req: NextRequest) {
   try {
     const { userMessage, reportId, projectId, model = 'grok-4' } = await req.json();
@@ -21,7 +24,34 @@ export async function POST(req: NextRequest) {
       }), { status: 400 });
     }
     
-    // --- Step 1: Fetch the report using the cached function ---
+    // --- Step 1: Check if we need to verify report generation completion ---
+    const isInitializationMessage = userMessage.includes('Silent initialization') || userMessage.includes('This is your first message to the user');
+    
+    if (currentCompletedReportId !== reportId && !isInitializationMessage) {
+      // Check DB once to see if generation is complete (skip for initialization)
+      const { data: reportStatus } = await supabaseAdmin
+        .from('reports')
+        .select('generated_content')
+        .eq('id', reportId)
+        .single();
+
+      const isComplete = reportStatus?.generated_content?.includes('✅ Report Generation Complete');
+      
+      if (!isComplete) {
+        // Still generating - send message and stop
+        return new Response(JSON.stringify({
+          error: "Report generation not done yet. Please wait...",
+          isGenerating: true
+        }), { status: 202 });
+      }
+      
+      // Generation is complete! Mark it and refresh cache
+      currentCompletedReportId = reportId;
+      revalidateTag(`report:${reportId}`);
+      console.log(`[CHAT] Report ${reportId} marked as complete. Cache refreshed.`);
+    }
+
+    // --- Step 2: Fetch the report using the cached function ---
     const reportData = await getReportSectionsForChat(reportId);
 
     if (!reportData) {
@@ -196,6 +226,13 @@ function getSystemPrompt(): string {
 **CORE BEHAVIOR:**
 You start with NO CONTEXT about the report or chat history. Your primary goal is to fulfill the user's request using tools.
 
+**WHEN TO USE CHAT HISTORY:**
+Call \`get_chat_history()\` when:
+- The user refers to something from a previous conversation (e.g., "what we discussed before", "the change I mentioned earlier")
+- You need clarification and the current message alone doesn't provide enough context
+- The user is asking you to continue or modify work from previous messages
+- You're asking a clarifying question but need to reference what the user was originally trying to accomplish
+
 **CRITICAL RULE: USE IDs, NOT NUMBERS**
 Section numbers (e.g., "1", "2.1") are for display only and can change. You **MUST NOT** use them as IDs in your tool calls.
 If a user refers to a section number, your workflow **MUST** be:
@@ -203,11 +240,24 @@ If a user refers to a section number, your workflow **MUST** be:
 2. Find the section in the response that has the matching number.
 3. Use that section's stable UUID in the action tool (e.g., \`update_section\`).
 
+**NOTE:** \`get_report_slices()\` returns a structured object with \`{ sections: [...], truncated: boolean }\`. If \`truncated: true\`, the response was shortened to fit size limits and you may need to make more specific queries.
+
 **EXAMPLE WORKFLOW:**
 User says: "Change the title of section 2 to 'New Title'"
 Your response MUST be a sequence of two tool calls:
 1. First, call \`get_report_slices({})\` to get the ID for section number "2.".
 2. Then, use that ID to call \`update_section({ "id": "the-real-uuid-you-found", "title": "New Title" })\`.
+
+**IMAGE REFERENCE SYSTEM:**
+- Images are displayed to users with sequential dummy numbers (Image 1, Image 2, Image 3, etc.)
+- These numbers are independent of database IDs and are calculated by frontend traversal order
+- When users refer to images by number, use \`get_image_map()\` to understand which actual images they mean
+
+**IMAGE OPERATIONS:**
+- For **image swaps**: Use \`swap_photos(imageNumber1, imageNumber2)\` - handles both text and image swapping automatically
+- For **multiple swaps**: Call \`swap_photos\` multiple times (each swap is a fast, atomic operation)
+- For **image content updates**: Use \`batch_update_sections\` with \`images\` field to update image references
+- \`swap_photos\` is optimized for single swaps and handles all the complexity internally
 
 **OTHER RULES:**
 1.  **BE LAZY:** Do not fetch context you don't need. Use the narrowest tool possible.

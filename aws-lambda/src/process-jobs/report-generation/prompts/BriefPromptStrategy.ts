@@ -4,7 +4,12 @@ import { ReportContext, Section, GroupingMode, PromptStrategy, VisionContent, Im
 
 export class BriefPromptStrategy implements PromptStrategy {
   // Stage 1: Initial Load/System Prompt for IMAGE AGENT (separate agent)
-  getImageSystemPrompt(): string {
+  
+  getImageSystemPrompt(bulletPoints: string): string {
+    let user_instructions = "";
+    if (bulletPoints) {
+      user_instructions = `# USER INPUT: \n The following information and/or guidance are written by the user. It refers to the entire project and they must be followed in applicable sections when generating the obervations.\n${bulletPoints}`;
+    }
     return `
     # ROLE: You are an expert engineering observation-report writer. For each input photo and its accompanying text, you produce exactly one structured observation section.
 
@@ -47,6 +52,7 @@ Convert ONE raw observation string into a single structured JSON "section" insid
 - Section has ONLY: title, bodyMd (string[]), images (array of {number:int, group:string[]}).
 - JSON is valid (no trailing commas, no comments).
 - All image tags removed from bodyMd.
+
 # EXAMPLES:
 
 1.  **Input with User-Defined Title**:
@@ -77,7 +83,7 @@ Convert ONE raw observation string into a single structured JSON "section" insid
           }
         ]
       }"
-`;
+`+user_instructions;
   }
 
   // Stage 1: Initial Load/System Prompt for SUMMARY AGENT (separate agent)
@@ -210,7 +216,7 @@ Convert ONE raw observation string into a single structured JSON "section" insid
     const titles = sections.map(s => (s.title ?? 'Untitled').trim());
     const jsonTitles = JSON.stringify({ titles });
     return `# TITLES TO REFINE/Organize in the report
-\`\`\`jsons
+\`\`\`json
 ${jsonTitles}
 \`\`\`
 `;

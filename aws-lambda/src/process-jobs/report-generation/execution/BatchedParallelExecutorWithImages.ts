@@ -46,7 +46,7 @@ export class BatchedParallelExecutorWithImages implements ExecutionStrategy {
           await Promise.race(activePromises);
         }
 
-        const promise = this.processBatch(batch, params).then(async (batchSections) => {
+        const promise = this.processBatch(batch, params, bulletPoints).then(async (batchSections) => {
           if (batchSections.length > 0) {
             allSections.push(...batchSections);
             const streamingPayload = this.prepareStreamingPayload(allSections);
@@ -66,11 +66,9 @@ export class BatchedParallelExecutorWithImages implements ExecutionStrategy {
 
       // Drain remaining
       await Promise.all(allPromises);
-            
-      await this.updateReportContent({
-        type: 'status',
-        message: `IMAGE AGENT COMPLETE: Produced ${allSections.length} initial sections. Moving to summary agent...`,
-      });
+      
+      // Skip the "Moving to summary agent" status update to avoid overwriting the intermediateResult
+      // The frontend will show the last intermediateResult until the final completion message
 
       // STEP 2: Generate final summary sequentially
       console.log('📝 Generating final summary sequentially...');
@@ -298,7 +296,7 @@ export class BatchedParallelExecutorWithImages implements ExecutionStrategy {
     return model.getState().sections;
   }
 
-  private async processBatch(batch: any[], params: ExecutionParams): Promise<Section[]> {
+  private async processBatch(batch: any[], params: ExecutionParams, bulletPoints: string): Promise<Section[]> {
     const { llmProvider, promptStrategy, grouping, projectId, supabase } = params;
   
     if (!projectId || !supabase) {
@@ -306,7 +304,7 @@ export class BatchedParallelExecutorWithImages implements ExecutionStrategy {
       return [];
     }
   
-    const systemPrompt = promptStrategy.getImageSystemPrompt();
+    const systemPrompt = promptStrategy.getImageSystemPrompt(bulletPoints);
   
     const parseSections = (content?: string): Section[] => {
       if (!content) return [];

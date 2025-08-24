@@ -113,6 +113,16 @@
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
+.imageNumber {
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #666;
+  margin-top: 0rem;
+  padding: 0rem;
+  background-color: transparent;
+}
+
 .markdownContent p {
   margin: 0.5rem 0;
   line-height: 1.5;

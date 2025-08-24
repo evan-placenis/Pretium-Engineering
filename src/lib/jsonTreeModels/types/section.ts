@@ -1,6 +1,6 @@
 export interface ImageReference {
     number: number;
-    group?: string;
+    group?: string[];
   }
   
   export interface Section {

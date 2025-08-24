@@ -3,7 +3,11 @@ import { ReportContext, Section, GroupingMode, PromptStrategy, VisionContent, Im
 
 export class ElaboratePromptStrategy implements PromptStrategy {
   // Stage 1: Initial Load/System Prompt for IMAGE AGENT (separate agent)
-  getImageSystemPrompt(): string {
+  getImageSystemPrompt(bulletPoints: string): string {
+    let user_instructions = "";
+    if (bulletPoints) {
+      user_instructions = `# USER INPUT: \n The following information and/or guidance are written by the user. It refers to the entire project and they must be followed in applicable sections when generating the obervations.\n${bulletPoints}`;
+    }
     return `
     # ROLE: You are an expert engineering observation‑report writer. For each input (which may include one PHOTOGRAPH and accompanying text), you produce exactly one structured observation section.
 
@@ -39,9 +43,8 @@ export class ElaboratePromptStrategy implements PromptStrategy {
 
     # TITLES
     - If the observation contains "Section Title:" on the same line followed by text, you MUST use that exact text as the "title" (user‑locked; DO NOT prefix with "~").
-    - Otherwise, generate a concise, descriptive title and MUST prefix it with a tilde "~" (AI‑editable).
+    - Otherwise, generate a concise, general title and MUST prefix it with a tilde "~" (AI‑editable).
       - Examples: "~Roof – Step Flashing at Chimney", "~Electrical – Panel Labeling"
-    - Keep titles professional and concise.
 
     # BODY CONTENT (WHAT TO WRITE — ELABORATION RULES)
     Write clear, professional, compliance‑focused bullets—no filler, no speculation. Prefer the firm tone:
@@ -89,7 +92,9 @@ export class ElaboratePromptStrategy implements PromptStrategy {
           }
         ]
       }"
-`;
+
+  
+` + user_instructions;
   }
 
   // Stage 1: Initial Load/System Prompt for SUMMARY AGENT (separate agent)
@@ -111,8 +116,7 @@ export class ElaboratePromptStrategy implements PromptStrategy {
       - Do not merge, group, or map EDITABLE titles to a LOCKED title.
 
     2) **EDITABLE titles ("~")**
-      - Normalize for clarity and consistency.
-      - Fix spelling (e.g., "Falshings" → "Flashings").
+      - You will often need to make a judgement call and group titles/components that are similar but not exactly the same. (e.g shingles and )
       - Use Title Case (Capitalize Significant Words).
       - Titles must be **broad and concise**:
         - Maximum length: **1–2 words**.
@@ -146,30 +150,21 @@ export class ElaboratePromptStrategy implements PromptStrategy {
 
     ## Example 1 (mixed; generalize editable)
     Input:
-    {"titles": ["Roof Sheathing","~roof sheathing issue","~Roof Sheathing (south area)","~Shingle Damage"]}
+    {"titles": ["Electrical","~Roof - sheathing issue","~Roof - Sheathing (south area)","~Shingles -Shingle Damage"]}
 
     Output:
-    {"titles": ["Roof Sheathing","Roof Sheathing – Additional Items","Roof Sheathing – Additional Items","Shingles"]}
+    {"titles": ["Electrical","Roofing","Roofing","Roofing"]}
 
-    (Explanation: “Roof Sheathing” is LOCKED. EDITABLE variants normalize to a broad category. “Shingle Damage” → generalized to “Shingles”.)
+    (Explanation: “Electrical” is LOCKED. EDITABLE variants normalize to a broad category. "Shingles" is on the same topic as "Roofing" so it is grouped with it.)
 
     ## Example 2 (no locked anchor; editable cluster)
     Input:
-    {"titles": ["Block 1","~Soffits","~soffit damage","~Soffit"]}
+    {"titles": ["Block 1","~Soffits - soffit damage","~Soffits - soffit damage","~Soffit - leakage"]}
 
     Output:
     {"titles": ["Block 1","Soffit","Soffit","Soffit"]}
 
     (Explanation: All EDITABLE titles collapse to a single general category “Soffit”.)
-
-    ## Example 3 (multiple locked anchors; collision avoided)
-    Input:
-    {"titles": ["Roof Flashings","Roof Sheathing","~roof flashing","~roof sheath"]}
-
-    Output:
-    {"titles": ["Roof Flashings","Roof Sheathing","Roof Flashings – Additional Items","Roof Sheathing – Additional Items"]}
-
-    (Explanation: EDITABLES are generalized to broad anchors with disambiguators to avoid collisions with LOCKED titles.)
 
     # OUTPUT FORMAT
     Return only:
@@ -226,7 +221,7 @@ export class ElaboratePromptStrategy implements PromptStrategy {
     const titles = sections.map(s => (s.title ?? 'Untitled').trim());
     const jsonTitles = JSON.stringify({ titles });
     return `# TITLES TO REFINE/Organize in the report
-\`\`\`jsons
+\`\`\`json
 ${jsonTitles}
 \`\`\`
 `;

@@ -666,7 +666,6 @@ export default function ProjectImagesPage() {
                isSelectionMode 
                  ? [
                      { label: 'Dashboard', href: '/dashboard' },
-                     { label: 'Reports', href: '/reports' },
                      { label: 'New Report', href: `/reports/new?project_id=${projectId}` },
                      { label: 'Organize Images', isCurrent: true }
                    ]

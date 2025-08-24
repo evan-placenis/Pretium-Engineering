@@ -371,13 +371,7 @@ export default function NewReport() {
     }
   }, [reportTitle, bulletPoints, selectedModel, reasoningEffort, projectId, groupNumberingStates, selectedImages, selectedImageIds, groupsData]);
 
-  // Auto-switch execution strategy to Standard when in ungrouped mode
-  // TODO: Remove this restriction later - Parallel Summary should work with ungrouped photos
-  useEffect(() => {
-    if (isUngroupedMode && executionStrategy === 'batched-parallel-with-images') {
-      setExecutionStrategy('batched-parallel');
-    }
-  }, [isUngroupedMode, executionStrategy]);
+  // Removed restriction - vision-enabled now works with ungrouped photos
 
   // Clear saved form data when report is successfully generated
   // Initialize group order when groups are loaded
@@ -644,10 +638,7 @@ export default function NewReport() {
       return;
     }
 
-    if (!bulletPoints.trim()) {
-      setError('Please enter some bullet points to generate a report');
-      return;
-    }
+    // Bullet points are now optional - will use "N/A" if empty
 
     if (selectedImages.length === 0) {
       setError('Please add at least one image to the report');
@@ -745,7 +736,7 @@ export default function NewReport() {
           {
             project_id: project!.id,
             title: reportTitle.trim() || null, // Save title if provided
-            bullet_points: bulletPoints,
+            bullet_points: bulletPoints.trim(),
             generated_content: '', // Will be updated after generation
             user_id: user.id, // Add user tracking
           },
@@ -800,7 +791,7 @@ export default function NewReport() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          bulletPoints,
+          bulletPoints: bulletPoints.trim(),
           projectId: project?.id,
           contractName: project?.["Client Name"],
           location: project?.location,
@@ -1176,28 +1167,22 @@ export default function NewReport() {
                 onClick={() => setExecutionStrategy('batched-parallel-with-images')}
                 className="btn btn-sm"
                 style={{ 
-                  backgroundColor: (loading || isUngroupedMode) ? 'var(--color-bg-secondary)' : (executionStrategy === 'batched-parallel-with-images' ? 'var(--color-primary)' : 'transparent'),
-                  color: (loading || isUngroupedMode) ? 'var(--color-text-secondary)' : (executionStrategy === 'batched-parallel-with-images' ? '#fff' : 'var(--color-text)'),
-                  borderColor: (loading || isUngroupedMode) ? 'var(--color-border)' : (executionStrategy === 'batched-parallel-with-images' ? 'var(--color-primary)' : 'var(--color-border)'),
+                  backgroundColor: loading ? 'var(--color-bg-secondary)' : (executionStrategy === 'batched-parallel-with-images' ? 'var(--color-primary)' : 'transparent'),
+                  color: loading ? 'var(--color-text-secondary)' : (executionStrategy === 'batched-parallel-with-images' ? '#fff' : 'var(--color-text)'),
+                  borderColor: loading ? 'var(--color-border)' : (executionStrategy === 'batched-parallel-with-images' ? 'var(--color-primary)' : 'var(--color-border)'),
                   fontSize: "0.875rem",
                   padding: "0.5rem 1rem",
-                  cursor: (loading || isUngroupedMode) ? 'not-allowed' : 'pointer',
-                  opacity: (loading || isUngroupedMode) ? 0.6 : 1
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  opacity: loading ? 0.6 : 1
                 }}
-                disabled={loading || isUngroupedMode}
-                title={isUngroupedMode ? "Parallel Summary is not available for ungrouped photos" : "Use multiple AI agents for faster processing"}
+                disabled={loading}
+                title="Use multiple AI agents for faster processing with vision capabilities"
               >
                 Vision-Enabled
               </button>
             </div>
             <p style={{ fontSize: "0.75rem", color: "var(--color-text-secondary)", marginTop: "0.5rem" }}>
-              Standard: Traditional processing. Parallel Summary: Uses multiple AI agents for faster processing with reduced timeout risk.
-              {/* TODO: Remove this restriction later - Parallel Summary should work with ungrouped photos */}
-              {isUngroupedMode && (
-                <span style={{ color: 'var(--color-accent)', fontWeight: '500' }}>
-                  {' '}(Parallel Summary disabled for ungrouped photos)
-                </span>
-              )}
+              Standard: Traditional processing. Vision-Enabled: Uses multiple AI agents with vision capabilities for faster processing with reduced timeout risk.
             </p>
             
           </div>
@@ -1273,8 +1258,8 @@ export default function NewReport() {
                 router.push(`/reports/new/use-previous?project_id=${projectId}&returnTo=reports`);
               }}
               className="btn btn-outline"
-              disabled={loading || isUngroupedMode}
-              title={isUngroupedMode ? "Cannot use previous grouped reports when using ungrouped photos" : "Use previous report as template"}
+              disabled={loading}
+              title="Use previous report as template"
             >
               Use Previous
             </button>
@@ -1587,7 +1572,7 @@ export default function NewReport() {
       <div className="card" style={{ minHeight: "400px", position: "relative" }}>
         <div className="card-body">
           <p style={{ fontSize: "0.875rem", marginBottom: "0.75rem" }} className="text-secondary">
-            Enter your observation notes as bullet points below. These will be used to generate a detailed report. Press "Generate Report" when you're ready.
+            Enter instructions or guidance to the report generator below (Optional). Press "Generate Report" when you're ready. 
           </p>
           <textarea
             value={bulletPoints}
@@ -1602,11 +1587,8 @@ export default function NewReport() {
               borderRadius: "0.25rem",
               resize: "vertical"
             }}
-            placeholder={'• Observed water damage in northwest corner \n \
-• Ceiling tiles showing discoloration \n \
-• HVAC system making unusual noise \n \
-• Foundation appears to be settling on the east side \n \
-• ...'}
+            placeholder={'Examples: \n"Overall workmanship on site requires improvement; multiple deficiencies were observed and should be documented in detail." \n \ or\n\
+"Work observed was largely in accordance with specifications, with only minor issues requiring documentation." \n \...'}
             disabled={loading}
           />
           
@@ -1641,7 +1623,7 @@ export default function NewReport() {
               `}</style>
               <p style={{ fontSize: "1.125rem", fontWeight: 500 }}>Generating Your Report</p>
               <p style={{ color: "#666", maxWidth: "400px", textAlign: "center", marginTop: "0.5rem" }}>
-                This may take up to a minute as we analyze your bullet points and create a detailed engineering report.
+                This may take up to 5 minutes as we create a detailed engineering report.
               </p>
             </div>
           )}
@@ -1688,7 +1670,7 @@ export default function NewReport() {
         </div>
         <button
           onClick={generateReport}
-          disabled={loading || !bulletPoints.trim()}
+          disabled={loading}
           className="btn btn-primary"
           style={{ fontSize: "1.125rem", padding: "0.75rem 2rem" }}
         >

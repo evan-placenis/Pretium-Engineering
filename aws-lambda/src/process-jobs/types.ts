@@ -255,7 +255,7 @@ export interface ExecutionResult {
 
 
 export interface PromptStrategy {
-  getImageSystemPrompt(): string;
+  getImageSystemPrompt(bulletPoints: string): string;
   getSummarySystemPrompt(grouping: GroupingMode): string;
   generateUserPrompt(observations: string[], specifications: string[], sections: Section[], grouping: GroupingMode, imageReferences?: ImageReference[]): string | VisionContent;
   generateSummaryPrompt(draft: string, context: any, sections: Section[]): string;

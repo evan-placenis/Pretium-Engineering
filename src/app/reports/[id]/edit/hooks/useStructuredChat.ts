@@ -172,6 +172,15 @@ export const useStructuredChat = (
               throw new Error(`Failed to initialize chat after ${maxAttempts} attempts.`);
             }
             await new Promise(res => setTimeout(res, retryDelay));
+          } else if (response.status === 202) {
+            // Report generation in progress - treat as temporary failure and retry
+            attempts++;
+            const errorData = await response.json().catch(() => ({ generationStatus: 'Processing...' }));
+            console.warn(`[initializeChat] Report generation in progress: ${errorData.generationStatus}. Retrying in ${retryDelay}ms...`);
+            if (attempts >= maxAttempts) {
+              throw new Error(`Report generation is still in progress. Please wait a moment and refresh the page.`);
+            }
+            await new Promise(res => setTimeout(res, retryDelay));
           } else {
             // For other errors, fail immediately
             throw new Error(`API error: ${response.status} ${response.statusText}`);
@@ -248,6 +257,12 @@ export const useStructuredChat = (
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'API did not return valid JSON.' }));
+        
+        // Special handling for report generation in progress
+        if (response.status === 202 && errorData.isGenerating) {
+          throw new Error(`${errorData.error} Current status: ${errorData.generationStatus || 'Processing...'}`);
+        }
+        
         throw new Error(`API error: ${response.status} ${response.statusText} - ${errorData.error}`);
       }
       

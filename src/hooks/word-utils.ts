@@ -871,7 +871,21 @@ export const createPlaceholderImageRow = async (
         new Paragraph({
           children: [
             new TextRun({
-              text: `Photo X\nPlaceholder image — actual photo not available`,
+              text: "",
+              font: "Segoe UI",
+              size: 18,
+            }),
+          ],
+          numbering: {
+            reference: 'photo-numbering',
+            level: 0,
+          },
+          alignment: AlignmentType.LEFT,
+        }),
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: "Placeholder image — actual photo not available",
               font: "Segoe UI",
               size: 18,
             }),
@@ -1046,12 +1060,18 @@ const createSectionTitleParagraph = (section: Section, level: number): Paragraph
         text: section.title,
         bold: true,
         font: "Segoe UI",
-        size: 20 - (level * 2),
+        size: 20,
       }),
     ],
-    // Numbering removed from title, will be applied to content
+    numbering: {
+      reference: 'ai-numbering',
+      level: level,
+    },
     style: "Strong",
     alignment: AlignmentType.JUSTIFIED,
+    indent: {
+      hanging: 720,
+    },
     spacing: {
       before: 100,
       after: 0,
@@ -1105,6 +1125,10 @@ const renderSectionsRecursively = async (
                 numbering: { reference: 'ai-numbering', level: level + 1 },
                 alignment: AlignmentType.JUSTIFIED,
                 indent: { hanging: 720 },
+                spacing: {
+                  before: 100,
+                  after: 100,
+                },
               }));
             });
           }
@@ -1130,7 +1154,17 @@ const renderSectionsRecursively = async (
                   alignment: AlignmentType.CENTER,
                 }));
                 imageParagraphs.push(new Paragraph({
-                  text: `Photo ${image.number || ''}`,
+                  children: [
+                    new TextRun({
+                      text: "",
+                      font: "Segoe UI",
+                      size: 18,
+                    }),
+                  ],
+                  numbering: {
+                    reference: 'photo-numbering',
+                    level: 0,
+                  },
                   alignment: AlignmentType.CENTER,
                   spacing: { after: 200 },
                 }));
@@ -1223,21 +1257,21 @@ export const createWordDocumentWithImages = async (
               format: LevelFormat.DECIMAL,
               text: '%1.',
               alignment: AlignmentType.LEFT,
-              style: { paragraph: { indent: { left: 720, hanging: 360 } } },
+              style: { paragraph: { indent: { left: 720, hanging: 720 } } },
             },
             {
               level: 1,
               format: LevelFormat.DECIMAL,
               text: '%1.%2.',
               alignment: AlignmentType.LEFT,
-              style: { paragraph: { indent: { left: 720, hanging: 360 } } },
+              style: { paragraph: { indent: { left: 720, hanging: 720 } } },
             },
             {
               level: 2,
               format: LevelFormat.DECIMAL,
               text: '%1.%2.%3.',
               alignment: AlignmentType.LEFT,
-              style: { paragraph: { indent: { left: 1080, hanging: 360 } } },
+              style: { paragraph: { indent: { left: 1080, hanging: 720 } } },
             },
           ],
         },

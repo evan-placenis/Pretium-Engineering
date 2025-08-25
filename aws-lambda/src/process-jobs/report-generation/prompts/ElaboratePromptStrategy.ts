@@ -3,10 +3,19 @@ import { ReportContext, Section, GroupingMode, PromptStrategy, VisionContent, Im
 
 export class ElaboratePromptStrategy implements PromptStrategy {
   // Stage 1: Initial Load/System Prompt for IMAGE AGENT (separate agent)
-  getImageSystemPrompt(bulletPoints: string): string {
+  getImageSystemPrompt(bulletPoints: string, imageReferences?: ImageReference[]): string {
     let user_instructions = "";
+    let image_instructions = "";
     if (bulletPoints) {
       user_instructions = `# USER INPUT: \n The following information and/or guidance are written by the user. It refers to the entire project and they must be followed in applicable sections when generating the obervations.\n${bulletPoints}`;
+    }
+    if (imageReferences && imageReferences.length > 0) {
+      image_instructions = `# VISUAL ANALYSIS RULES:
+    - Examine the supplied photo(s) directly and integrate **visual evidence** into bodyMd (materials, conditions, installation details, locations, visible defects).
+    - Be factual and specific (e.g., “vertical membrane flashing debonding at upper 1–2 courses,” “unsealed fastener penetrations at ridge line”).
+    - If a detail is uncertain (angle/occlusion/low resolution), use calibrated language: “noted indications of…,” “appears to,”.
+    - Do NOT fabricate elements not visible or not stated. If visibility is insufficient, add a verification directive rather than a guess. Make it clear that this is not part of the report iteself.
+    - If photos contradict the text, prioritize what is noted in the text as this is human-generated and should be the source of truth.\n`
     }
     return `
     # ROLE: You are an expert engineering observation‑report writer. For each input (which may include one PHOTOGRAPH and accompanying text), you produce exactly one structured observation section.
@@ -19,7 +28,7 @@ export class ElaboratePromptStrategy implements PromptStrategy {
     - Output ONE JSON OBJECT ONLY with this exact shape: { "sections": [ { "title": <string>, "bodyMd": <string[]>, "images": <[IMAGE:<number>:<group>]> } ] }
     - Do NOT include any other properties on the section (no id, number, level, children, metadata, etc.).
     - Do NOT include any text before or after the JSON.
-    - The bodyMd MUST be an array of strings. Target 2–3 items per observation (fewer than 2 is fine if the source is truly trivial). Each item should be concise and 1–2 sentences.
+    - The bodyMd MUST be an array of strings. Target 2 items per observation however this is not a hard rule. Each idea and observation should be professional and concise but can be as long as needed.
     - If the observation is multi-point, bodyMd length > 1.
 
     # IMAGE TAG PARSING (FROM TEXT)
@@ -34,25 +43,19 @@ export class ElaboratePromptStrategy implements PromptStrategy {
     - If the same image number appears multiple times, merge groups (set union) in order of appearance.
     - Remove all [IMAGE:…] tags from the final bodyMd text.
 
-    # VISUAL ANALYSIS RULES (WHEN PHOTOS ARE PROVIDED)
-    - Examine the supplied photo(s) directly and integrate **visual evidence** into bodyMd (materials, conditions, installation details, locations, visible defects).
-    - Be factual and specific (e.g., “vertical membrane flashing debonding at upper 1–2 courses,” “unsealed fastener penetrations at ridge line”).
-    - If a detail is uncertain (angle/occlusion/low resolution), use calibrated language: “noted indications of…,” “appears to,”.
-    - Do NOT fabricate elements not visible or not stated. If visibility is insufficient, add a verification directive rather than a guess. Make it clear that this is not part of the report iteself.
-    - If photos contradict the text, prioritize what is noted in the text as this is human-generated and should be the source of truth.
-
     # TITLES
     - If the observation contains "Section Title:" on the same line followed by text, you MUST use that exact text as the "title" (user‑locked; DO NOT prefix with "~").
     - Otherwise, generate a concise, general title and MUST prefix it with a tilde "~" (AI‑editable).
       - Examples: "~Roof – Step Flashing at Chimney", "~Electrical – Panel Labeling"
 
     # BODY CONTENT (WHAT TO WRITE — ELABORATION RULES)
-    Write clear, professional, compliance‑focused bullets—no filler, no speculation. Prefer the firm tone:
-    - “The Contractor was reminded…”
-    - “…should be implemented as per specifications.”
-
+    - Preserve any parenthetical citations such as "(Roofing Specifications - Section 2.1 Materials)" in bodyMd.
+    - Write clear, professional, compliance‑focused bullets — no filler, no speculation. Prefer the firm tone:
+      - “The Contractor was reminded…”
+      - “…should be implemented as per specifications.”
+    
     Each bodyMd item should advance one of these aspects when applicable (select the relevant ones):
-    1) **Condition/Observation** – Visual/text evidence of what is present or deficient.  
+    1) **Condition/Observation** – visual/text evidence of what is present or deficient.  
     2) **Location/Extent** – Where it occurs (area/elevation/slope/unit; approximate extent if known).  
     3) **Implication/Consequence** – Why it matters (performance, moisture risk, wind‑uplift, durability, code/spec non‑conformance).  
     4) **Instruction/Required Action** – Directive phrased for contractor compliance (what to correct/verify, and how, if known).  
@@ -66,11 +69,6 @@ export class ElaboratePromptStrategy implements PromptStrategy {
     # WHEN EVIDENCE IS INSUFFICIENT
     - Add a concise verification directive (e.g., “Verify substrate condition beneath blistered area prior to re‑adhesion.”).
     - If an image is unreadable/irrelevant, state that it does not provide sufficient detail to confirm the claim and focus on actions needed.
-
-    # FORMATTING RULES
-    - bodyMd is the observation text with all image tags removed.
-    - Preserve any parenthetical citations such as "(Roofing Specifications - Section 2.1 Materials)" in bodyMd.
-    - **CRITICAL RULE:** You MUST analyze the observation for distinct points, requirements, or actions. Each distinct point MUST be a separate string element in the "bodyMd" array. Do NOT put multiple distinct ideas into a single string.
 
     # VALIDATION (must be true)
     - Exactly one section in sections[].
@@ -94,7 +92,7 @@ export class ElaboratePromptStrategy implements PromptStrategy {
       }"
 
   
-` + user_instructions;
+` + image_instructions+ user_instructions;
   }
 
   // Stage 1: Initial Load/System Prompt for SUMMARY AGENT (separate agent)
@@ -194,8 +192,8 @@ export class ElaboratePromptStrategy implements PromptStrategy {
       - Analyze the provided image and the following raw observations.
       - **Critical** If you generate a title yourself, you MUST prefix it with a tilde (~). For example: "~Gable End Drip Edge Flashing".
       - Return a single JSON object of the form {"sections":[ ... ]} containing one section for each observation, in the same order.
-      - Reference the relevant specifications when needed.
-      - Follow all the rules in the system prompt about the image/text analysis.
+      - MUST Properly reference the relevant specifications when needed.
+      - Follow all the rules in the system prompt about the image/text analysis. (the image may or may not be provided to you)
 
       ${specs}
 

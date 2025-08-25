@@ -142,22 +142,55 @@ export default function MultipleFileUploadModal({
           }}>
             Select Files
           </label>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".docx"
-            multiple
-            onChange={handleFileSelect}
-            style={{
-              width: '100%',
-              padding: '0.75rem',
-              fontSize: '1rem',
-              border: '1px solid var(--color-border)',
-              borderRadius: '0.25rem',
-              backgroundColor: 'white'
-            }}
-            disabled={loading}
-          />
+          <div style={{ position: 'relative' }}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".docx"
+              multiple
+              onChange={handleFileSelect}
+              style={{ display: 'none' }}
+              disabled={loading}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={loading}
+              style={{
+                padding: '0.75rem 1.5rem',
+                fontSize: '1rem',
+                fontWeight: '500',
+                color: 'white',
+                backgroundColor: 'var(--color-primary)',
+                border: 'none',
+                borderRadius: '0.5rem',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                transition: 'all 0.2s ease',
+                opacity: loading ? 0.6 : 1
+              }}
+              onMouseOver={(e) => {
+                if (!loading) {
+                  e.currentTarget.style.backgroundColor = '#1e4d72';
+                }
+              }}
+              onMouseOut={(e) => {
+                if (!loading) {
+                  e.currentTarget.style.backgroundColor = 'var(--color-primary)';
+                }
+              }}
+            >
+              Choose Files
+            </button>
+            {selectedFiles.length > 0 && (
+              <span style={{
+                marginLeft: '1rem',
+                fontSize: '0.875rem',
+                color: 'var(--color-text-secondary)'
+              }}>
+                {selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''} selected
+              </span>
+            )}
+          </div>
           <p style={{ 
             fontSize: '0.75rem', 
             color: 'var(--color-text-secondary)', 

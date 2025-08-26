@@ -13,6 +13,59 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
   private supabase: any = null;
   private reportId: string = '';
 
+  private buildImageOrderMap(images: { number: number }[]): Map<number, number> {
+    const order = new Map<number, number>();
+    images.forEach((img, idx) => order.set(img.number, idx));
+    return order;
+  }
+
+  private getLeadSeqForSection(
+    s: Section,
+    imgOrder: Map<number, number>
+  ): number {
+    let best = Infinity;
+  
+    // Consider images on this section
+    if (Array.isArray(s.images) && s.images.length > 0) {
+      for (const img of s.images) {
+        if (typeof img.number === 'number') {
+          const seq = imgOrder.get(img.number);
+          if (seq !== undefined && seq < best) best = seq;
+        }
+      }
+    }
+  
+    // Consider children
+    if (Array.isArray(s.children) && s.children.length > 0) {
+      for (const child of s.children) {
+        const childBest = this.getLeadSeqForSection(child, imgOrder);
+        if (childBest < best) best = childBest;
+      }
+    }
+  
+    return best;
+  }
+
+  private orderSectionsByImageSequence(
+    sections: Section[],
+    imgOrder: Map<number, number>
+  ): Section[] {
+    // Decorate
+    const decorated = sections.map((s, i) => ({
+      s,
+      i, // original index for tie-break
+      key: this.getLeadSeqForSection(s, imgOrder)
+    }));
+  
+    decorated.sort((a, b) => {
+      if (a.key === b.key) return a.i - b.i; // preserve relative order on ties
+      return a.key - b.key;
+    });
+  
+    // Undecorate
+    return decorated.map(d => d.s);
+  }
+
   async execute(params: ExecutionParams): Promise<ExecutionResult> {
     const { images, bulletPoints, projectData, llmProvider, promptStrategy, grouping, options, projectId } = params;
     
@@ -159,9 +212,16 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
         finalSections = [errorSection, ...allSections]; // Prepend error and use original sections
       }
       
-      console.error(`[DEBUG] EXECUTION COMPLETE: Report generation finished.`);
 
-      const groupedSections = this.createGroupedHierarchy(finalSections);
+      // Build image order map from the same `images` array you received from the front-end (maybe dont want this for ungrouped in the future)
+      const imgOrder = this.buildImageOrderMap(images);
+
+      // Order the sections by the front-end sequence
+      const orderedSections = this.orderSectionsByImageSequence(finalSections, imgOrder);
+
+      // Use ordered sections for grouping
+      const groupedSections = this.createGroupedHierarchy(orderedSections);
+      
       await this.supabase.from('reports').update({ sections_json: { sections: groupedSections } }).eq('id', this.reportId);
 
       // Final success message

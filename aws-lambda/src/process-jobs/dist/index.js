@@ -23578,6 +23578,45 @@ var BatchedParallelExecutor = class {
     this.supabase = null;
     this.reportId = "";
   }
+  buildImageOrderMap(images) {
+    const order = /* @__PURE__ */ new Map();
+    images.forEach((img, idx) => order.set(img.number, idx));
+    return order;
+  }
+  getLeadSeqForSection(s2, imgOrder) {
+    let best = Infinity;
+    if (Array.isArray(s2.images) && s2.images.length > 0) {
+      for (const img of s2.images) {
+        if (typeof img.number === "number") {
+          const seq = imgOrder.get(img.number);
+          if (seq !== void 0 && seq < best)
+            best = seq;
+        }
+      }
+    }
+    if (Array.isArray(s2.children) && s2.children.length > 0) {
+      for (const child of s2.children) {
+        const childBest = this.getLeadSeqForSection(child, imgOrder);
+        if (childBest < best)
+          best = childBest;
+      }
+    }
+    return best;
+  }
+  orderSectionsByImageSequence(sections, imgOrder) {
+    const decorated = sections.map((s2, i2) => ({
+      s: s2,
+      i: i2,
+      // original index for tie-break
+      key: this.getLeadSeqForSection(s2, imgOrder)
+    }));
+    decorated.sort((a2, b2) => {
+      if (a2.key === b2.key)
+        return a2.i - b2.i;
+      return a2.key - b2.key;
+    });
+    return decorated.map((d2) => d2.s);
+  }
   async execute(params) {
     const { images, bulletPoints, projectData, llmProvider, promptStrategy, grouping, options, projectId } = params;
     if (!projectId) {
@@ -23699,7 +23738,9 @@ ${JSON.stringify(summaryContent, null, 2)}
         finalSections = [errorSection, ...allSections];
       }
       console.error(`[DEBUG] EXECUTION COMPLETE: Report generation finished.`);
-      const groupedSections = this.createGroupedHierarchy(finalSections);
+      const imgOrder = this.buildImageOrderMap(images);
+      const orderedSections = this.orderSectionsByImageSequence(finalSections, imgOrder);
+      const groupedSections = this.createGroupedHierarchy(orderedSections);
       await this.supabase.from("reports").update({ sections_json: { sections: groupedSections } }).eq("id", this.reportId);
       await this.updateReportContent({
         type: "status",
@@ -24512,12 +24553,22 @@ var GPT5Provider = class {
 // src/process-jobs/report-generation/prompts/BriefPromptStrategy.ts
 var BriefPromptStrategy = class {
   // Stage 1: Initial Load/System Prompt for IMAGE AGENT (separate agent)
-  getImageSystemPrompt(bulletPoints) {
+  getImageSystemPrompt(bulletPoints, imageReferences) {
     let user_instructions = "";
+    let image_instructions = "";
     if (bulletPoints) {
       user_instructions = `# USER INPUT: 
  The following information and/or guidance are written by the user. It refers to the entire project and they must be followed in applicable sections when generating the obervations.
 ${bulletPoints}`;
+    }
+    if (imageReferences && imageReferences.length > 0) {
+      image_instructions = `# VISUAL ANALYSIS RULES:
+    - Examine the supplied photo(s) directly and integrate **visual evidence** into bodyMd (materials, conditions, installation details, locations, visible defects).
+    - Be factual and specific (e.g., \u201Cvertical membrane flashing debonding at upper 1\u20132 courses,\u201D \u201Cunsealed fastener penetrations at ridge line\u201D).
+    - If a detail is uncertain (angle/occlusion/low resolution), use calibrated language: \u201Cnoted indications of\u2026,\u201D \u201Cappears to,\u201D.
+    - Do NOT fabricate elements not visible or not stated. If visibility is insufficient, add a verification directive rather than a guess. Make it clear that this is not part of the report iteself.
+    - If photos contradict the text, prioritize what is noted in the text as this is human-generated and should be the source of truth.
+`;
     }
     return `
     # ROLE: You are an expert engineering observation-report writer. For each input photo and its accompanying text, you produce exactly one structured observation section.
@@ -24531,7 +24582,7 @@ Convert ONE raw observation string into a single structured JSON "section" insid
   { "sections": [ { "title": <string>, "bodyMd": <string[]>, "images": <[IMAGE:<number>:<group>]> } ] }
 - Do NOT include any other properties on the section (no id, number, level, children, metadata, etc.).
 - Do NOT include any text before or after the JSON.
-- The bodyMd MUST be an array of strings (1-2 sentences). If the observation is more than one point, bodyMd has length greater than1.
+- The bodyMd MUST be an array of strings (1-2 sentences). Keep the observation as concise as possible without sacrificing professionalism. If the observation is more than one point, bodyMd has length greater than 1.
 
 # IMAGE TAG PARSING
 - Detect zero or more tags of the form: [IMAGE:<number>:<group>]
@@ -24549,50 +24600,48 @@ Convert ONE raw observation string into a single structured JSON "section" insid
 - If the observation contains "Section Title:" followed by text on the same line, you MUST use that exact text as the "title" (user-locked; DO NOT prefix with "~").
 - Otherwise, generate a concise, descriptive title and MUST prefix it with a tilde "~" (AI-editable).
   - Examples: "~Roof \u2013 Step Flashing at Chimney", "~Electrical \u2013 Panel Labeling"
-- Keep titles professional and concise.
 
 # BODY CONTENT
 - bodyMd is the observation text with all image tags removed.
-- Preserve any parenthetical citations such as "(Roofing Specifications - Section 2.1 Materials)" in bodyMd.
+
 - Split unique ideas into multiple elements in bodyMd array. These will show up as bullet points in the report.
+
+# BODY CONTENT (WHAT TO WRITE)
+- Preserve any parenthetical citations such as "(Roofing Specifications - Section 2.1 Materials)" in bodyMd.
+- Write clear, professional, compliance\u2011focused bullets \u2014 no filler, no speculation. Prefer the firm tone:
+  - \u201CThe Contractor was reminded\u2026\u201D
+  - \u201C\u2026should be implemented as per specifications.\u201D
+
+## TONE & RISK
+- Do NOT make positive assumptions about quality or compliance unless explicitly supported by the input. You are no NEVER take liabliity of the site and should always direct the quality, safety, and compliance to the duty of thecontractor.
+- Avoid casual filler (\u201Cvery\u201D, \u201Cclearly\u201D) and unbounded certainty; state facts, implications, and directives.
+- No liability\u2011creating guarantees; use directive/compliance language.
+
+# WHEN EVIDENCE IS INSUFFICIENT
+- Add a concise verification directive (e.g., \u201CVerify substrate condition beneath blistered area prior to re\u2011adhesion.\u201D).
+- If an image is unreadable/irrelevant, state that it does not provide sufficient detail to confirm the claim and focus on actions needed.
 
 # VALIDATION (must be true)
 - Exactly one section in sections[].
 - Section has ONLY: title, bodyMd (string[]), images (array of {number:int, group:string[]}).
 - JSON is valid (no trailing commas, no comments).
-- All image tags removed from bodyMd.
+- All [IMAGE:\u2026] tags removed from bodyMd.
 
-# EXAMPLES:
-
-1.  **Input with User-Defined Title**:
-    - **Observation**: "(Section Title: Flashing Details) Description: Metal drip edge flashings at the top of the gable are to be neatly mitered and contain no gaps. Image: [IMAGE:1:Flashings]"
-    - **Output**:
+# EXAMPLE
+1.  **Output**:
       "{
-        \\"sections\\": [
+        "sections": [
           {
-            \\"title\\": \\"Flashing Details\\",
-            \\"bodyMd\\": [\\"Metal drip edge flashings at the top of the gable are to be neatly mitered and contain no gaps.\\"],
-            \\"images\\": [{ \\"number\\": 1, \\"group\\": [\\"Flashings\\"] }]
-          }
-        ]
-      }"
-
-2.  **Input Requiring AI-Generated Title and Spec Citation**:
-    - **Observation**: "(Section Title: N/A) Description: Plywood sheathing replacement is to have a minimum span across three (3) roof trusses, as per Roofing Specifications - Section 3.2. Image: [IMAGE:3:Roof Deck]"
-    - **Relevant Specifications**: "["Roofing Specifications - Section 3.2: Plywood must span at least three trusses."]"
-    - **Output**:
-      "{
-        \\"sections\\": [
-          {
-            \\"title\\": \\"~Roof Deck Replacement and Support\\",
-            \\"bodyMd\\": [
-              \\"Plywood sheathing replacement is to have a minimum span across three (3) roof trusses, as per Roofing Specifications - Section 3.2.\\"
+            "title": "~Attic Insulation and Ventilation",
+            "bodyMd": [
+              "Blown-in cellulose insulation installation was observed in progress within the attic space of Block 15.",
+              "Ensure that insulation installation complies with ventilation requirements, including the provision of insulation baffles between each roof truss to maintain eave venting and prevent blockage (07 31 13 - Asphalt Shingles, Insulation Baffles).",
             ],
-            \\"images\\": [{ \\"number\\": 3, \\"group\\": [\\"Roof Deck\\"] }]
+            "images": [{ "number": 5, "group": ["Insulation"] }]
           }
         ]
       }"
-` + user_instructions;
+` + image_instructions + user_instructions;
   }
   // Stage 1: Initial Load/System Prompt for SUMMARY AGENT (separate agent)
   getSummarySystemPrompt(grouping) {
@@ -24639,36 +24688,26 @@ Convert ONE raw observation string into a single structured JSON "section" insid
          - If it would, append a disambiguator from the allowed list.
       c) Reuse the exact same normalized string for other EDITABLE titles with the same meaning.
     - Emit {"titles":[...]} with the same order/length as input.
-    
     # EXAMPLES
-    
-    ## Example 1 (mixed; do NOT map to locked)
+
+    ## Example 1 (mixed; generalize editable)
     Input:
-    {"titles": ["Roof Sheathing","~roof sheathing issue","~Roof Sheathing (south area)","~Shingle Damage"]}
-    
+    {"titles": ["Electrical","~Roof - sheathing issue","~Roof - Sheathing (south area)","~Shingles -Shingle Damage"]}
+
     Output:
-    {"titles": ["Roof Sheathing","Roof Sheathing \u2013 Additional Items","Roof Sheathing \u2013 Additional Items","Shingle Damage"]}
-    
-    (Explanation: "Roof Sheathing" is LOCKED. EDITABLE variants normalize to a consistent label but not equal to the locked anchor; a disambiguator keeps them distinct.)
-    
+    {"titles": ["Electrical","Roofing","Roofing","Roofing"]}
+
+    (Explanation: \u201CElectrical\u201D is LOCKED. EDITABLE variants normalize to a broad category. "Shingles" is on the same topic as "Roofing" so it is grouped with it.)
+
     ## Example 2 (no locked anchor; editable cluster)
     Input:
-    {"titles": ["Block 1","~Soffits","~soffit damage","~Soffit"]}
-    
+    {"titles": ["Block 1","~Soffits - soffit damage","~Soffits - soffit damage","~Soffit - leakage"]}
+
     Output:
     {"titles": ["Block 1","Soffit","Soffit","Soffit"]}
-    
-    (Explanation: No LOCKED "Soffit" exists, so EDITABLES normalize to "Soffit" without a disambiguator.)
-    
-    ## Example 3 (multiple locked anchors; keep distinct)
-    Input:
-    {"titles": ["Roof Flashings","Roof Sheathing","~roof flashing","~roof sheath"]}
-    
-    Output:
-    {"titles": ["Roof Flashings","Roof Sheathing","Roof Flashings \u2013 Additional Items","Roof Sheathing \u2013 Additional Items"]}
-    
-    (Explanation: EDITABLES stay distinct from the corresponding LOCKED anchors by using consistent disambiguators.)
-    
+
+    (Explanation: All EDITABLE titles collapse to a single general category \u201CSoffit\u201D.)
+
     # OUTPUT FORMAT
     Return only:
     {"titles":[...]}
@@ -24685,9 +24724,10 @@ Convert ONE raw observation string into a single structured JSON "section" insid
       # INSTRUCTIONS:
       - Analyze the provided image and the following raw observations.
       - **Critical** If you generate a title yourself, you MUST prefix it with a tilde (~). For example: "~Gable End Drip Edge Flashing".
-      - For each observation, generate exactly one section, which can and should have multiple elements in the bodyMd array, each element is a specific point.
       - Return a single JSON object of the form {"sections":[ ... ]} containing one section for each observation, in the same order.
-      - Reference the relevant specifications when needed.
+      - MUST Properly reference Reference the relevant specifications when needed.
+      - Follow all the rules in the system prompt about the image/text analysis. (the image may or may not be provided to you)
+
 
       ${specs}
 
@@ -24717,12 +24757,22 @@ ${jsonTitles}
 // src/process-jobs/report-generation/prompts/ElaboratePromptStrategy.ts
 var ElaboratePromptStrategy = class {
   // Stage 1: Initial Load/System Prompt for IMAGE AGENT (separate agent)
-  getImageSystemPrompt(bulletPoints) {
+  getImageSystemPrompt(bulletPoints, imageReferences) {
     let user_instructions = "";
+    let image_instructions = "";
     if (bulletPoints) {
       user_instructions = `# USER INPUT: 
  The following information and/or guidance are written by the user. It refers to the entire project and they must be followed in applicable sections when generating the obervations.
 ${bulletPoints}`;
+    }
+    if (imageReferences && imageReferences.length > 0) {
+      image_instructions = `# VISUAL ANALYSIS RULES:
+    - Examine the supplied photo(s) directly and integrate **visual evidence** into bodyMd (materials, conditions, installation details, locations, visible defects).
+    - Be factual and specific (e.g., \u201Cvertical membrane flashing debonding at upper 1\u20132 courses,\u201D \u201Cunsealed fastener penetrations at ridge line\u201D).
+    - If a detail is uncertain (angle/occlusion/low resolution), use calibrated language: \u201Cnoted indications of\u2026,\u201D \u201Cappears to,\u201D.
+    - Do NOT fabricate elements not visible or not stated. If visibility is insufficient, add a verification directive rather than a guess. Make it clear that this is not part of the report iteself.
+    - If photos contradict the text, prioritize what is noted in the text as this is human-generated and should be the source of truth.
+`;
     }
     return `
     # ROLE: You are an expert engineering observation\u2011report writer. For each input (which may include one PHOTOGRAPH and accompanying text), you produce exactly one structured observation section.
@@ -24735,7 +24785,7 @@ ${bulletPoints}`;
     - Output ONE JSON OBJECT ONLY with this exact shape: { "sections": [ { "title": <string>, "bodyMd": <string[]>, "images": <[IMAGE:<number>:<group>]> } ] }
     - Do NOT include any other properties on the section (no id, number, level, children, metadata, etc.).
     - Do NOT include any text before or after the JSON.
-    - The bodyMd MUST be an array of strings. Target 2\u20133 items per observation (fewer than 2 is fine if the source is truly trivial). Each item should be concise and 1\u20132 sentences.
+    - The bodyMd MUST be an array of strings. Target 2 items per observation however this is not a hard rule. Each idea and observation should be professional and concise but can be as long as needed.
     - If the observation is multi-point, bodyMd length > 1.
 
     # IMAGE TAG PARSING (FROM TEXT)
@@ -24750,25 +24800,19 @@ ${bulletPoints}`;
     - If the same image number appears multiple times, merge groups (set union) in order of appearance.
     - Remove all [IMAGE:\u2026] tags from the final bodyMd text.
 
-    # VISUAL ANALYSIS RULES (WHEN PHOTOS ARE PROVIDED)
-    - Examine the supplied photo(s) directly and integrate **visual evidence** into bodyMd (materials, conditions, installation details, locations, visible defects).
-    - Be factual and specific (e.g., \u201Cvertical membrane flashing debonding at upper 1\u20132 courses,\u201D \u201Cunsealed fastener penetrations at ridge line\u201D).
-    - If a detail is uncertain (angle/occlusion/low resolution), use calibrated language: \u201Cnoted indications of\u2026,\u201D \u201Cappears to,\u201D.
-    - Do NOT fabricate elements not visible or not stated. If visibility is insufficient, add a verification directive rather than a guess. Make it clear that this is not part of the report iteself.
-    - If photos contradict the text, prioritize what is noted in the text as this is human-generated and should be the source of truth.
-
     # TITLES
     - If the observation contains "Section Title:" on the same line followed by text, you MUST use that exact text as the "title" (user\u2011locked; DO NOT prefix with "~").
     - Otherwise, generate a concise, general title and MUST prefix it with a tilde "~" (AI\u2011editable).
       - Examples: "~Roof \u2013 Step Flashing at Chimney", "~Electrical \u2013 Panel Labeling"
 
     # BODY CONTENT (WHAT TO WRITE \u2014 ELABORATION RULES)
-    Write clear, professional, compliance\u2011focused bullets\u2014no filler, no speculation. Prefer the firm tone:
-    - \u201CThe Contractor was reminded\u2026\u201D
-    - \u201C\u2026should be implemented as per specifications.\u201D
-
+    - Preserve any parenthetical citations such as "(Roofing Specifications - Section 2.1 Materials)" in bodyMd.
+    - Write clear, professional, compliance\u2011focused bullets \u2014 no filler, no speculation. Prefer the firm tone:
+      - \u201CThe Contractor was reminded\u2026\u201D
+      - \u201C\u2026should be implemented as per specifications.\u201D
+    
     Each bodyMd item should advance one of these aspects when applicable (select the relevant ones):
-    1) **Condition/Observation** \u2013 Visual/text evidence of what is present or deficient.  
+    1) **Condition/Observation** \u2013 visual/text evidence of what is present or deficient.  
     2) **Location/Extent** \u2013 Where it occurs (area/elevation/slope/unit; approximate extent if known).  
     3) **Implication/Consequence** \u2013 Why it matters (performance, moisture risk, wind\u2011uplift, durability, code/spec non\u2011conformance).  
     4) **Instruction/Required Action** \u2013 Directive phrased for contractor compliance (what to correct/verify, and how, if known).  
@@ -24782,11 +24826,6 @@ ${bulletPoints}`;
     # WHEN EVIDENCE IS INSUFFICIENT
     - Add a concise verification directive (e.g., \u201CVerify substrate condition beneath blistered area prior to re\u2011adhesion.\u201D).
     - If an image is unreadable/irrelevant, state that it does not provide sufficient detail to confirm the claim and focus on actions needed.
-
-    # FORMATTING RULES
-    - bodyMd is the observation text with all image tags removed.
-    - Preserve any parenthetical citations such as "(Roofing Specifications - Section 2.1 Materials)" in bodyMd.
-    - **CRITICAL RULE:** You MUST analyze the observation for distinct points, requirements, or actions. Each distinct point MUST be a separate string element in the "bodyMd" array. Do NOT put multiple distinct ideas into a single string.
 
     # VALIDATION (must be true)
     - Exactly one section in sections[].
@@ -24810,7 +24849,7 @@ ${bulletPoints}`;
       }"
 
   
-` + user_instructions;
+` + image_instructions + user_instructions;
   }
   // Stage 1: Initial Load/System Prompt for SUMMARY AGENT (separate agent)
   getSummarySystemPrompt(grouping) {
@@ -24898,8 +24937,8 @@ ${bulletPoints}`;
       - Analyze the provided image and the following raw observations.
       - **Critical** If you generate a title yourself, you MUST prefix it with a tilde (~). For example: "~Gable End Drip Edge Flashing".
       - Return a single JSON object of the form {"sections":[ ... ]} containing one section for each observation, in the same order.
-      - Reference the relevant specifications when needed.
-      - Follow all the rules in the system prompt about the image/text analysis.
+      - MUST Properly reference the relevant specifications when needed.
+      - Follow all the rules in the system prompt about the image/text analysis. (the image may or may not be provided to you)
 
       ${specs}
 

@@ -14,6 +14,25 @@ const supabaseAdmin = createServiceRoleClient(); // Instantiate the admin client
 // Global variable to track if current report generation is complete (it checks for the completion message in the generated_content field)
 let currentCompletedReportId: string | null = null;
 
+// Heuristics for when to fetch recent chat history
+function shouldUseHistory(msg: string): boolean {
+  const m = msg.toLowerCase();
+  // Anaphora / references to prior content
+  const refTriggers = [
+    'as above','as before','as discussed','that change','this change','the change',
+    'previous message','earlier message','reworded content','the above','the one above',
+    'same as before','like before','again','implement that','do it','use that'
+  ];
+  // Underspecified edit requests
+  const editTriggers = [
+    /^rename\b/, /^reword\b/, /^update\b/, /^change\b/, /^implement\b/,
+    /section\s+\d+(\.\d+)*/ // References by number with no content in the same turn
+  ];
+  if (refTriggers.some(t => m.includes(t))) return true;
+  if (editTriggers.some(r => r.test(m)) && !m.includes('"') && !m.includes('“')) return true;
+  return false;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { userMessage, reportId, projectId, model = 'grok-4' } = await req.json();
@@ -70,7 +89,13 @@ export async function POST(req: NextRequest) {
 
     // --- Pre-check Gate ---
     const allowSpecs = await ruleGate(userMessage);
-    // --- Step 2: Pass the in-memory model to the tools ---
+    // --- Step 2: Auto-refresh the model with fresh database state ---
+    // This ensures the AI always works with the current section arrangement,
+    // even after operations like photo swaps that change section order
+    sectionModel.setState(reportData.sections);
+    console.log(`[AUTO-REFRESH] Section model refreshed with ${reportData.sections.length} root sections`);
+    
+    // --- Step 3: Pass the refreshed model to the tools ---
     const sectionTools = new SectionTools(reportId, projectId, sectionModel);
     
     // Dynamically assemble the tool list based on the gate
@@ -102,6 +127,22 @@ export async function POST(req: NextRequest) {
         { role: 'system', content: getSystemPrompt() + "\n" + policyFlags },
         { role: 'user', content: userMessage }
     ];
+
+    // NEW: force-load recent chat if the user likely refers to it
+    if (shouldUseHistory(userMessage)) {
+      const hist = await sectionTools.getChatHistory({ maxTurns: 6 });
+      if (hist.success && Array.isArray(hist.data)) {
+        // Lightweight, model-friendly summary line per turn
+        const histText = (hist.data as Array<{role:string, content:string}>)
+          .map(h => `${h.role.toUpperCase()}: ${h.content}`)
+          .join('\n---\n');
+        currentMessages.splice(1, 0, {
+          role: 'system',
+          content: `Recent chat context (last ${Math.min(6, hist.data.length)} turns):\n${histText}`
+        });
+      }
+    }
+    
     const maxSteps = 5;
     let hasMadeChanges = false; // Flag to track if any action tool was used
 
@@ -236,16 +277,15 @@ Call \`get_chat_history()\` when:
 **CRITICAL RULE: USE IDs, NOT NUMBERS**
 Section numbers (e.g., "1", "2.1") are for display only and can change. You **MUST NOT** use them as IDs in your tool calls.
 If a user refers to a section number, your workflow **MUST** be:
-1. Call \`get_report_slices()\` to get a list of all sections and their stable UUIDs.
-2. Find the section in the response that has the matching number.
-3. Use that section's stable UUID in the action tool (e.g., \`update_section\`).
+1. Call \`get_id_by_display_number({ "number": "1.4" })\` to get the section's stable UUID.
+2. Use that UUID in any subsequent action tool (e.g., \`update_section\`).
 
-**NOTE:** \`get_report_slices()\` returns a structured object with \`{ sections: [...], truncated: boolean }\`. If \`truncated: true\`, the response was shortened to fit size limits and you may need to make more specific queries.
+**NOTE:** \`get_report_slices()\` is still available for broad searches or fetching multiple sections, but for targeted operations based on a display number, \`get_id_by_display_number\` is mandatory.
 
 **EXAMPLE WORKFLOW:**
 User says: "Change the title of section 2 to 'New Title'"
 Your response MUST be a sequence of two tool calls:
-1. First, call \`get_report_slices({})\` to get the ID for section number "2.".
+1. First, call \`get_id_by_display_number({ "number": "2" })\` to get the ID for section number "2".
 2. Then, use that ID to call \`update_section({ "id": "the-real-uuid-you-found", "title": "New Title" })\`.
 
 **IMAGE REFERENCE SYSTEM:**
@@ -262,6 +302,5 @@ Your response MUST be a sequence of two tool calls:
 **OTHER RULES:**
 1.  **BE LAZY:** Do not fetch context you don't need. Use the narrowest tool possible.
 2.  **USE BATCH FOR EFFICIENCY:** If a user's request requires more than two distinct changes (e.g., updating three sections, adding two and deleting one), you **MUST** use the \`batch_update_sections\` tool. This is much faster and more efficient. For one or two changes, use the single-action tools.
-3.  **RENUMBER LAST:** After any structural change (\`add_section\`, \`move_section\`, \`delete_section\`, or a batch operation), your final action **MUST** be a call to \`renumber_sections()\`.
-4.  **SEARCH FOR SPECS:** Use \`search_project_specs\` ONLY for questions about technical requirements, codes, or standards.`;
+3.  **SEARCH FOR SPECS:** Use \`search_project_specs\` ONLY for questions about technical requirements, codes, or standards.`;
 }

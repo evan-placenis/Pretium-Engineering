@@ -61,12 +61,10 @@ export const ReportEditor: React.FC<ReportEditorProps> = ({
   
   const traverseAllSections = (sectionList: Section[]) => {
     for (const section of sectionList) {
-      console.log(`[DEBUG] Checking section ${section.id} - images: ${section.images?.length || 0}, children: ${section.children?.length || 0}`);
       if (section.images && section.images.length > 0) {
         for (let i = 0; i < section.images.length; i++) {
           const imageKey = `${section.id}-${i}`;
           imageSequentialMap.set(imageKey, globalImageCounter);
-          console.log(`[DEBUG] Setting ${imageKey} = Image ${globalImageCounter}`);
           globalImageCounter++;
         }
       }

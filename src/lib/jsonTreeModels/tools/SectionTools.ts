@@ -40,9 +40,16 @@ export class SectionTools {
         properties: {
           sectionIds: { type: 'array', items: { type: 'string' }, description: 'An array of section IDs to fetch.' },
           query: { type: 'string', description: 'If IDs are unknown, a search query to find relevant sections.' },
-          maxChars: { type: 'integer', minimum: 200, maximum: 4000, default: 2000 }
+          maxChars: { type: 'integer', minimum: 200, maximum: 4000, default: 2000 },
+          full: { type: 'boolean', description: 'If true, returns full section data including children. Defaults to false (summaries only).', default: false }
         },
         additionalProperties: false
+    };
+
+    private getIdByDisplayNumberSchema = {
+      type: 'object',
+      properties: { number: { type: 'string', description: 'Display number like "1.4"'} },
+      required: ['number'], additionalProperties: false
     };
 
     private getChatHistorySchema = {
@@ -122,26 +129,52 @@ export class SectionTools {
 
 
     // --- Context-Fetching Tools ---
-    async getReportSlices({ sectionIds, query, maxChars }: { sectionIds?: string[], query?: string, maxChars?: number }): Promise<ToolResult> {
+    async getReportSlices({ sectionIds, query, maxChars, full = false }: { sectionIds?: string[], query?: string, maxChars?: number, full?: boolean }): Promise<ToolResult> {
         const model = this.model;
-        let sections: SectionSummary[] = [];
+        let sections: (SectionSummary | Section)[] = [];
 
-        if (sectionIds) {
-            sections = sectionIds.map(id => model.findSectionSummary(id)).filter(Boolean) as SectionSummary[];
-        } else if (query) {
-            sections = model.findSections(query);
+        if (full) {
+            // Return full section data if requested
+            sections = model.getState().sections;
         } else {
-            sections = model.listSections(); // Default to summary if no specifics
+            // Otherwise, return summaries
+            if (sectionIds) {
+                sections = sectionIds.map(id => model.findSectionSummary(id)).filter(Boolean) as SectionSummary[];
+            } else if (query) {
+                sections = model.findSections(query);
+            } else {
+                sections = model.listSections(); // Default to summary
+            }
         }
 
         let payload = { sections, truncated: false };
         if (maxChars && JSON.stringify(payload).length > maxChars) {
-            // Fall back to summaries only, or slice the array by items, not characters.
-            const slim = sections.slice(0, Math.max(1, Math.floor(sections.length * 0.5)));
+            const numToSlice = Math.max(1, Math.floor(sections.length * 0.5));
+            const slim = sections.slice(0, numToSlice);
             payload = { sections: slim, truncated: true };
         }
         
         return { success: true, data: payload };
+    }
+
+    private findByDisplayNumber(num: string): Section | null {
+      const dfs = (list: Section[]): Section | null => {
+        for (const s of list) {
+          if (s.number === num) return s;
+          if (s.children?.length) {
+            const found = dfs(s.children);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      return dfs(this.model.getState().sections);
+    }
+
+    async getIdByDisplayNumber({ number }: { number: string }): Promise<ToolResult> {
+      const s = this.findByDisplayNumber(number);
+      if (!s) return { success: false, error: `Section ${number} not found.` };
+      return { success: true, data: { id: s.id, title: s.title ?? '', number: s.number } };
     }
 
     async getChatHistory({ maxTurns }: { maxTurns?: number }): Promise<ToolResult> {
@@ -221,6 +254,7 @@ export class SectionTools {
         if (!newSectionId) {
             return { success: false, error: `Failed to add section. Parent with ID '${parentId}' may not exist.` };
         }
+        model.autoNumberSections();
         return { success: true, data: 'Add successful.' };
     }
     
@@ -228,6 +262,7 @@ export class SectionTools {
         const model = this.model;
         const moveSuccess = model.moveSection(sectionId, newParentId, position);
         if(!moveSuccess) return { success: false, error: 'Move operation failed.' };
+        model.autoNumberSections();
         return { success: true, data: 'Move successful.' };
     }
     
@@ -235,6 +270,7 @@ export class SectionTools {
         const model = this.model;
         const deleteSuccess = model.deleteSection(sectionId);
         if(!deleteSuccess) return { success: false, error: 'Delete operation failed.' };
+        model.autoNumberSections();
         return { success: true, data: 'Delete successful.' };
     }
 
@@ -410,107 +446,115 @@ export class SectionTools {
 
     async swapPhotos(imageNumber1: number, imageNumber2: number): Promise<ToolResult> {
         if (imageNumber1 === imageNumber2) {
-            return { success: false, error: 'Cannot swap an image with itself.' };
+          return { success: false, error: 'Cannot swap an image with itself.' };
         }
-
-        // Get the current image map
+      
+        // 1) Resolve image -> (sectionId, imageIndex) via your sequential map
         const imageMapResult = await this.getImageMap();
-        if (!imageMapResult.success) {
-            return { success: false, error: 'Failed to get image map.' };
-        }
-
-        const imageMap = imageMapResult.data.imageMap;
-        
-        // Find the two images
-        const image1Info = imageMap[imageNumber1];
-        const image2Info = imageMap[imageNumber2];
-        
-        if (!image1Info) {
-            return { success: false, error: `Image ${imageNumber1} not found in the report.` };
-        }
-        
-        if (!image2Info) {
-            return { success: false, error: `Image ${imageNumber2} not found in the report.` };
-        }
-
+        if (!imageMapResult.success) return { success: false, error: 'Failed to get image map.' };
+      
+        const img1 = imageMapResult.data.imageMap[imageNumber1];
+        const img2 = imageMapResult.data.imageMap[imageNumber2];
+        if (!img1) return { success: false, error: `Image ${imageNumber1} not found in the report.` };
+        if (!img2) return { success: false, error: `Image ${imageNumber2} not found in the report.` };
+      
         const model = this.model;
-        const sections = model.getState().sections;
-        
-        // Helper function to find and update sections
-        const findAndGetSection = (sectionList: Section[], sectionId: string): Section | null => {
-            for (const section of sectionList) {
-                if (section.id === sectionId) {
-                    return section;
-                }
-                if (section.children) {
-                    const found = findAndGetSection(section.children, sectionId);
-                    if (found) return found;
-                }
+        const original = model.getState().sections;
+        const copy = JSON.parse(JSON.stringify(original)) as Section[];
+      
+        // 2) Utilities on the copied tree
+        const findParentAndIndex = (sectionList: Section[], targetId: string, parent: Section | null = null):
+          { parent: Section | null; index: number } | null => {
+          for (let i = 0; i < sectionList.length; i++) {
+            const s = sectionList[i];
+            if (s.id === targetId) return { parent, index: i };
+            if (s.children) {
+              const found = findParentAndIndex(s.children, targetId, s);
+              if (found) return found;
             }
-            return null;
+          }
+          return null;
         };
-        
-        const section1 = findAndGetSection(sections, image1Info.sectionId);
-        const section2 = findAndGetSection(sections, image2Info.sectionId);
-        
-        if (!section1 || !section2) {
-            return { success: false, error: 'Could not find one or both sections containing the images.' };
-        }
-
-        if (!section1.images || !section2.images) {
-            return { success: false, error: 'One or both sections do not have images.' };
-        }
-
-        // Store the images and text content to swap
-        const image1 = section1.images[image1Info.imageIndex];
-        const image2 = section2.images[image2Info.imageIndex];
-        const text1 = section1.bodyMd ? [...section1.bodyMd] : [];
-        const text2 = section2.bodyMd ? [...section2.bodyMd] : [];
-        
-        // Create a deep copy of the current sections to work with (fast, direct approach)
-        const allSections = JSON.parse(JSON.stringify(sections));
-        
-        // Helper function to find sections in the copied structure
-        const findSectionInCopy = (sectionList: Section[], sectionId: string): Section | null => {
-            for (const section of sectionList) {
-                if (section.id === sectionId) {
-                    return section;
-                }
-                if (section.children) {
-                    const found = findSectionInCopy(section.children, sectionId);
-                    if (found) return found;
-                }
-            }
-            return null;
+      
+        // Inclusive start at the image section; end is first section with images AFTER start (exclusive)
+        const groupBounds = (parent: Section, startIdx: number): [number, number] => {
+          const children = parent.children || [];
+          let end = startIdx + 1;
+          while (end < children.length) {
+            const c = children[end];
+            if (c.images && c.images.length > 0) break; // next image => stop
+            end++;
+          }
+          return [startIdx, end]; // [start, end)
         };
-        
-        // Find the sections in our copy
-        const section1Copy = findSectionInCopy(allSections, image1Info.sectionId);
-        const section2Copy = findSectionInCopy(allSections, image2Info.sectionId);
-        
-        if (!section1Copy || !section2Copy) {
-            return { success: false, error: 'Could not find sections in copied structure.' };
+      
+        // 3) Locate groups on the copy
+        const loc1 = findParentAndIndex(copy, img1.sectionId);
+        const loc2 = findParentAndIndex(copy, img2.sectionId);
+        if (!loc1?.parent || !loc2?.parent) {
+          return { success: false, error: 'Could not find parent sections for the images.' };
         }
+        if (!loc1.parent.children || !loc2.parent.children) {
+          return { success: false, error: 'One of the parents has no children array.' };
+        }
+      
+        // Compute [start, end) for each group based on the copy
+        const [aStart, aEnd] = groupBounds(loc1.parent, loc1.index);
+        const [bStart, bEnd] = groupBounds(loc2.parent, loc2.index);
+      
+        // 4) Swap logic
+        if (loc1.parent === loc2.parent) {
+          // Same parent: rebuild with pure slices (no shifting indices)
+          const parent = loc1.parent;
+          const kids = parent.children!;
+      
+          // Ensure aStart < bStart (swap labels if needed)
+          const sameOrder = aStart < bStart
+            ? { A: [aStart, aEnd], B: [bStart, bEnd] }
+            : { A: [bStart, bEnd], B: [aStart, aEnd] };
+          const [s1, e1] = sameOrder.A;
+          const [s2, e2] = sameOrder.B;
+      
+          const before  = kids.slice(0, s1);
+          const A       = kids.slice(s1, e1);
+          const between = kids.slice(e1, s2);
+          const B       = kids.slice(s2, e2);
+          const after   = kids.slice(e2);
+      
+          // Swap A and B: … before + B + between + A + after
+          parent.children = before.concat(B, between, A, after);
+        } else {
+          // Different parents: cut-and-paste via reconstruction on each parent
+          const p1 = loc1.parent, p2 = loc2.parent;
+          const c1 = p1.children!, c2 = p2.children!;
+      
+          const A = c1.slice(aStart, aEnd);
+          const B = c2.slice(bStart, bEnd);
+      
+          // Replace A with B in p1
+          const p1_before = c1.slice(0, aStart);
+          const p1_after  = c1.slice(aEnd);
+          p1.children = p1_before.concat(B, p1_after);
+      
+          // Replace B with A in p2
+          const p2_before = c2.slice(0, bStart);
+          const p2_after  = c2.slice(bEnd);
+          p2.children = p2_before.concat(A, p2_after);
+        }
+      
+        // 5) Commit new state
+        model.setState(copy);
+      
+        // 6) Immediately renumber to keep display consistent for the next tool call
+        model.autoNumberSections();
 
-        // Perform the swap on the copies (direct manipulation - faster for single swaps)
-        // Swap text content
-        section1Copy.bodyMd = text2;
-        section2Copy.bodyMd = text1;
-        
-        // Swap images
-        if (section1Copy.images && section2Copy.images) {
-            section1Copy.images[image1Info.imageIndex] = image2;
-            section2Copy.images[image2Info.imageIndex] = image1;
-        }
-        
-        // Update the model state with our modified sections (single atomic operation)
-        model.setState(allSections);
-        
-        return { 
-            success: true, 
-            data: `Successfully swapped Image ${imageNumber1} (in section ${section1.number || section1Copy.number}) with Image ${imageNumber2} (in section ${section2.number || section2Copy.number}). Both text content and images have been exchanged.`
+        const lenA = aEnd - aStart;
+        const lenB = bEnd - bStart;
+        return {
+          success: true,
+          data: `Successfully swapped Image ${imageNumber1} group (${lenA} sections) with Image ${imageNumber2} group (${lenB} sections).`
         };
-    }
+      }
 
   // New helper to identify tools that modify the report state
   isActionTool(toolName: string): boolean {
@@ -528,6 +572,15 @@ export class SectionTools {
                     parameters: this.getReportSlicesSchema,
                     handler: (args: any) => this.getReportSlices(args),
                 },
+            },
+            {
+                type: 'function' as const,
+                function: {
+                    name: 'get_id_by_display_number',
+                    description: 'Resolve a display number like "1.4" to a stable section UUID from the current tree.',
+                    parameters: this.getIdByDisplayNumberSchema,
+                    handler: (args:any) => this.getIdByDisplayNumber(args),
+                  },
             },
             {
                 type: 'function' as const,

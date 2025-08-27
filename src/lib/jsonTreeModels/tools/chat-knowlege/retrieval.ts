@@ -10,7 +10,8 @@ export async function getRelevantKnowledgeChunks(
   topK: number = 3
 ): Promise<string> {
   try {
-    console.log('🔍 Searching for relevant knowledge:', { query, topK });
+    const match_threshold = 0.45;
+    console.log('🔍 Searching for relevant knowledge:', { query, topK, match_threshold });
     
     const openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY!,
@@ -26,7 +27,7 @@ export async function getRelevantKnowledgeChunks(
     const { data, error } = await supabase.rpc('search_embeddings', {
       query_embedding: queryEmbedding,
       project_id: projectId,
-      match_threshold: 0.5,
+      match_threshold: match_threshold,
       match_count: topK,
     });
     

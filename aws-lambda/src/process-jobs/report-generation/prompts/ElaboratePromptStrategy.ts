@@ -66,9 +66,15 @@ export class ElaboratePromptStrategy implements PromptStrategy {
     - Avoid casual filler (“very”, “clearly”) and unbounded certainty; state facts, implications, and directives.
     - No liability‑creating guarantees; use directive/compliance language.
 
-    # WHEN EVIDENCE IS INSUFFICIENT
+    # WHEN EVIDENCE IS INSUFFICIENT OR INCORRECT
     - Add a concise verification directive (e.g., “Verify substrate condition beneath blistered area prior to re‑adhesion.”).
-    - If an image is unreadable/irrelevant, state that it does not provide sufficient detail to confirm the claim and focus on actions needed.
+    - If the description text makes a claim that contradicts the provided specifications:
+      - Keep all normal observation points in bodyMd as usual (factual, compliant).
+      - At the **end of bodyMd**, append an additional string item that is an author note.
+      - This author note must:
+        - Begin with "*Note to the author:*" (in italics, using * around it).
+        - Clearly state the incorrect claim and the correct specification detail (cite section if provided).
+    - Example: "*Note to the author: The description stated that sealant was not required. However, Section 07 31 13 requires all fastener penetrations to be sealed.*"
 
     # VALIDATION (must be true)
     - Exactly one section in sections[].

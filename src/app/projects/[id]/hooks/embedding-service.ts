@@ -6,6 +6,13 @@ export interface EmbeddingResult {
   chunkIndex: number;
 }
 
+export interface DocxChunk {
+  title: string;
+  content: string;
+  words: number;
+  chars: number;
+}
+
 export class EmbeddingService {
   private static instance: EmbeddingService;
   private openaiApiKey: string;
@@ -75,16 +82,29 @@ export class EmbeddingService {
   async processAndStoreEmbeddings(
     projectId: string,
     knowledgeId: string,
-    content: string,
+    contentOrChunks: string | DocxChunk[],
     fileName: string
   ): Promise<void> {
     try {
       console.log(`=== STARTING EMBEDDING PROCESSING ===`);
-      console.log(`File: ${fileName}, Content length: ${content.length} characters`);
+      
+      let chunks: string[];
+      let sectionTitles: string[];
 
-      // Split content into intelligent chunks
-      const chunks = this.splitIntoIntelligentChunks(content, fileName);
-      console.log(`Created ${chunks.length} intelligent chunks`);
+      if (typeof contentOrChunks === 'string') {
+        console.log(`File: ${fileName}, Content length: ${contentOrChunks.length} characters`);
+        // Original path: Split content into intelligent chunks
+        const intelligentChunks = this.splitIntoIntelligentChunks(contentOrChunks, fileName);
+        chunks = intelligentChunks;
+        sectionTitles = intelligentChunks.map(chunk => this.extractChunkMetadata(chunk, fileName).sectionTitle);
+        console.log(`Created ${chunks.length} intelligent chunks via regex`);
+      } else {
+        // New path: Use pre-parsed chunks
+        chunks = contentOrChunks.map(c => `Document: ${fileName}\nSection: ${c.title}\n\n${c.content}`);
+        sectionTitles = contentOrChunks.map(c => c.title);
+        console.log(`Using ${chunks.length} pre-parsed chunks from XML parser`);
+      }
+
 
       // Generate embeddings
       console.log('Generating embeddings...');
@@ -95,7 +115,6 @@ export class EmbeddingService {
       console.log('Storing embeddings in database...');
       for (let i = 0; i < chunks.length; i++) {
         try {
-          const chunkMetadata = this.extractChunkMetadata(chunks[i], fileName);
           
           const { error } = await supabase
             .from('project_embeddings')
@@ -106,8 +125,8 @@ export class EmbeddingService {
               embedding: embeddings[i],
               chunk_index: i,
               document_source: fileName,
-              section_title: chunkMetadata.sectionTitle,
-              chunk_type: chunkMetadata.chunkType,
+              section_title: sectionTitles[i],
+              chunk_type: 'section', // We can assume 'section' type for XML parsed chunks
               created_at: new Date().toISOString()
             });
           

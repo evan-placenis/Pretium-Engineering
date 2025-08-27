@@ -8481,12 +8481,12 @@ var require_helpers3 = __commonJS({
       return data;
     }
     exports2.decodeJWT = decodeJWT;
-    async function sleep2(time) {
+    async function sleep4(time) {
       return await new Promise((accept) => {
         setTimeout(() => accept(null), time);
       });
     }
-    exports2.sleep = sleep2;
+    exports2.sleep = sleep4;
     function retryable(fn, isRetryable) {
       const promise = new Promise((accept, reject) => {
         ;
@@ -16663,44 +16663,48 @@ __export(process_jobs_exports, {
 module.exports = __toCommonJS(process_jobs_exports);
 var import_supabase_js = __toESM(require_main5());
 
-// node_modules/uuid/dist/esm-node/rng.js
-var import_crypto = __toESM(require("crypto"));
-var rnds8Pool = new Uint8Array(256);
-var poolPtr = rnds8Pool.length;
-function rng() {
-  if (poolPtr > rnds8Pool.length - 16) {
-    import_crypto.default.randomFillSync(rnds8Pool);
-    poolPtr = 0;
-  }
-  return rnds8Pool.slice(poolPtr, poolPtr += 16);
-}
-
-// node_modules/uuid/dist/esm-node/stringify.js
+// node_modules/uuid/dist/esm/stringify.js
 var byteToHex = [];
 for (let i2 = 0; i2 < 256; ++i2) {
   byteToHex.push((i2 + 256).toString(16).slice(1));
 }
 function unsafeStringify(arr, offset = 0) {
-  return byteToHex[arr[offset + 0]] + byteToHex[arr[offset + 1]] + byteToHex[arr[offset + 2]] + byteToHex[arr[offset + 3]] + "-" + byteToHex[arr[offset + 4]] + byteToHex[arr[offset + 5]] + "-" + byteToHex[arr[offset + 6]] + byteToHex[arr[offset + 7]] + "-" + byteToHex[arr[offset + 8]] + byteToHex[arr[offset + 9]] + "-" + byteToHex[arr[offset + 10]] + byteToHex[arr[offset + 11]] + byteToHex[arr[offset + 12]] + byteToHex[arr[offset + 13]] + byteToHex[arr[offset + 14]] + byteToHex[arr[offset + 15]];
+  return (byteToHex[arr[offset + 0]] + byteToHex[arr[offset + 1]] + byteToHex[arr[offset + 2]] + byteToHex[arr[offset + 3]] + "-" + byteToHex[arr[offset + 4]] + byteToHex[arr[offset + 5]] + "-" + byteToHex[arr[offset + 6]] + byteToHex[arr[offset + 7]] + "-" + byteToHex[arr[offset + 8]] + byteToHex[arr[offset + 9]] + "-" + byteToHex[arr[offset + 10]] + byteToHex[arr[offset + 11]] + byteToHex[arr[offset + 12]] + byteToHex[arr[offset + 13]] + byteToHex[arr[offset + 14]] + byteToHex[arr[offset + 15]]).toLowerCase();
 }
 
-// node_modules/uuid/dist/esm-node/native.js
-var import_crypto2 = __toESM(require("crypto"));
-var native_default = {
-  randomUUID: import_crypto2.default.randomUUID
-};
+// node_modules/uuid/dist/esm/rng.js
+var import_crypto = require("crypto");
+var rnds8Pool = new Uint8Array(256);
+var poolPtr = rnds8Pool.length;
+function rng() {
+  if (poolPtr > rnds8Pool.length - 16) {
+    (0, import_crypto.randomFillSync)(rnds8Pool);
+    poolPtr = 0;
+  }
+  return rnds8Pool.slice(poolPtr, poolPtr += 16);
+}
 
-// node_modules/uuid/dist/esm-node/v4.js
+// node_modules/uuid/dist/esm/native.js
+var import_crypto2 = require("crypto");
+var native_default = { randomUUID: import_crypto2.randomUUID };
+
+// node_modules/uuid/dist/esm/v4.js
 function v4(options, buf, offset) {
   if (native_default.randomUUID && !buf && !options) {
     return native_default.randomUUID();
   }
   options = options || {};
-  const rnds = options.random || (options.rng || rng)();
+  const rnds = options.random ?? options.rng?.() ?? rng();
+  if (rnds.length < 16) {
+    throw new Error("Random bytes length must be >= 16");
+  }
   rnds[6] = rnds[6] & 15 | 64;
   rnds[8] = rnds[8] & 63 | 128;
   if (buf) {
     offset = offset || 0;
+    if (offset < 0 || offset + 16 > buf.length) {
+      throw new RangeError(`UUID byte range ${offset}:${offset + 15} is out of buffer bounds`);
+    }
     for (let i2 = 0; i2 < 16; ++i2) {
       buf[offset + i2] = rnds[i2];
     }
@@ -23568,13 +23572,110 @@ function validateConcurrency(concurrency) {
 }
 
 // src/process-jobs/report-generation/execution/limiter.ts
-var globalLlmLimit = pLimit(8);
+var globalLlmLimit = pLimit(5);
 
 // src/process-jobs/report-generation/execution/BatchedParallelExecutor.ts
+function isRetriable(err) {
+  const code = err?.code || err?.errno;
+  const status = err?.status || err?.response?.status;
+  return code === "ECONNRESET" || code === "ETIMEDOUT" || code === "EAI_AGAIN" || status === 429 || typeof status === "number" && status >= 500;
+}
+function backoffJitter(attempt, baseMs = 300) {
+  const max = baseMs * 2 ** attempt;
+  return Math.floor(Math.random() * max);
+}
+function sleep2(ms) {
+  return new Promise((r2) => setTimeout(r2, ms));
+}
+async function callWithRetryBudget(doCall, {
+  totalBudgetMs = 8 * 6e4,
+  // 8 minutes of the 15-min Lambda window
+  maxAttempts = 3,
+  baseBackoffMs = 300,
+  // Optional guards, set to 0 to disable:
+  minPerAttemptMs = 0,
+  // e.g., 60_000 to avoid too-short attempts
+  maxPerAttemptMs = 0,
+  // e.g., 10 * 60_000 to avoid one huge hang
+  label = "retry-budget",
+  safetyMarginMs = 3e4
+  // keep some buffer at the end
+} = {}) {
+  const start = Date.now();
+  let lastErr;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const elapsed = Date.now() - start;
+    let remaining = totalBudgetMs - elapsed - safetyMarginMs;
+    if (remaining <= 0) {
+      const finalError2 = lastErr ?? new Error(`[${label}] Retry budget exhausted`);
+      console.log(JSON.stringify({
+        stage: label,
+        attempts: attempt,
+        success: false,
+        elapsedMs: Date.now() - start,
+        error: finalError2?.code || finalError2?.message
+      }));
+      throw finalError2;
+    }
+    let perAttemptLimit = remaining;
+    if (maxPerAttemptMs > 0)
+      perAttemptLimit = Math.min(perAttemptLimit, maxPerAttemptMs);
+    if (minPerAttemptMs > 0)
+      perAttemptLimit = Math.max(perAttemptLimit, minPerAttemptMs);
+    const ac = new AbortController();
+    let timer;
+    if (maxPerAttemptMs > 0) {
+      timer = setTimeout(() => ac.abort(), perAttemptLimit);
+    }
+    try {
+      const result = await doCall(ac.signal);
+      if (timer)
+        clearTimeout(timer);
+      console.log(JSON.stringify({
+        stage: label,
+        attempts: attempt + 1,
+        success: true,
+        elapsedMs: Date.now() - start,
+        error: null
+      }));
+      return result;
+    } catch (err) {
+      if (timer)
+        clearTimeout(timer);
+      lastErr = err;
+      const retriable = isRetriable(err) || err?.name === "AbortError";
+      const lastAttempt = attempt === maxAttempts - 1;
+      const elapsed2 = Date.now() - start;
+      const remaining2 = totalBudgetMs - elapsed2 - safetyMarginMs;
+      if (!retriable || lastAttempt || remaining2 <= 0) {
+        console.log(JSON.stringify({
+          stage: label,
+          attempts: attempt + 1,
+          success: false,
+          elapsedMs: Date.now() - start,
+          error: err?.code || err?.message
+        }));
+        throw err;
+      }
+      const wait = Math.min(backoffJitter(attempt, baseBackoffMs), Math.max(0, remaining2 / 2));
+      console.warn(`[${label}] attempt ${attempt + 1} failed (${err?.code || err?.status || err?.message}); retrying in ${wait}ms`);
+      await sleep2(wait);
+    }
+  }
+  const finalError = lastErr ?? new Error(`[${label}] Unknown failure`);
+  console.log(JSON.stringify({
+    stage: label,
+    attempts: maxAttempts,
+    success: false,
+    elapsedMs: Date.now() - start,
+    error: finalError?.code || finalError?.message
+  }));
+  throw finalError;
+}
 var BatchedParallelExecutor = class {
   constructor() {
     this.BATCH_SIZE = 5;
-    this.MAX_PARALLEL_AGENTS = 3;
+    this.MAX_PARALLEL_AGENTS = 2;
     this.supabase = null;
     this.reportId = "";
   }
@@ -23664,7 +23765,7 @@ ${summaryTaskPrompt}`;
       console.log(`\u{1F4DD} Summary prompt length: ${fullSummaryPrompt.length} characters`);
       const summaryOptions = {
         temperature: 0.7,
-        maxTokens: 3e3
+        maxTokens: 5e3
         // Reduced from 12000 for title-only summary
       };
       if (params.options?.reasoningEffort) {
@@ -23672,11 +23773,22 @@ ${summaryTaskPrompt}`;
         summaryOptions.mode = params.mode;
         console.log(`\u{1F9E0} Summary generation using reasoning effort: ${params.options.reasoningEffort}`);
       }
-      const summaryPromise = llmProvider.generateContent(fullSummaryPrompt, summaryOptions);
-      const timeoutPromise = new Promise((_2, reject) => {
-        setTimeout(() => reject(new Error("Summary generation timed out after 15 minutes")), 9e5);
-      });
-      const summaryResponse = await Promise.race([summaryPromise, timeoutPromise]);
+      const summaryResponse = await callWithRetryBudget(
+        (signal) => llmProvider.generateContent(fullSummaryPrompt, { ...summaryOptions, signal }),
+        {
+          totalBudgetMs: 8 * 6e4,
+          // give the summary up to 8 minutes total
+          maxAttempts: 3,
+          // e.g., 1 long try + 2 safety retries if it fails fast
+          baseBackoffMs: 300,
+          label: "summary",
+          safetyMarginMs: 3e4
+          // leave 30s to wrap up/DB writes
+        }
+      );
+      if (summaryResponse?.metadata?.usage) {
+        console.log(`[summary] token usage:`, summaryResponse.metadata.usage);
+      }
       if (summaryResponse.error) {
         console.error(`[ERROR] SUMMARY ERROR: ${summaryResponse.error}`);
         throw new Error(`Summary generation failed: ${summaryResponse.error}`);
@@ -23686,6 +23798,8 @@ ${summaryTaskPrompt}`;
         test = "the output is actually empty";
       }
       let summaryContent = summaryResponse.content || "";
+      if (!summaryContent)
+        throw new Error("Summary returned empty content");
       let finalSections = [];
       try {
         const parsedJson = JSON.parse(summaryContent);
@@ -23737,7 +23851,6 @@ ${JSON.stringify(summaryContent, null, 2)}
         };
         finalSections = [errorSection, ...allSections];
       }
-      console.error(`[DEBUG] EXECUTION COMPLETE: Report generation finished.`);
       const imgOrder = this.buildImageOrderMap(images);
       const orderedSections = this.orderSectionsByImageSequence(finalSections, imgOrder);
       const groupedSections = this.createGroupedHierarchy(orderedSections);
@@ -23879,16 +23992,29 @@ Please try generating again.`;
         const specifications = specsText ? specsText.split("\n") : [];
         console.log(`\u{1F4DD} [img ${img.number}] specs=${specifications.length}`);
         const userPrompt = promptStrategy.generateUserPrompt([observation], specifications, [], grouping);
-        const resp = await llmProvider.generateContent(
-          `${systemPrompt}
+        const resp = await callWithRetryBudget(
+          (signal) => llmProvider.generateContent(
+            `${systemPrompt}
 
 ${userPrompt}`,
+            {
+              temperature: 0.3,
+              maxTokens: 1500,
+              ...params.options?.reasoningEffort ? { reasoningEffort: params.options.reasoningEffort, mode: params.mode } : {},
+              signal
+            }
+          ),
           {
-            temperature: 0.3,
-            maxTokens: 1500,
-            ...params.options?.reasoningEffort ? { reasoningEffort: params.options.reasoningEffort, mode: params.mode } : {}
+            maxAttempts: 4,
+            totalBudgetMs: 3 * 6e4,
+            // 3 minutes total for this image agent
+            label: `image-${img.number}`,
+            baseBackoffMs: 200
           }
         );
+        if (resp?.metadata?.usage) {
+          console.log(`[image-${img.number}] token usage:`, resp.metadata.usage);
+        }
         if (resp?.error) {
           console.error(`[img ${img.number}] LLM error: ${resp.error}`);
           return [];
@@ -23925,12 +24051,148 @@ ${userPrompt}`,
 };
 
 // src/process-jobs/report-generation/execution/BatchedParallelExecutorWithImages.ts
+function isRetriable2(err) {
+  const code = err?.code || err?.errno;
+  const status = err?.status || err?.response?.status;
+  return code === "ECONNRESET" || code === "ETIMEDOUT" || code === "EAI_AGAIN" || status === 429 || typeof status === "number" && status >= 500;
+}
+function backoffJitter2(attempt, baseMs = 300) {
+  const max = baseMs * 2 ** attempt;
+  return Math.floor(Math.random() * max);
+}
+function sleep3(ms) {
+  return new Promise((r2) => setTimeout(r2, ms));
+}
+async function callWithRetryBudget2(doCall, {
+  totalBudgetMs = 8 * 6e4,
+  // 12 minutes of the 15-min Lambda window
+  maxAttempts = 3,
+  baseBackoffMs = 300,
+  // Optional guards, set to 0 to disable:
+  minPerAttemptMs = 0,
+  // e.g., 60_000 to avoid too-short attempts
+  maxPerAttemptMs = 0,
+  // e.g., 10 * 60_000 to avoid one huge hang
+  label = "retry-budget",
+  safetyMarginMs = 3e4
+  // keep some buffer at the end
+} = {}) {
+  const start = Date.now();
+  let lastErr;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const elapsed = Date.now() - start;
+    let remaining = totalBudgetMs - elapsed - safetyMarginMs;
+    if (remaining <= 0) {
+      const finalError2 = lastErr ?? new Error(`[${label}] Retry budget exhausted`);
+      console.log(JSON.stringify({
+        stage: label,
+        attempts: attempt,
+        success: false,
+        elapsedMs: Date.now() - start,
+        error: finalError2?.code || finalError2?.message
+      }));
+      throw finalError2;
+    }
+    let perAttemptLimit = remaining;
+    if (maxPerAttemptMs > 0)
+      perAttemptLimit = Math.min(perAttemptLimit, maxPerAttemptMs);
+    if (minPerAttemptMs > 0)
+      perAttemptLimit = Math.max(perAttemptLimit, minPerAttemptMs);
+    const ac = new AbortController();
+    let timer;
+    if (maxPerAttemptMs > 0) {
+      timer = setTimeout(() => ac.abort(), perAttemptLimit);
+    }
+    try {
+      const result = await doCall(ac.signal);
+      if (timer)
+        clearTimeout(timer);
+      console.log(JSON.stringify({
+        stage: label,
+        attempts: attempt + 1,
+        success: true,
+        elapsedMs: Date.now() - start,
+        error: null
+      }));
+      return result;
+    } catch (err) {
+      if (timer)
+        clearTimeout(timer);
+      lastErr = err;
+      const retriable = isRetriable2(err) || err?.name === "AbortError";
+      const lastAttempt = attempt === maxAttempts - 1;
+      const elapsed2 = Date.now() - start;
+      const remaining2 = totalBudgetMs - elapsed2 - safetyMarginMs;
+      if (!retriable || lastAttempt || remaining2 <= 0) {
+        console.log(JSON.stringify({
+          stage: label,
+          attempts: attempt + 1,
+          success: false,
+          elapsedMs: Date.now() - start,
+          error: err?.code || err?.message
+        }));
+        throw err;
+      }
+      const wait = Math.min(backoffJitter2(attempt, baseBackoffMs), Math.max(0, remaining2 / 2));
+      console.warn(`[${label}] attempt ${attempt + 1} failed (${err?.code || err?.status || err?.message}); retrying in ${wait}ms`);
+      await sleep3(wait);
+    }
+  }
+  const finalError = lastErr ?? new Error(`[${label}] Unknown failure`);
+  console.log(JSON.stringify({
+    stage: label,
+    attempts: maxAttempts,
+    success: false,
+    elapsedMs: Date.now() - start,
+    error: finalError?.code || finalError?.message
+  }));
+  throw finalError;
+}
 var BatchedParallelExecutorWithImages = class {
   constructor() {
     this.BATCH_SIZE = 5;
     this.MAX_PARALLEL_AGENTS = 3;
     this.supabase = null;
     this.reportId = "";
+  }
+  buildImageOrderMap(images) {
+    const order = /* @__PURE__ */ new Map();
+    images.forEach((img, idx) => order.set(img.number, idx));
+    return order;
+  }
+  getLeadSeqForSection(s2, imgOrder) {
+    let best = Infinity;
+    if (Array.isArray(s2.images) && s2.images.length > 0) {
+      for (const img of s2.images) {
+        if (typeof img.number === "number") {
+          const seq = imgOrder.get(img.number);
+          if (seq !== void 0 && seq < best)
+            best = seq;
+        }
+      }
+    }
+    if (Array.isArray(s2.children) && s2.children.length > 0) {
+      for (const child of s2.children) {
+        const childBest = this.getLeadSeqForSection(child, imgOrder);
+        if (childBest < best)
+          best = childBest;
+      }
+    }
+    return best;
+  }
+  orderSectionsByImageSequence(sections, imgOrder) {
+    const decorated = sections.map((s2, i2) => ({
+      s: s2,
+      i: i2,
+      // original index for tie-break
+      key: this.getLeadSeqForSection(s2, imgOrder)
+    }));
+    decorated.sort((a2, b2) => {
+      if (a2.key === b2.key)
+        return a2.i - b2.i;
+      return a2.key - b2.key;
+    });
+    return decorated.map((d2) => d2.s);
   }
   async execute(params) {
     const { images, bulletPoints, projectData, llmProvider, promptStrategy, grouping, options, projectId } = params;
@@ -23954,7 +24216,8 @@ var BatchedParallelExecutorWithImages = class {
         while (activePromises.size >= this.MAX_PARALLEL_AGENTS) {
           await Promise.race(activePromises);
         }
-        const promise = this.processBatch(batch, params, bulletPoints).then(async (batchSections) => {
+        const promise = this.processBatch(batch, params, bulletPoints, (img) => {
+        }).then(async (batchSections) => {
           if (batchSections.length > 0) {
             allSections.push(...batchSections);
             const streamingPayload = this.prepareStreamingPayload(allSections);
@@ -23979,7 +24242,7 @@ ${summaryTaskPrompt}`;
       console.log(`\u{1F4DD} Summary prompt length: ${fullSummaryPrompt.length} characters`);
       const summaryOptions = {
         temperature: 0.7,
-        maxTokens: 3e3
+        maxTokens: 5e3
         // Reduced from 12000 for title-only summary
       };
       if (params.options?.reasoningEffort) {
@@ -23987,20 +24250,28 @@ ${summaryTaskPrompt}`;
         summaryOptions.mode = params.mode;
         console.log(`\u{1F9E0} Summary generation using reasoning effort: ${params.options.reasoningEffort}`);
       }
-      const summaryPromise = llmProvider.generateContent(fullSummaryPrompt, summaryOptions);
-      const timeoutPromise = new Promise((_2, reject) => {
-        setTimeout(() => reject(new Error("Summary generation timed out after 15 minutes")), 9e5);
-      });
-      const summaryResponse = await Promise.race([summaryPromise, timeoutPromise]);
-      if (summaryResponse.error) {
-        console.error(`[ERROR] SUMMARY ERROR: ${summaryResponse.error}`);
-        throw new Error(`Summary generation failed: ${summaryResponse.error}`);
+      const summaryResponse = await callWithRetryBudget2(
+        (signal) => llmProvider.generateContent(fullSummaryPrompt, { ...summaryOptions, signal }),
+        {
+          totalBudgetMs: 8 * 6e4,
+          // give the summary up to 8 minutes total
+          maxAttempts: 3,
+          // e.g., 1 long try + 2 safety retries if it fails fast
+          baseBackoffMs: 300,
+          // Keep these disabled to avoid per-attempt cutoffs:
+          minPerAttemptMs: 0,
+          maxPerAttemptMs: 0,
+          label: "summary",
+          safetyMarginMs: 3e4
+          // leave 30s to wrap up/DB writes
+        }
+      );
+      if (summaryResponse?.metadata?.usage) {
+        console.log(`[summary] token usage:`, summaryResponse.metadata.usage);
       }
-      var test = "";
-      if (summaryResponse.content.length == 0) {
-        test = "the output is actually empty";
-      }
-      let summaryContent = summaryResponse.content || "";
+      let summaryContent = summaryResponse?.content || "";
+      if (!summaryContent)
+        throw new Error("Summary returned empty content");
       let finalSections = [];
       try {
         const parsedJson = JSON.parse(summaryContent);
@@ -24052,15 +24323,16 @@ ${JSON.stringify(summaryContent, null, 2)}
         };
         finalSections = [errorSection, ...allSections];
       }
-      console.error(`[DEBUG] EXECUTION COMPLETE: Report generation finished.`);
-      const groupedSections = this.createGroupedHierarchy(finalSections);
+      const imgOrder = this.buildImageOrderMap(images);
+      const orderedSections = this.orderSectionsByImageSequence(finalSections, imgOrder);
+      const groupedSections = this.createGroupedHierarchy(orderedSections);
       await this.supabase.from("reports").update({ sections_json: { sections: groupedSections } }).eq("id", this.reportId);
       await this.updateReportContent({
         type: "status",
         message: "\u2705 Report Generation Complete"
       });
       return {
-        content: summaryContent + test,
+        content: summaryContent,
         sections: groupedSections,
         metadata: {
           ...metadata,
@@ -24164,7 +24436,7 @@ Please try generating again.`;
     model.autoNumberSections();
     return model.getState().sections;
   }
-  async processBatch(batch, params, bulletPoints) {
+  async processBatch(batch, params, bulletPoints, onProgress) {
     const { llmProvider, promptStrategy, grouping, projectId, supabase } = params;
     if (!projectId || !supabase) {
       console.error("processBatch called without projectId or supabase client.");
@@ -24224,19 +24496,33 @@ ${userPromptResult.text}`
 
 ${userPromptResult}`;
         }
-        const resp = await llmProvider.generateContent(
-          finalPrompt,
+        const response = await callWithRetryBudget2(
+          (signal) => llmProvider.generateContent(
+            finalPrompt,
+            {
+              temperature: 0.3,
+              maxTokens: 1500,
+              ...params.options?.reasoningEffort ? { reasoningEffort: params.options.reasoningEffort, mode: params.mode } : {},
+              signal
+            }
+          ),
           {
-            temperature: 0.3,
-            maxTokens: 1500,
-            ...params.options?.reasoningEffort ? { reasoningEffort: params.options.reasoningEffort, mode: params.mode } : {}
+            maxAttempts: 4,
+            totalBudgetMs: 3 * 6e4,
+            // 3 minutes total for this image agent
+            label: `image-${img.number}`,
+            baseBackoffMs: 200
           }
         );
-        if (resp?.error) {
-          console.error(`[img ${img.number}] LLM error: ${resp.error}`);
+        if (response?.metadata?.usage) {
+          console.log(`[image-${img.number}] token usage:`, response.metadata.usage);
+        }
+        const content = response?.content || "";
+        if (!content) {
+          console.error(`[img ${img.number}] LLM returned empty content.`);
           return [];
         }
-        return parseSections(resp.content);
+        return parseSections(content);
       })
     );
     const results = await Promise.all(perImageTasks);
@@ -24310,7 +24596,7 @@ var Grok4Provider = class {
         // Force JSON output
         stream: true
         // Enable streaming
-      });
+      }, { signal: options?.signal });
       const apiCallEndTime = Date.now();
       console.log(`\u{1F916} Grok4: API call initiated in ${apiCallEndTime - apiCallStartTime}ms`);
       let content = "";
@@ -24401,8 +24687,7 @@ var GPT4oProvider = class {
         response_format: { type: "json_object" },
         // Force JSON output
         stream: true
-        // Enable streaming
-      });
+      }, { signal: options?.signal });
       let content = "";
       let usage = null;
       for await (const chunk of response) {
@@ -24823,9 +25108,15 @@ ${bulletPoints}`;
     - Avoid casual filler (\u201Cvery\u201D, \u201Cclearly\u201D) and unbounded certainty; state facts, implications, and directives.
     - No liability\u2011creating guarantees; use directive/compliance language.
 
-    # WHEN EVIDENCE IS INSUFFICIENT
+    # WHEN EVIDENCE IS INSUFFICIENT OR INCORRECT
     - Add a concise verification directive (e.g., \u201CVerify substrate condition beneath blistered area prior to re\u2011adhesion.\u201D).
-    - If an image is unreadable/irrelevant, state that it does not provide sufficient detail to confirm the claim and focus on actions needed.
+    - If the description text makes a claim that contradicts the provided specifications:
+      - Keep all normal observation points in bodyMd as usual (factual, compliant).
+      - At the **end of bodyMd**, append an additional string item that is an author note.
+      - This author note must:
+        - Begin with "*Note to the author:*" (in italics, using * around it).
+        - Clearly state the incorrect claim and the correct specification detail (cite section if provided).
+    - Example: "*Note to the author: The description stated that sealant was not required. However, Section 07 31 13 requires all fastener penetrations to be sealed.*"
 
     # VALIDATION (must be true)
     - Exactly one section in sections[].

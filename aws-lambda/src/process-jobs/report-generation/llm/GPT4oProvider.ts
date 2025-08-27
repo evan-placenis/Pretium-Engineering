@@ -48,8 +48,8 @@ export class GPT4oProvider implements LLMProvider {
         temperature: options?.temperature || 0.7,
         max_tokens: options?.maxTokens || 2000,
         response_format: { type: "json_object" }, // Force JSON output
-        stream: true // Enable streaming
-      });
+        stream: true,
+      }, { signal: options?.signal });
 
       // Handle streaming response
       let content = '';

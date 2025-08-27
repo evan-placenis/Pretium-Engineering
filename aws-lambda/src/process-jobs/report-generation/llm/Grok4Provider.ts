@@ -48,7 +48,7 @@ export class Grok4Provider implements LLMProvider {
         max_tokens: options?.maxTokens || 2000,
         response_format: { type: "json_object" }, // Force JSON output
         stream: true // Enable streaming
-      });
+      }, { signal: options?.signal });
       const apiCallEndTime = Date.now();
       console.log(`🤖 Grok4: API call initiated in ${apiCallEndTime - apiCallStartTime}ms`);
 

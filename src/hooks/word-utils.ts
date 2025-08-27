@@ -1079,16 +1079,19 @@ const createSectionTitleParagraph = (section: Section, level: number): Paragraph
   });
 };
 
-const findImageByNumber = (images: ReportImage[], imageNumber: number): ReportImage | undefined => {
-  return images.find(img => img.number === imageNumber);
+const createImageKey = (number: number | undefined, group: string[] | undefined): string => {
+  if (number === undefined) return `no-number-${Math.random()}`; // Should not happen with clean data
+  const sortedGroup = group ? [...group].sort() : [];
+  return `${number}-${JSON.stringify(sortedGroup)}`;
 };
 
 const renderSectionsRecursively = async (
   sections: Section[],
   level: number,
-  allImages: ReportImage[]
+  allImages: ReportImage[], // This is the definitive list of images to render
 ): Promise<(Paragraph | Table)[]> => {
   const elements: (Paragraph | Table)[] = [];
+  const imageMap = new Map(allImages.map(img => [createImageKey(img.number, img.group), img])); // Create a lookup map
 
   for (const section of sections) {
     const titlePara = createSectionTitleParagraph(section, level);
@@ -1137,34 +1140,33 @@ const renderSectionsRecursively = async (
         const imageParagraphs: Paragraph[] = [];
         const firstChildWithImage = group.find(c => c.images && c.images.length > 0);
         if (firstChildWithImage && firstChildWithImage.images) {
+          // For each image reference in the section, look up the correct image from our map.
           for (const imageRef of firstChildWithImage.images) {
-            const image = findImageByNumber(allImages, imageRef.number);
+            const image = imageMap.get(createImageKey(imageRef.number, imageRef.group)); // Find the specific image by its number and group
+
             if (image && image.signedUrl) {
               try {
                 const response = await fetch(image.signedUrl);
                 const buffer = await response.arrayBuffer();
                 const compressedBuffer = await compressImage(buffer, 400, 300, 0.7, 'jpeg', 150);
+                const data = new Uint8Array(compressedBuffer);
                 
                 imageParagraphs.push(new Paragraph({
                   children: [new ImageRun({
-                    data: compressedBuffer,
+                    data: data,
                     transformation: { width: 300, height: 225 },
-                    type: 'jpg',
+                    type: 'jpg'
                   })],
                   alignment: AlignmentType.CENTER,
                 }));
                 imageParagraphs.push(new Paragraph({
                   children: [
                     new TextRun({
-                      text: "",
+                      text: `Photo ${image.number}`, // Use the actual image number for the caption
                       font: "Segoe UI",
                       size: 18,
                     }),
                   ],
-                  numbering: {
-                    reference: 'photo-numbering',
-                    level: 0,
-                  },
                   alignment: AlignmentType.CENTER,
                   spacing: { after: 200 },
                 }));
@@ -1212,6 +1214,8 @@ export const createWordDocumentWithImages = async (
   project: Project | null,
   sectionSelection?: SectionSelection
 ) => {
+  
+
   try {
     // Load and compress Pretium logo
     let pretiumLogoBuffer: ArrayBuffer | null = null;
@@ -1314,6 +1318,9 @@ export const createWordDocumentWithImages = async (
     }
 
     // --- NEW LOGIC ---
+    // The `images` array is already in the correct order, as confirmed by debugging.
+    // We pass it directly to the renderer, which will consume it sequentially.
+
     const bodyElements = await renderSectionsRecursively(sections, 0, images);
     bodyChildren.push(...bodyElements);
     // --- END NEW LOGIC ---

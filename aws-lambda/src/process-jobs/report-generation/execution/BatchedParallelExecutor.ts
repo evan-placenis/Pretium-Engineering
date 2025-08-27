@@ -6,10 +6,144 @@ import { getRelevantKnowledgeChunks } from '../report-knowledge/guards';
 import { SectionModel } from './SectionModel';
 
 import { globalLlmLimit } from './limiter';
-export class BatchedParallelExecutor implements ExecutionStrategy {
-  
+
+// // (optional but recommended) keep-alive hygiene
+// setGlobalDispatcher(new Agent({
+//   keepAliveTimeout: 10_000,
+//   keepAliveMaxTimeout: 60_000,
+//   connections: 128,
+//   pipelining: 0,
+// }));
+
+function isRetriable(err: any): boolean {
+  const code = err?.code || err?.errno;
+  const status = err?.status || err?.response?.status;
+  return (
+    code === 'ECONNRESET' ||
+    code === 'ETIMEDOUT' ||
+    code === 'EAI_AGAIN' ||
+    status === 429 ||
+    (typeof status === 'number' && status >= 500)
+  );
+}
+
+function backoffJitter(attempt: number, baseMs = 300): number {
+  const max = baseMs * (2 ** attempt);   // exponential
+  return Math.floor(Math.random() * max); // full jitter
+}
+
+function sleep(ms: number) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+/**
+ * Calls `doCall(signal)` with a *total* time budget.
+ * - No hard per-attempt cutoff unless you set guards.
+ * - Each attempt can run until completion.
+ * - Retries only on retriable failures.
+ * - Ensures we never exceed totalBudgetMs (with a small safety margin).
+ */
+export async function callWithRetryBudget<T>(
+  doCall: (signal: AbortSignal) => Promise<T>,
+  {
+    totalBudgetMs = 8 * 60_000, // 8 minutes of the 15-min Lambda window
+    maxAttempts = 3,
+    baseBackoffMs = 300,
+    // Optional guards, set to 0 to disable:
+    minPerAttemptMs = 0,         // e.g., 60_000 to avoid too-short attempts
+    maxPerAttemptMs = 0,         // e.g., 10 * 60_000 to avoid one huge hang
+    label = 'retry-budget',
+    safetyMarginMs = 30_000,     // keep some buffer at the end
+  } = {}
+): Promise<T> {
+  const start = Date.now();
+  let lastErr: any;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Remaining budget with safety margin
+    const elapsed = Date.now() - start;
+    let remaining = totalBudgetMs - elapsed - safetyMarginMs;
+    if (remaining <= 0) {
+      const finalError = lastErr ?? new Error(`[${label}] Retry budget exhausted`);
+      console.log(JSON.stringify({
+        stage: label,
+        attempts: attempt,
+        success: false,
+        elapsedMs: Date.now() - start,
+        error: finalError?.code || finalError?.message,
+      }));
+      throw finalError;
+    }
+
+    // Optional per-attempt guardrails (still “soft” since we abort via signal)
+    // If you want *no* per-attempt limit, keep maxPerAttemptMs = 0.
+    let perAttemptLimit = remaining; // default: “as long as it needs”
+    if (maxPerAttemptMs > 0) perAttemptLimit = Math.min(perAttemptLimit, maxPerAttemptMs);
+    if (minPerAttemptMs > 0) perAttemptLimit = Math.max(perAttemptLimit, minPerAttemptMs);
+
+    const ac = new AbortController();
+    let timer: NodeJS.Timeout | undefined;
+    if (maxPerAttemptMs > 0) {
+      // Only set a timer if you actually want an upper bound for attempts
+      timer = setTimeout(() => ac.abort(), perAttemptLimit);
+    }
+
+    try {
+      // Run attempt; if you didn't set maxPerAttemptMs, there's no per-attempt cutoff.
+      const result = await doCall(ac.signal);
+      if (timer) clearTimeout(timer);
+      console.log(JSON.stringify({
+        stage: label,
+        attempts: attempt + 1,
+        success: true,
+        elapsedMs: Date.now() - start,
+        error: null,
+      }));
+      return result; // success, exit
+    } catch (err: any) {
+      if (timer) clearTimeout(timer);
+      lastErr = err;
+
+      const retriable = isRetriable(err) || err?.name === 'AbortError';
+      const lastAttempt = attempt === maxAttempts - 1;
+
+      // If not retriable or no time left for another attempt, fail fast
+      const elapsed2 = Date.now() - start;
+      const remaining2 = totalBudgetMs - elapsed2 - safetyMarginMs;
+      if (!retriable || lastAttempt || remaining2 <= 0) {
+        console.log(JSON.stringify({
+            stage: label,
+            attempts: attempt + 1,
+            success: false,
+            elapsedMs: Date.now() - start,
+            error: err?.code || err?.message,
+        }));
+        throw err;
+      }
+
+      // Backoff with jitter before next attempt (bounded by remaining budget)
+      const wait = Math.min(backoffJitter(attempt, baseBackoffMs), Math.max(0, remaining2 / 2));
+      console.warn(`[${label}] attempt ${attempt + 1} failed (${err?.code || err?.status || err?.message}); retrying in ${wait}ms`);
+      await sleep(wait);
+    }
+  }
+
+  // Should not be reached if the logic inside the loop is correct, but as a fallback:
+  const finalError = lastErr ?? new Error(`[${label}] Unknown failure`);
+  console.log(JSON.stringify({
+      stage: label,
+      attempts: maxAttempts,
+      success: false,
+      elapsedMs: Date.now() - start,
+      error: finalError?.code || finalError?.message,
+  }));
+  throw finalError;
+}
+
+
+export class BatchedParallelExecutor implements ExecutionStrategy { 
   private readonly BATCH_SIZE = 5;
-  private readonly MAX_PARALLEL_AGENTS = 3;
+  private readonly MAX_PARALLEL_AGENTS = 2;
   private supabase: any = null;
   private reportId: string = '';
 
@@ -136,7 +270,7 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
       // Add timeout safeguard for summary generation
       const summaryOptions: any = {
         temperature: 0.7,
-        maxTokens: 3000  // Reduced from 12000 for title-only summary
+        maxTokens: 5000  // Reduced from 12000 for title-only summary
       };
       
       // Add reasoning effort for GPT-5
@@ -146,14 +280,20 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
         console.log(`🧠 Summary generation using reasoning effort: ${params.options.reasoningEffort}`);
       }
       
-      const summaryPromise = llmProvider.generateContent(fullSummaryPrompt, summaryOptions);
+      const summaryResponse = await callWithRetryBudget(
+        (signal) => llmProvider.generateContent(fullSummaryPrompt, { ...summaryOptions, signal }),
+        {
+          totalBudgetMs: 8 * 60_000,  // give the summary up to 8 minutes total
+          maxAttempts: 3,              // e.g., 1 long try + 2 safety retries if it fails fast
+          baseBackoffMs: 300,
+          label: 'summary',
+          safetyMarginMs: 30_000,      // leave 30s to wrap up/DB writes
+        }
+      );
 
-      // Set a timeout of 15 mins for summary generation (increased due to larger content from embeddings)
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Summary generation timed out after 15 minutes')), 900000);
-      });
-
-      const summaryResponse = await Promise.race([summaryPromise, timeoutPromise]) as any;
+      if (summaryResponse?.metadata?.usage) {
+        console.log(`[summary] token usage:`, summaryResponse.metadata.usage);
+      }
 
       if (summaryResponse.error) {
         console.error(`[ERROR] SUMMARY ERROR: ${summaryResponse.error}`);
@@ -165,6 +305,7 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
       }
 
       let summaryContent = summaryResponse.content || '';
+      if (!summaryContent) throw new Error('Summary returned empty content');
       let finalSections: Section[] = [];
       try {
         const parsedJson = JSON.parse(summaryContent);
@@ -398,17 +539,30 @@ export class BatchedParallelExecutor implements ExecutionStrategy {
         const userPrompt = promptStrategy.generateUserPrompt([observation], specifications, [], grouping);
   
         // Stateless call: same systemPrompt, unique tiny userPrompt
-        const resp = await llmProvider.generateContent(
-          `${systemPrompt}\n\n${userPrompt}`,
+        const resp = await callWithRetryBudget(
+          (signal) => llmProvider.generateContent(
+            `${systemPrompt}\n\n${userPrompt}`,
+            {
+              temperature: 0.3,
+              maxTokens: 1500,
+              ...(params.options?.reasoningEffort
+                ? { reasoningEffort: params.options.reasoningEffort, mode: params.mode }
+                : {}),
+              signal,
+            }
+          ),
           {
-            temperature: 0.3,
-            maxTokens: 1500,
-            ...(params.options?.reasoningEffort
-              ? { reasoningEffort: params.options.reasoningEffort, mode: params.mode }
-              : {}),
+            maxAttempts: 4,
+            totalBudgetMs: 3 * 60_000, // 3 minutes total for this image agent
+            label: `image-${img.number}`,
+            baseBackoffMs: 200,
           }
         );
   
+        if (resp?.metadata?.usage) {
+          console.log(`[image-${img.number}] token usage:`, resp.metadata.usage);
+        }
+
         if (resp?.error) {
           console.error(`[img ${img.number}] LLM error: ${resp.error}`);
           return [] as Section[];

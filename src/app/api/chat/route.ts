@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
       }
     }
     
-    const maxSteps = 5;
+    const maxSteps = 10; // Increased from 5 to 7
     let hasMadeChanges = false; // Flag to track if any action tool was used
 
     for (let step = 0; step < maxSteps; step++) {
@@ -233,9 +233,25 @@ export async function POST(req: NextRequest) {
           result = { success: false, error: error.message };
         }
       
-        const toolContent = result.success 
-            ? (typeof result.data === 'object' ? JSON.stringify(result.data ?? {}) : String(result.data ?? ''))
-            : `Error: ${result.error}`;
+        let toolContent = '';
+        if (result.success) {
+          const data = result.data;
+          if (typeof data === 'string' || typeof data === 'number' || typeof data === 'boolean') {
+            toolContent = String(data);
+          } else if (data && typeof data === 'object') {
+            if ('message' in data && typeof data.message === 'string') {
+              toolContent = data.message;
+            } else if ('status' in data && typeof data.status === 'string') {
+              toolContent = data.status;
+            } else {
+              toolContent = JSON.stringify(data, null, 2); // Pretty print for complex objects
+            }
+          } else {
+            toolContent = "Operation successful, no data returned.";
+          }
+        } else {
+            toolContent = `Error: ${result.error}`;
+        }
         
         if (!result.success) {
           console.log(`[Tool Feedback] Sending corrective error to model: ${toolContent}`);
